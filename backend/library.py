@@ -259,6 +259,7 @@ class GameLibrary(QObject):
         # when the process finishes.
         self._active_game: Optional[Game] = None
         self._active_game_index: int = -1
+        self._active_games_model: Optional[GameListModel] = None
 
         # Sort state — reset when selectSystem is called
         self._current_games_unfiltered: list[Game] = []
@@ -403,10 +404,13 @@ class GameLibrary(QObject):
         command = self._config.get_launch_command(game.system_folder, game.path)
         logger.info("launchGame: launching '%s' — %s", game.name, command)
 
-        started = self._launcher.launch(command)
-        if started:
-            self._active_game = game
-            self._active_game_index = index
+        # Set active game optimistically before the async launch.  If the
+        # process fails to start, _on_process_finished(-1, 0) will be called
+        # and will clear these fields (game is None guard handles that).
+        self._active_game = game
+        self._active_game_index = index
+        self._active_games_model = self._games_model
+        self._launcher.launch(command)
 
     @Slot()
     def rescan(self) -> None:
@@ -480,8 +484,15 @@ class GameLibrary(QObject):
             return
 
         index = self._active_game_index
+        launch_model = self._active_games_model
         self._active_game = None
         self._active_game_index = -1
+        self._active_games_model = None
+
+        if exit_code == -1:
+            # Process failed to start — clear tracking state but don't update stats.
+            logger.warning("_on_process_finished: process failed to start for '%s'", game.name)
+            return
 
         # Update in-memory stats
         game.play_count += 1
@@ -496,8 +507,15 @@ class GameLibrary(QObject):
             game.last_played,
         )
 
-        # Notify QML
-        self._games_model.notify_game_changed(index)
+        # Notify QML only if the user hasn't navigated to a different system
+        # since the game was launched (i.e. the games model hasn't been replaced).
+        if launch_model is self._games_model:
+            self._games_model.notify_game_changed(index)
+        else:
+            logger.debug(
+                "_on_process_finished: games model replaced since launch of '%s' — skipping notify",
+                game.name,
+            )
 
         # Persist to gamelist.xml
         system = self._systems_by_folder.get(game.system_folder)
@@ -573,6 +591,10 @@ class GameLibrary(QObject):
 
         # Rebuild the folder lookup so selectSystem can find the updated objects.
         self._systems_by_folder = {s.folder_name: s for s in self._systems}
+
+        # Rebuild the SystemListModel so QML picks up the updated collection game counts.
+        self._systems_model = SystemListModel(self._systems, self)
+        self.systemsModelChanged.emit()
 
         logger.debug("_rebuild_collections: rebuilt %d collection(s)", len(new_collections))
 

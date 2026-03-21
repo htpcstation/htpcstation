@@ -348,7 +348,6 @@ class TestGameLibraryLaunchGame:
         config.get_launch_command.return_value = ["retroarch", "-L", "snes9x_libretro.so", str(rom_path)]
 
         mock_launcher = MagicMock(spec=Launcher)
-        mock_launcher.launch.return_value = True
         mock_launcher.processFinished = MagicMock()
         mock_launcher.processFinished.connect = MagicMock()
 
@@ -359,6 +358,45 @@ class TestGameLibraryLaunchGame:
         mock_launcher.launch.assert_called_once()
         call_args = mock_launcher.launch.call_args[0][0]
         assert "retroarch" in call_args[0]
+
+    def test_active_game_set_optimistically_before_launch(self, tmp_path: Path) -> None:
+        """_active_game is set before launch() returns (optimistic async tracking)."""
+        from backend.config import Config
+        from backend.launcher import Launcher
+        from backend.library import GameLibrary
+
+        system_dir = tmp_path / "snes"
+        system_dir.mkdir()
+        rom_path = system_dir / "game.rom"
+        rom_path.touch()
+        _write_gamelist(
+            system_dir,
+            "<game><path>./game.rom</path><name>Test Game</name></game>",
+        )
+
+        config = MagicMock(spec=Config)
+        config.rom_directory = tmp_path
+        config.get_system.return_value = MagicMock(display_name="SNES", core="snes9x_libretro.so", extensions=[".smc"])
+        config.get_launch_command.return_value = ["retroarch", "-L", "snes9x_libretro.so", str(rom_path)]
+
+        active_game_during_launch = []
+
+        def capture_active_game(command):
+            active_game_during_launch.append(library._active_game)
+
+        mock_launcher = MagicMock(spec=Launcher)
+        mock_launcher.processFinished = MagicMock()
+        mock_launcher.processFinished.connect = MagicMock()
+        mock_launcher.launch.side_effect = capture_active_game
+
+        library = GameLibrary(config, launcher=mock_launcher)
+        library.selectSystem("snes")
+        library.launchGame(0)
+
+        # _active_game must be set before launch() is called
+        assert len(active_game_during_launch) == 1
+        assert active_game_during_launch[0] is not None
+        assert active_game_during_launch[0].name == "Test Game"
 
     def test_launch_out_of_range_is_noop(self, tmp_path: Path) -> None:
         """launchGame with an out-of-range index does nothing."""
@@ -377,3 +415,196 @@ class TestGameLibraryLaunchGame:
         library.launchGame(0)
 
         mock_launcher.launch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Launcher — async signal-based start
+# ---------------------------------------------------------------------------
+
+
+class TestLauncherAsyncStart:
+    def test_launch_returns_none(self) -> None:
+        """launch() returns None — it is now a void async operation."""
+        from backend.launcher import Launcher
+        from PySide6.QtCore import QProcess
+
+        launcher = Launcher()
+        with patch.object(QProcess, "start"), \
+             patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
+            result = launcher.launch(["echo", "hello"])
+        assert result is None
+
+    def test_launch_empty_command_is_noop(self) -> None:
+        """launch() with an empty command does nothing and returns None."""
+        from backend.launcher import Launcher
+
+        launcher = Launcher()
+        result = launcher.launch([])
+        assert result is None
+        assert launcher._process is None
+
+    def test_on_started_emits_process_started(self) -> None:
+        """_on_started emits processStarted signal."""
+        from backend.launcher import Launcher
+        from PySide6.QtCore import QProcess
+
+        launcher = Launcher()
+
+        received: list[bool] = []
+        launcher.processStarted.connect(lambda: received.append(True))
+
+        with patch.object(QProcess, "start"), \
+             patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
+            launcher.launch(["echo", "hello"])
+            launcher._on_started()
+
+        assert received == [True]
+
+    def test_on_error_occurred_failed_to_start_emits_process_finished(self) -> None:
+        """_on_error_occurred(FailedToStart) emits processFinished(-1, 0) and clears _process."""
+        from backend.launcher import Launcher
+        from PySide6.QtCore import QProcess
+
+        launcher = Launcher()
+
+        received: list[tuple] = []
+        launcher.processFinished.connect(lambda code, elapsed: received.append((code, elapsed)))
+
+        with patch.object(QProcess, "start"), \
+             patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
+            launcher.launch(["echo", "hello"])
+            assert launcher._process is not None
+            launcher._on_error_occurred(QProcess.ProcessError.FailedToStart)
+
+        assert received == [(-1, 0)]
+        assert launcher._process is None
+
+    def test_on_error_occurred_non_failed_to_start_is_ignored(self) -> None:
+        """_on_error_occurred for non-FailedToStart errors does not emit processFinished."""
+        from backend.launcher import Launcher
+        from PySide6.QtCore import QProcess
+
+        launcher = Launcher()
+
+        received: list[tuple] = []
+        launcher.processFinished.connect(lambda code, elapsed: received.append((code, elapsed)))
+
+        with patch.object(QProcess, "start"), \
+             patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
+            launcher.launch(["echo", "hello"])
+            launcher._on_error_occurred(QProcess.ProcessError.Crashed)
+
+        assert received == []
+
+    def test_process_finished_skips_notify_when_model_replaced(self, tmp_path: Path) -> None:
+        """_on_process_finished skips notify_game_changed when the user navigated away.
+
+        If the user switches to a different system while the emulator is running,
+        _games_model is replaced by _apply_sort_filter.  The notification must be
+        skipped so we don't fire dataChanged on the wrong (new) model.
+        """
+        from backend.config import Config
+        from backend.launcher import Launcher
+        from backend.library import GameLibrary
+
+        # Two systems so we can navigate between them
+        snes_dir = tmp_path / "snes"
+        snes_dir.mkdir()
+        (snes_dir / "game.rom").touch()
+        _write_gamelist(snes_dir, "<game><path>./game.rom</path><name>SNES Game</name></game>")
+
+        nes_dir = tmp_path / "nes"
+        nes_dir.mkdir()
+        (nes_dir / "other.rom").touch()
+        _write_gamelist(nes_dir, "<game><path>./other.rom</path><name>NES Game</name></game>")
+
+        config = MagicMock(spec=Config)
+        config.rom_directory = tmp_path
+        config.get_system.return_value = MagicMock(display_name="System", core="core.so", extensions=[".rom"])
+        config.get_launch_command.return_value = ["retroarch", str(snes_dir / "game.rom")]
+
+        mock_launcher = MagicMock(spec=Launcher)
+        mock_launcher.processFinished = MagicMock()
+        mock_launcher.processFinished.connect = MagicMock()
+
+        library = GameLibrary(config, launcher=mock_launcher)
+        library.selectSystem("snes")
+        library.launchGame(0)
+
+        # Capture the model that was active at launch time
+        launch_model = library._active_games_model
+
+        # User navigates to a different system while the emulator is running
+        library.selectSystem("nes")
+
+        # The games model must have been replaced
+        assert library._games_model is not launch_model
+
+        # Track dataChanged emissions on the *new* model
+        new_model_notifications: list = []
+        library._games_model.dataChanged.connect(
+            lambda tl, br, roles: new_model_notifications.append((tl.row(), br.row()))
+        )
+
+        # Simulate the emulator finishing
+        library._on_process_finished(0, 120)
+
+        # notify_game_changed must NOT have fired on the new (wrong) model
+        assert new_model_notifications == []
+
+        # Stats must still have been updated on the Game object
+        snes_game = library._systems_by_folder["snes"].games[0]
+        assert snes_game.play_count == 1
+        assert snes_game.game_time == 120
+
+    def test_process_finished_notifies_when_model_unchanged(self, tmp_path: Path) -> None:
+        """_on_process_finished calls notify_game_changed when the model hasn't changed."""
+        from backend.config import Config
+        from backend.launcher import Launcher
+        from backend.library import GameLibrary
+
+        system_dir = tmp_path / "snes"
+        system_dir.mkdir()
+        (system_dir / "game.rom").touch()
+        _write_gamelist(system_dir, "<game><path>./game.rom</path><name>Test Game</name></game>")
+
+        config = MagicMock(spec=Config)
+        config.rom_directory = tmp_path
+        config.get_system.return_value = MagicMock(display_name="SNES", core="core.so", extensions=[".rom"])
+        config.get_launch_command.return_value = ["retroarch", str(system_dir / "game.rom")]
+
+        mock_launcher = MagicMock(spec=Launcher)
+        mock_launcher.processFinished = MagicMock()
+        mock_launcher.processFinished.connect = MagicMock()
+
+        library = GameLibrary(config, launcher=mock_launcher)
+        library.selectSystem("snes")
+        library.launchGame(0)
+
+        # Track dataChanged on the current model (user did NOT navigate away)
+        notifications: list = []
+        library._games_model.dataChanged.connect(
+            lambda tl, br, roles: notifications.append((tl.row(), br.row()))
+        )
+
+        library._on_process_finished(0, 60)
+
+        # notify_game_changed SHOULD have fired
+        assert len(notifications) == 1
+        assert notifications[0] == (0, 0)
+
+    def test_launch_ignores_when_process_already_running(self) -> None:
+        """launch() is a no-op when a process is already running."""
+        from backend.launcher import Launcher
+        from PySide6.QtCore import QProcess
+
+        launcher = Launcher()
+
+        mock_process = MagicMock(spec=QProcess)
+        mock_process.state.return_value = QProcess.ProcessState.Running
+        launcher._process = mock_process
+
+        result = launcher.launch(["echo", "hello"])
+        assert result is None
+        # _process should still be the original mock (no new process created)
+        assert launcher._process is mock_process

@@ -392,3 +392,69 @@ class TestSelectSystemRebuildsCollections:
         library.selectSystem("_allgames")
 
         assert len(library._systems) == initial_count
+
+    def test_systems_model_updated_after_rebuild(self, tmp_path: Path) -> None:
+        """After _rebuild_collections, systemsModel reflects updated collection game counts."""
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": "<game><path>./game.rom</path><name>Test Game</name></game>",
+            },
+        )
+
+        # Capture systemsModelChanged emissions
+        signals_received: list[bool] = []
+        library.systemsModelChanged.connect(lambda: signals_received.append(True))
+
+        # Initially no favorites — favorites collection has 0 games
+        initial_model = library._systems_model
+        fav_count_before = library._systems_model._systems[
+            [s.folder_name for s in library._systems_model._systems].index("_favorites")
+        ].game_count
+        assert fav_count_before == 0
+
+        # Toggle a game as favorite
+        library.selectSystem("snes")
+        library.toggleFavorite(0)
+
+        # Trigger a collection rebuild by selecting a collection
+        library.selectSystem("_favorites")
+
+        # systemsModelChanged must have been emitted at least once during rebuild
+        assert len(signals_received) >= 1
+
+        # The systemsModel must be a new object (rebuilt)
+        assert library._systems_model is not initial_model
+
+        # The new model must reflect the updated favorites count
+        fav_count_after = library._systems_model._systems[
+            [s.folder_name for s in library._systems_model._systems].index("_favorites")
+        ].game_count
+        assert fav_count_after == 1
+
+    def test_systems_model_game_count_reflects_favorite_toggle(self, tmp_path: Path) -> None:
+        """systemsModel.gameCount for _favorites updates after toggle + rebuild."""
+        from backend.library import SystemListModel
+
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name></game>"
+                    "<game><path>./b.rom</path><name>Beta</name></game>"
+                ),
+            },
+        )
+
+        # Toggle both games as favorites
+        library.selectSystem("snes")
+        library.toggleFavorite(0)
+        library.toggleFavorite(1)
+
+        # Rebuild by selecting a collection
+        library.selectSystem("_favorites")
+
+        # The systemsModel must now report 2 favorites
+        systems_model: SystemListModel = library._systems_model
+        fav_idx = [s.folder_name for s in systems_model._systems].index("_favorites")
+        assert systems_model._systems[fav_idx].game_count == 2

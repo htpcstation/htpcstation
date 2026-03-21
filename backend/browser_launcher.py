@@ -47,24 +47,26 @@ class BrowserLauncher(QObject):
     # Public API
     # ------------------------------------------------------------------
 
-    def launch(self, url: str) -> bool:
+    def launch(self, url: str) -> None:
         """Launch browser in kiosk mode at the given URL.
 
-        The browser command is split into tokens; ``--kiosk`` and
-        ``--app=<url>`` are appended automatically.
+        The browser command is split into tokens; ``--kiosk`` and the URL are
+        appended automatically.
 
-        Returns ``True`` if the process was started, ``False`` if a browser
-        is already running or the URL is empty.
+        Returns immediately without blocking.  Outcome is reported via the
+        ``processStarted`` and ``processFinished`` signals.
+
+        Does nothing if a browser is already running or the URL is empty.
         """
         if not url:
             logger.error("BrowserLauncher.launch: empty URL — ignoring")
-            return False
+            return
 
         if self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning:
             logger.warning(
                 "BrowserLauncher.launch: a browser is already running — ignoring new launch request"
             )
-            return False
+            return
 
         command = self._build_command(url)
         program = command[0]
@@ -73,25 +75,13 @@ class BrowserLauncher(QObject):
         logger.info("BrowserLauncher: starting %s %s", program, " ".join(args))
 
         self._process = QProcess(self)
+        # Connect signals before start() so no events are missed.
+        self._process.started.connect(self._on_started)
+        self._process.errorOccurred.connect(self._on_error_occurred)
         self._process.finished.connect(self._on_finished)
 
         self._start_time = time.monotonic()
         self._process.start(program, args)
-
-        if self._process.waitForStarted(3000):
-            logger.info(
-                "BrowserLauncher: browser started (pid=%s)", self._process.processId()
-            )
-            self.processStarted.emit()
-            return True
-
-        # Process failed to start
-        error = self._process.errorString()
-        logger.error("BrowserLauncher: failed to start '%s': %s", program, error)
-        self._process.finished.disconnect(self._on_finished)
-        self._process = None
-        self.processFinished.emit(-1)
-        return False
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -135,6 +125,33 @@ class BrowserLauncher(QObject):
                 logger.debug("BrowserLauncher: removed Session Storage dir")
             except OSError as e:
                 logger.warning("BrowserLauncher: failed to remove Session Storage: %s", e)
+
+    def _on_started(self) -> None:
+        """Handle QProcess.started — browser process is confirmed running."""
+        if self._process is not None:
+            logger.info(
+                "BrowserLauncher: browser started (pid=%s)", self._process.processId()
+            )
+        self.processStarted.emit()
+
+    def _on_error_occurred(self, error: QProcess.ProcessError) -> None:
+        """Handle QProcess.errorOccurred — only act on FailedToStart."""
+        if error != QProcess.ProcessError.FailedToStart:
+            # Crashed/Timedout/WriteError/ReadError happen after the process is
+            # running; they are already covered by the finished signal.
+            return
+
+        program = self._process.program() if self._process is not None else "<unknown>"
+        error_string = self._process.errorString() if self._process is not None else ""
+        logger.error("BrowserLauncher: failed to start '%s': %s", program, error_string)
+
+        if self._process is not None:
+            self._process.started.disconnect(self._on_started)
+            self._process.errorOccurred.disconnect(self._on_error_occurred)
+            self._process.finished.disconnect(self._on_finished)
+            self._process = None
+
+        self.processFinished.emit(-1)
 
     def _on_finished(self, exit_code: int, exit_status: QProcess.ExitStatus) -> None:
         elapsed = int(time.monotonic() - self._start_time)

@@ -75,12 +75,13 @@ class TestBrowserLauncherCommandConstruction:
 
 
 class TestBrowserLauncherLaunchGuard:
-    def test_launch_returns_false_for_empty_url(self) -> None:
+    def test_launch_returns_none_for_empty_url(self) -> None:
+        """launch() returns None (not False) for an empty URL — it's now void."""
         from backend.browser_launcher import BrowserLauncher
 
         launcher = BrowserLauncher()
         result = launcher.launch("")
-        assert result is False
+        assert result is None
 
     def test_launch_ignores_when_process_already_running(self) -> None:
         from backend.browser_launcher import BrowserLauncher
@@ -94,9 +95,10 @@ class TestBrowserLauncherLaunchGuard:
         launcher._process = mock_process
 
         result = launcher.launch("http://example.com")
-        assert result is False
+        assert result is None
 
     def test_launch_emits_process_finished_minus_one_on_start_failure(self) -> None:
+        """processFinished(-1) is emitted when errorOccurred(FailedToStart) fires."""
         from backend.browser_launcher import BrowserLauncher
         from PySide6.QtCore import QProcess
 
@@ -106,12 +108,31 @@ class TestBrowserLauncherLaunchGuard:
         launcher.processFinished.connect(lambda code: received.append(code))
 
         with patch.object(QProcess, "start"), \
-             patch.object(QProcess, "waitForStarted", return_value=False), \
-             patch.object(QProcess, "errorString", return_value="not found"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
             launcher.launch("http://example.com")
+            # Simulate the FailedToStart error signal firing asynchronously
+            assert launcher._process is not None
+            launcher._on_error_occurred(QProcess.ProcessError.FailedToStart)
 
         assert received == [-1]
+
+    def test_non_failed_to_start_error_does_not_emit_process_finished(self) -> None:
+        """errorOccurred for non-FailedToStart errors is ignored (handled by finished)."""
+        from backend.browser_launcher import BrowserLauncher
+        from PySide6.QtCore import QProcess
+
+        launcher = BrowserLauncher()
+
+        received: list[int] = []
+        launcher.processFinished.connect(lambda code: received.append(code))
+
+        with patch.object(QProcess, "start"), \
+             patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
+            launcher.launch("http://example.com")
+            # Simulate a Crashed error — should be ignored
+            launcher._on_error_occurred(QProcess.ProcessError.Crashed)
+
+        assert received == []
 
 
 # ---------------------------------------------------------------------------

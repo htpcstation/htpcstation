@@ -28,11 +28,6 @@ ASSETS_DIR = Path(__file__).parent / "assets"
 def main() -> None:
     config = Config()  # loads/creates ***REMOVED***.config/htpcstation/config.json
 
-    # Temporary: use reference ROM data when no ROM directory is configured.
-    # A proper first-run setup will replace this in a later task.
-    if config.rom_directory is None:
-        config.set_rom_directory("***REMOVED***opencode/ROMs")
-
     app = QGuiApplication(sys.argv)
     app.setApplicationName("htpcstation")
     app.setOrganizationName("htpcstation")

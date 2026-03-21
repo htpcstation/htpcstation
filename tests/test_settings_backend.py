@@ -314,6 +314,11 @@ class TestSettingsManagerSetters:
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
+        # Prevent save() from writing to the real config file after the patch
+        # exits.  Setter tests only verify in-memory state and signal emissions;
+        # file persistence is already covered by TestConfigSetters.
+        config.save = MagicMock()
+
         library = MagicMock()
         plex_library = MagicMock()
         return SettingsManager(config, library, plex_library), config
