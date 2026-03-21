@@ -1,0 +1,8 @@
+Let's create a checkpoint here. 
+Write a markdown file that I can give to you in a fresh context without losing any of the progress we have made thus far.
+Make sure it includes:
+- The summary and scope of the project
+- Any issues that have been postponed
+- All future milestones, including any adjustments we have made from the original proposal.
+
+Call this file "resume-project.md"

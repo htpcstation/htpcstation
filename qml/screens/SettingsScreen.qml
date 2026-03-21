@@ -1,0 +1,410 @@
+import QtQuick
+import ".."
+import "../components"
+
+// Settings screen — navigable list of settings organized into 4 sections:
+// Games, Plex, Browser, User Interface.
+//
+// Navigation:
+//   Up/Down — move between setting rows (headers are skipped automatically)
+//   A (Return) on text input — enter edit mode
+//   A (Return) on toggle — toggle value
+//   A (Return) on button — execute action
+//   A (Return) on slider — enter adjust mode
+//   B (Escape) — if in edit/adjust mode, exit it; otherwise emit back()
+FocusScope {
+    id: settingsScreen
+
+    // Emit when B (Escape) is pressed so HomeScreen can return focus to the tab bar.
+    signal back()
+
+    // Only process input when this screen is active.
+    enabled: focus
+
+    // ── Settings model ────────────────────────────────────────────────────────
+    // Each entry specifies the type and properties of a setting row.
+    // Headers are non-focusable visual separators.
+    readonly property var _settingsModel: [
+        { type: "header",  label: "Games" },
+        { type: "text",    label: "ROMs Directory",    settingKey: "romDirectory" },
+        { type: "text",    label: "RetroArch Command", settingKey: "retroarchCommand" },
+        { type: "text",    label: "Cores Directory",   settingKey: "coresDirectory" },
+        { type: "button",  label: "System Cores...",   action: "systemCores" },
+        { type: "button",  label: "Rescan Library",    action: "rescan" },
+        { type: "header",  label: "Plex" },
+        { type: "text",    label: "Server URL",        settingKey: "plexServerUrl" },
+        { type: "text",    label: "Token",             settingKey: "plexToken", masked: true },
+        { type: "button",  label: "Test Connection",   action: "testPlex" },
+        { type: "header",  label: "Browser" },
+        { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
+        { type: "header",  label: "User Interface" },
+        { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
+        { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
+          min: 0, max: 5000, step: 100, suffix: "ms" },
+    ]
+
+    // ── Toast notification ────────────────────────────────────────────────────
+    property string _toastText: ""
+
+    Timer {
+        id: toastTimer
+        interval: 2500
+        repeat: false
+        onTriggered: settingsScreen._toastText = ""
+    }
+
+    function _showToast(msg) {
+        settingsScreen._toastText = msg
+        toastTimer.restart()
+    }
+
+    // ── Helper: get current value for a setting key ───────────────────────────
+    function _getValue(key) {
+        if (!settings) return ""
+        if (key === "romDirectory")       return settings.romDirectory
+        if (key === "retroarchCommand")   return settings.retroarchCommand
+        if (key === "coresDirectory")     return settings.coresDirectory
+        if (key === "plexServerUrl")      return settings.plexServerUrl
+        if (key === "plexToken")          return settings.plexToken
+        if (key === "browserCommand")     return settings.browserCommand
+        if (key === "videoSnapAutoplay")  return settings.videoSnapAutoplay
+        if (key === "videoSnapDelayMs")   return settings.videoSnapDelayMs
+        return ""
+    }
+
+    // ── Helper: call the appropriate setter ───────────────────────────────────
+    function _setValue(key, value) {
+        if (!settings) return
+        if (key === "romDirectory")       settings.setRomDirectory(value)
+        else if (key === "retroarchCommand")   settings.setRetroarchCommand(value)
+        else if (key === "coresDirectory")     settings.setCoresDirectory(value)
+        else if (key === "plexServerUrl")      settings.setPlexServerUrl(value)
+        else if (key === "plexToken")          settings.setPlexToken(value)
+        else if (key === "browserCommand")     settings.setBrowserCommand(value)
+        else if (key === "videoSnapAutoplay")  settings.setVideoSnapAutoplay(value)
+        else if (key === "videoSnapDelayMs")   settings.setVideoSnapDelayMs(value)
+    }
+
+    // ── Focus routing ─────────────────────────────────────────────────────────
+    onActiveFocusChanged: {
+        if (activeFocus) {
+            // Route focus to the current setting item
+            var item = settingsList.currentItem
+            if (item && item.children[0] && item.children[0].item) {
+                item.children[0].item.forceActiveFocus()
+            } else {
+                settingsList.forceActiveFocus()
+            }
+        }
+    }
+
+    // ── Settings list ─────────────────────────────────────────────────────────
+    ListView {
+        id: settingsList
+
+        anchors {
+            top: parent.top
+            left: parent.left
+            right: parent.right
+            bottom: actionBar.top
+            topMargin: root.vpx(24)
+            leftMargin: root.vpx(48)
+            rightMargin: root.vpx(48)
+            bottomMargin: root.vpx(8)
+        }
+
+        model: settingsScreen._settingsModel
+        clip: true
+        focus: true
+        keyNavigationEnabled: false  // We handle Up/Down manually to skip headers
+        highlightMoveDuration: Theme.animDurationFast
+
+        // Track whether any child is in edit/adjust mode
+        property bool _childEditing: false
+
+        // ── Key handling for the list ─────────────────────────────────────────
+        Keys.onPressed: (event) => {
+            // If a child is in edit/adjust mode, let it handle keys
+            if (settingsList._childEditing) {
+                return
+            }
+
+            if (event.key === Qt.Key_Up) {
+                event.accepted = true
+                _moveFocus(-1)
+            } else if (event.key === Qt.Key_Down) {
+                event.accepted = true
+                _moveFocus(1)
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                settingsScreen.back()
+            }
+        }
+
+        // Move focus by delta, skipping header rows
+        function _moveFocus(delta) {
+            var newIndex = currentIndex + delta
+            while (newIndex >= 0 && newIndex < model.length) {
+                if (model[newIndex].type !== "header") {
+                    currentIndex = newIndex
+                    // Force active focus on the loaded component
+                    var item = currentItem
+                    if (item && item.children[0] && item.children[0].item) {
+                        item.children[0].item.forceActiveFocus()
+                    }
+                    return
+                }
+                newIndex += delta
+            }
+        }
+
+        // Initialize to first non-header row
+        Component.onCompleted: {
+            for (var i = 0; i < model.length; i++) {
+                if (model[i].type !== "header") {
+                    currentIndex = i
+                    // Defer forceActiveFocus to next frame so the Loader has finished
+                    Qt.callLater(function() {
+                        var item = settingsList.currentItem
+                        if (item && item.children[0] && item.children[0].item) {
+                            item.children[0].item.forceActiveFocus()
+                        }
+                    })
+                    break
+                }
+            }
+        }
+
+        // ── Delegate ──────────────────────────────────────────────────────────
+        delegate: Item {
+            id: delegateWrapper
+            width: settingsList.width
+            height: loaderItem.item ? loaderItem.item.implicitHeight : 0
+
+            readonly property var rowData: modelData
+            readonly property bool isCurrentRow: settingsList.currentIndex === index
+
+            Loader {
+                id: loaderItem
+                width: parent.width
+
+                // Pick the right component based on type
+                sourceComponent: {
+                    if (rowData.type === "header")  return headerComp
+                    if (rowData.type === "text")    return textInputComp
+                    if (rowData.type === "toggle")  return toggleComp
+                    if (rowData.type === "button")  return buttonComp
+                    if (rowData.type === "slider")  return sliderComp
+                    return null
+                }
+
+                // Give focus to the loaded item when it becomes the current row
+                onLoaded: {
+                    if (item && rowData.type !== "header") {
+                        item.focus = Qt.binding(function() {
+                            return delegateWrapper.isCurrentRow && settingsList.activeFocus
+                        })
+                    }
+                }
+            }
+
+            // ── Header component ──────────────────────────────────────────────
+            Component {
+                id: headerComp
+                Item {
+                    implicitHeight: root.vpx(48)
+                    width: parent ? parent.width : 0
+
+                    // Separator line
+                    Rectangle {
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            verticalCenter: headerLabel.verticalCenter
+                        }
+                        height: root.vpx(1)
+                        color: Theme.colorTextDim
+                        opacity: 0.3
+                    }
+
+                    // Header label on a background patch to "break" the line
+                    Rectangle {
+                        id: labelBg
+                        anchors {
+                            left: parent.left
+                            verticalCenter: headerLabel.verticalCenter
+                        }
+                        width: headerLabel.width + root.vpx(16)
+                        height: headerLabel.height + root.vpx(4)
+                        color: Theme.colorBackground
+                    }
+
+                    Text {
+                        id: headerLabel
+                        anchors {
+                            left: parent.left
+                            bottom: parent.bottom
+                            bottomMargin: root.vpx(6)
+                        }
+                        text: rowData.label
+                        color: Theme.colorPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        font.bold: true
+                        font.letterSpacing: root.vpx(2)
+                    }
+                }
+            }
+
+            // ── Text input component ──────────────────────────────────────────
+            Component {
+                id: textInputComp
+                SettingTextInput {
+                    width: parent ? parent.width : 0
+                    label: rowData.label
+                    value: settingsScreen._getValue(rowData.settingKey)
+                    masked: rowData.masked || false
+
+                    onEditingChanged: {
+                        settingsList._childEditing = editing
+                    }
+
+                    onValueEdited: (newValue) => {
+                        settingsScreen._setValue(rowData.settingKey, newValue)
+                    }
+                }
+            }
+
+            // ── Toggle component ──────────────────────────────────────────────
+            Component {
+                id: toggleComp
+                SettingToggle {
+                    width: parent ? parent.width : 0
+                    label: rowData.label
+                    checked: settingsScreen._getValue(rowData.settingKey)
+
+                    onToggled: (newValue) => {
+                        settingsScreen._setValue(rowData.settingKey, newValue)
+                    }
+                }
+            }
+
+            // ── Button component ──────────────────────────────────────────────
+            Component {
+                id: buttonComp
+                SettingButton {
+                    id: actionButton
+                    width: parent ? parent.width : 0
+                    label: rowData.label
+
+                    onClicked: {
+                        var action = rowData.action
+                        if (action === "rescan") {
+                            settings.rescanLibrary()
+                            actionButton.statusText = "Rescanned!"
+                        } else if (action === "testPlex") {
+                            actionButton.statusText = "Testing..."
+                            // Defer the synchronous call to next event loop turn
+                            // so "Testing..." is rendered before blocking.
+                            Qt.callLater(function() {
+                                var ok = settings.testPlexConnection()
+                                actionButton.statusText = ok ? "Connected!" : "Failed"
+                            })
+                        } else if (action === "systemCores") {
+                            settingsScreen._showToast("Coming soon")
+                        }
+                    }
+                }
+            }
+
+            // ── Slider component ──────────────────────────────────────────────
+            Component {
+                id: sliderComp
+                SettingSlider {
+                    width: parent ? parent.width : 0
+                    label: rowData.label
+                    value: settingsScreen._getValue(rowData.settingKey)
+                    minValue: rowData.min !== undefined ? rowData.min : 0
+                    maxValue: rowData.max !== undefined ? rowData.max : 5000
+                    step: rowData.step !== undefined ? rowData.step : 100
+                    suffix: rowData.suffix !== undefined ? rowData.suffix : ""
+
+                    onAdjustingChanged: {
+                        settingsList._childEditing = adjusting
+                    }
+
+                    onValueEdited: (newValue) => {
+                        settingsScreen._setValue(rowData.settingKey, newValue)
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Action bar ────────────────────────────────────────────────────────────
+    Rectangle {
+        id: actionBar
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+        }
+        height: root.vpx(44)
+        color: Theme.colorSecondary
+        opacity: 0.8
+
+        Row {
+            anchors {
+                left: parent.left
+                leftMargin: root.vpx(48)
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: root.vpx(24)
+
+            Text {
+                text: keys.useGamepadLabels ? "Ⓑ Back" : "Esc  Back"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
+                text: keys.useGamepadLabels ? "Ⓐ Select" : "Enter  Select"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+        }
+    }
+
+    // ── Toast overlay ─────────────────────────────────────────────────────────
+    Rectangle {
+        id: toastOverlay
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: actionBar.top
+            bottomMargin: root.vpx(16)
+        }
+        width: toastLabel.implicitWidth + root.vpx(32)
+        height: root.vpx(40)
+        radius: root.vpx(20)
+        color: Theme.colorSecondary
+        border.color: Theme.colorPrimary
+        border.width: root.vpx(1)
+        visible: settingsScreen._toastText.length > 0
+        opacity: visible ? 1.0 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation { duration: Theme.animDurationFast }
+        }
+
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            text: settingsScreen._toastText
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+    }
+}
