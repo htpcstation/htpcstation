@@ -536,6 +536,12 @@ class PlexLibrary(QObject):
                 "sectionKey": str(lib.get("key", "")),
                 "count": 0,
             })
+        result.append({
+            "title": "Live TV",
+            "type": "livetv",
+            "sectionKey": "_livetv",
+            "count": 0,
+        })
         return result
 
     @Slot()
@@ -840,6 +846,32 @@ class PlexLibrary(QObject):
                     "posterLocal": episode.poster_local,
                 })
         return episodes
+
+    @Slot()
+    def launchLiveTv(self) -> None:
+        """Launch Plex Web in kiosk browser at the Live TV guide.
+
+        Builds a deep-link URL using the active token, then delegates to the
+        browser launcher.  The URL format places the token before the hash
+        fragment so Plex Web picks it up correctly.
+        """
+        if self._browser_launcher is None:
+            logger.warning("PlexLibrary.launchLiveTv: no browser launcher configured")
+            return
+        if not self._active_token:
+            logger.warning("PlexLibrary.launchLiveTv: no active token — ignoring")
+            return
+
+        url = (
+            f"https://app.plex.tv/desktop"
+            f"?X-Plex-Token={self._active_token}"
+            f"#!/live-tv"
+        )
+        user_title = self._cached_user_title
+        if user_title:
+            url += f"&htpc_user={quote(user_title)}"
+        logger.info("PlexLibrary.launchLiveTv: launching %s", url)
+        self._browser_launcher.launch(url)
 
     @Slot(str)
     def launchContent(self, rating_key: str) -> None:

@@ -1120,9 +1120,13 @@ class TestGetLibraryList:
         return lib
 
     def test_empty_when_no_data(self) -> None:
+        """With no libraries and no on-deck, only the Live TV entry is returned."""
         lib = self._make_lib()
         result = lib.getLibraryList()
-        assert result == []
+        # Live TV is always appended
+        assert len(result) == 1
+        assert result[0]["title"] == "Live TV"
+        assert result[0]["type"] == "livetv"
 
     def test_libraries_only_no_ondeck(self) -> None:
         lib = self._make_lib()
@@ -1131,12 +1135,15 @@ class TestGetLibraryList:
             {"title": "TV Shows", "type": "show", "key": "3"},
         ])
         result = lib.getLibraryList()
-        assert len(result) == 2
+        # Movies, TV Shows, then Live TV
+        assert len(result) == 3
         assert result[0]["title"] == "Movies"
         assert result[0]["type"] == "movie"
         assert result[0]["sectionKey"] == "4"
         assert result[1]["title"] == "TV Shows"
         assert result[1]["sectionKey"] == "3"
+        assert result[2]["title"] == "Live TV"
+        assert result[2]["type"] == "livetv"
 
     def test_ondeck_prepended_when_items_present(self) -> None:
         lib = self._make_lib()
@@ -1149,12 +1156,14 @@ class TestGetLibraryList:
             {"title": "Movies", "type": "movie", "key": "4"},
         ])
         result = lib.getLibraryList()
-        assert len(result) == 2
+        # Continue Watching, Movies, then Live TV
+        assert len(result) == 3
         assert result[0]["title"] == "Continue Watching"
         assert result[0]["type"] == "ondeck"
         assert result[0]["sectionKey"] == "_ondeck"
         assert result[0]["count"] == 1
         assert result[1]["title"] == "Movies"
+        assert result[2]["title"] == "Live TV"
 
     def test_ondeck_not_prepended_when_empty(self) -> None:
         lib = self._make_lib()
@@ -1162,8 +1171,10 @@ class TestGetLibraryList:
             {"title": "Movies", "type": "movie", "key": "4"},
         ])
         result = lib.getLibraryList()
-        assert len(result) == 1
+        # Movies, then Live TV
+        assert len(result) == 2
         assert result[0]["title"] == "Movies"
+        assert result[1]["title"] == "Live TV"
 
     def test_section_key_is_string(self) -> None:
         """sectionKey must be a string even when the raw key is an int."""
@@ -3758,3 +3769,173 @@ class TestWorkerLoadSectionShowsTotal:
         mock_client.get_library_items.assert_called_once()
         call_kwargs = mock_client.get_library_items.call_args[1]
         assert call_kwargs.get("content_rating") == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.launchLiveTv — Task 001 (Live TV entry)
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchLiveTv:
+    """launchLiveTv() builds the correct URL and delegates to the browser launcher."""
+
+    def _make_lib(self, browser_launcher=None):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config, browser_launcher=browser_launcher)
+        return lib
+
+    def test_launches_correct_url_with_token(self) -> None:
+        """launchLiveTv builds URL with token before the hash fragment."""
+        mock_launcher = MagicMock()
+        lib = self._make_lib(browser_launcher=mock_launcher)
+        lib._active_token = "mytoken123"
+
+        lib.launchLiveTv()
+
+        mock_launcher.launch.assert_called_once()
+        url = mock_launcher.launch.call_args[0][0]
+        assert url == "https://app.plex.tv/desktop?X-Plex-Token=mytoken123#!/live-tv"
+
+    def test_includes_htpc_user_when_user_selected(self) -> None:
+        """launchLiveTv appends htpc_user after the hash fragment when a user is set."""
+        mock_launcher = MagicMock()
+        lib = self._make_lib(browser_launcher=mock_launcher)
+        lib._active_token = "mytoken123"
+        lib._cached_user_title = "Kids"
+
+        lib.launchLiveTv()
+
+        mock_launcher.launch.assert_called_once()
+        url = mock_launcher.launch.call_args[0][0]
+        assert url == "https://app.plex.tv/desktop?X-Plex-Token=mytoken123#!/live-tv&htpc_user=Kids"
+
+    def test_htpc_user_is_url_encoded(self) -> None:
+        """htpc_user value is URL-encoded when it contains special characters."""
+        mock_launcher = MagicMock()
+        lib = self._make_lib(browser_launcher=mock_launcher)
+        lib._active_token = "tok"
+        lib._cached_user_title = "My User"
+
+        lib.launchLiveTv()
+
+        url = mock_launcher.launch.call_args[0][0]
+        assert "htpc_user=My%20User" in url
+
+    def test_no_htpc_user_when_no_user_selected(self) -> None:
+        """launchLiveTv does not append htpc_user when no user is selected."""
+        mock_launcher = MagicMock()
+        lib = self._make_lib(browser_launcher=mock_launcher)
+        lib._active_token = "tok"
+        lib._cached_user_title = ""
+
+        lib.launchLiveTv()
+
+        url = mock_launcher.launch.call_args[0][0]
+        assert "htpc_user" not in url
+
+    def test_guard_no_browser_launcher(self) -> None:
+        """launchLiveTv returns early when no browser launcher is configured."""
+        lib = self._make_lib(browser_launcher=None)
+        lib._active_token = "tok"
+
+        # Should not raise
+        lib.launchLiveTv()
+
+    def test_guard_no_active_token(self) -> None:
+        """launchLiveTv returns early when there is no active token."""
+        mock_launcher = MagicMock()
+        lib = self._make_lib(browser_launcher=mock_launcher)
+        lib._active_token = ""
+
+        lib.launchLiveTv()
+
+        mock_launcher.launch.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getLibraryList — Live TV entry (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestGetLibraryListLiveTv:
+    """getLibraryList() always appends a 'Live TV' entry at the end."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_live_tv_entry_always_present(self) -> None:
+        """getLibraryList always includes a 'Live TV' entry."""
+        lib = self._make_lib()
+        result = lib.getLibraryList()
+
+        live_tv = result[-1]
+        assert live_tv["title"] == "Live TV"
+        assert live_tv["type"] == "livetv"
+        assert live_tv["sectionKey"] == "_livetv"
+        assert live_tv["count"] == 0
+
+    def test_live_tv_entry_appears_after_libraries(self) -> None:
+        """Live TV entry appears after all library sections."""
+        lib = self._make_lib()
+        lib._libraries_model.set_items([
+            {"title": "Movies", "type": "movie", "key": "4"},
+            {"title": "TV Shows", "type": "show", "key": "3"},
+        ])
+
+        result = lib.getLibraryList()
+
+        # Movies and TV Shows come first, Live TV is last
+        assert result[0]["title"] == "Movies"
+        assert result[1]["title"] == "TV Shows"
+        assert result[-1]["title"] == "Live TV"
+
+    def test_live_tv_entry_appears_after_ondeck_and_libraries(self) -> None:
+        """Live TV entry appears after Continue Watching and library sections."""
+        lib = self._make_lib()
+        lib._on_deck_model.set_items([
+            {"rating_key": "1", "title": "Ep 1", "type": "episode",
+             "poster_local": "", "grandparent_title": "Show",
+             "view_offset": 0, "duration": 1000, "thumb_path": ""},
+        ])
+        lib._libraries_model.set_items([
+            {"title": "Movies", "type": "movie", "key": "4"},
+        ])
+
+        result = lib.getLibraryList()
+
+        assert result[0]["title"] == "Continue Watching"
+        assert result[1]["title"] == "Movies"
+        assert result[-1]["title"] == "Live TV"
+        assert result[-1]["type"] == "livetv"
+
+    def test_live_tv_entry_present_even_with_no_libraries(self) -> None:
+        """Live TV entry is present even when no library sections are loaded."""
+        lib = self._make_lib()
+        # No libraries, no on-deck
+        result = lib.getLibraryList()
+
+        assert len(result) == 1
+        assert result[0]["title"] == "Live TV"
+        assert result[0]["type"] == "livetv"

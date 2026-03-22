@@ -206,11 +206,15 @@ FocusScope {
                     if (keys.isAccept(event)) {
                         event.accepted = true
                         if (currentItem) {
-                            watchScreen.selectedLibraryTitle = currentItem.entryTitle
-                            watchScreen.selectedSectionKey = currentItem.entrySectionKey
-                            watchScreen.selectedLibraryType = currentItem.entryType
-                            plex.selectLibrary(currentItem.entrySectionKey)
-                            watchScreen.currentView = "content"
+                            if (currentItem.entryType === "livetv") {
+                                plex.launchLiveTv()
+                            } else {
+                                watchScreen.selectedLibraryTitle = currentItem.entryTitle
+                                watchScreen.selectedSectionKey = currentItem.entrySectionKey
+                                watchScreen.selectedLibraryType = currentItem.entryType
+                                plex.selectLibrary(currentItem.entrySectionKey)
+                                watchScreen.currentView = "content"
+                            }
                         }
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
@@ -296,11 +300,15 @@ FocusScope {
                         }
                         onDoubleClicked: {
                             libraryList.currentIndex = index
-                            watchScreen.selectedLibraryTitle = modelData.title
-                            watchScreen.selectedSectionKey = modelData.sectionKey
-                            watchScreen.selectedLibraryType = modelData.type
-                            plex.selectLibrary(modelData.sectionKey)
-                            watchScreen.currentView = "content"
+                            if (modelData.type === "livetv") {
+                                plex.launchLiveTv()
+                            } else {
+                                watchScreen.selectedLibraryTitle = modelData.title
+                                watchScreen.selectedSectionKey = modelData.sectionKey
+                                watchScreen.selectedLibraryType = modelData.type
+                                plex.selectLibrary(modelData.sectionKey)
+                                watchScreen.currentView = "content"
+                            }
                         }
                     }
                 }
