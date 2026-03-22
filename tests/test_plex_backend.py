@@ -3160,3 +3160,601 @@ class TestWorkerLoadSectionContentRating:
         mock_client.get_library_items.assert_called_once()
         call_kwargs = mock_client.get_library_items.call_args[1]
         assert call_kwargs.get("content_rating") == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+
+# ---------------------------------------------------------------------------
+# PlexShowListModel.append_shows (Task 001 — show pagination)
+# ---------------------------------------------------------------------------
+
+
+class TestAppendShows:
+    """append_shows adds items to the model without resetting it."""
+
+    def _make_show(self, rating_key: str = "1", title: str = "Test Show") -> "PlexShow":
+        from backend.plex_models import PlexShow
+        return PlexShow(
+            rating_key=rating_key,
+            title=title,
+            year=2019,
+            audience_rating=9.0,
+            child_count=3,
+            leaf_count=30,
+            viewed_leaf_count=10,
+        )
+
+    def test_append_shows_adds_to_existing(self) -> None:
+        from backend.plex_library import PlexShowListModel
+
+        model = PlexShowListModel()
+        model.set_shows([self._make_show("1", "First")])
+        model.append_shows([self._make_show("2", "Second")])
+
+        assert model.rowCount() == 2
+        idx = model.index(1, 0)
+        assert model.data(idx, PlexShowListModel.TitleRole) == "Second"
+
+    def test_append_shows_noop_on_empty_list(self) -> None:
+        from backend.plex_library import PlexShowListModel
+
+        model = PlexShowListModel()
+        model.set_shows([self._make_show("1", "First")])
+        model.append_shows([])
+
+        assert model.rowCount() == 1
+
+    def test_append_shows_emits_rows_inserted(self) -> None:
+        from backend.plex_library import PlexShowListModel
+
+        model = PlexShowListModel()
+        model.set_shows([self._make_show("1", "First")])
+
+        inserted: list = []
+        model.rowsInserted.connect(lambda parent, first, last: inserted.append((first, last)))
+
+        model.append_shows([self._make_show("2", "Second"), self._make_show("3", "Third")])
+
+        assert len(inserted) == 1
+        assert inserted[0] == (1, 2)  # rows 1 and 2 inserted
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._showsReady signal carries total count (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestShowsReadySignalCarriesTotalCount:
+    """_showsReady signal must carry (list, int) — the total count."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_on_shows_ready_sets_total(self) -> None:
+        """_on_shows_ready stores the total count from the signal."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None  # prevent poster fetch attempts
+
+        show = PlexShow(rating_key="1", title="Test Show", year=2020)
+        lib._on_shows_ready([show], 150)
+
+        assert lib._shows_total == 150
+        assert lib._shows_loaded == 1
+
+    def test_on_shows_ready_first_page_replaces_model(self) -> None:
+        """First call (_shows_loaded == 0) replaces the model."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+        lib._shows_loaded = 0
+
+        shows = [PlexShow(rating_key=str(i), title=f"Show {i}", year=2020) for i in range(3)]
+        lib._on_shows_ready(shows, 100)
+
+        assert lib._shows_model.rowCount() == 3
+        assert lib._shows_loaded == 3
+        assert lib._shows_total == 100
+
+    def test_on_shows_ready_subsequent_page_appends(self) -> None:
+        """Subsequent calls (_shows_loaded > 0) append to the model."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+
+        # Simulate first page already loaded
+        first_page = [PlexShow(rating_key=str(i), title=f"Show {i}", year=2020) for i in range(3)]
+        lib._shows_model.set_shows(first_page)
+        lib._shows_loaded = 3
+        lib._shows_total = 6
+
+        # Load second page
+        second_page = [PlexShow(rating_key=str(i + 3), title=f"Show {i + 3}", year=2020) for i in range(3)]
+        lib._on_shows_ready(second_page, 6)
+
+        assert lib._shows_model.rowCount() == 6
+        assert lib._shows_loaded == 6
+
+    def test_on_shows_ready_clears_loading_more_flag(self) -> None:
+        """_shows_loading_more is reset to False when _on_shows_ready is called."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+        lib._shows_loading_more = True
+        lib._shows_loaded = 0
+
+        show = PlexShow(rating_key="1", title="Test", year=2020)
+        lib._on_shows_ready([show], 1)
+
+        assert lib._shows_loading_more is False
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.loadMoreShows — guards and pagination (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadMoreShowsGuard:
+    """loadMoreShows guards prevent duplicate submissions."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_loading_more_flag_prevents_duplicate_submission(self) -> None:
+        """Second call to loadMoreShows while _shows_loading_more is True is a no-op."""
+        lib = self._make_lib()
+        lib._shows_total = 100
+        lib._shows_loaded = 50
+        lib._current_section_key = "3"
+
+        submit_calls: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submit_calls.append(fn)  # type: ignore[method-assign]
+
+        # First call — should submit
+        lib.loadMoreShows()
+        assert lib._shows_loading_more is True
+        assert len(submit_calls) == 1
+
+        # Second call while flag is set — should be a no-op
+        lib.loadMoreShows()
+        assert len(submit_calls) == 1  # still only one submission
+
+    def test_no_submission_when_all_loaded(self) -> None:
+        """loadMoreShows is a no-op when all shows are already loaded."""
+        lib = self._make_lib()
+        lib._shows_total = 50
+        lib._shows_loaded = 50
+        lib._current_section_key = "3"
+
+        submit_calls: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submit_calls.append(fn)  # type: ignore[method-assign]
+
+        lib.loadMoreShows()
+
+        assert len(submit_calls) == 0
+
+    def test_no_submission_when_no_client(self) -> None:
+        """loadMoreShows is a no-op when _client is None."""
+        lib = self._make_lib()
+        lib._client = None
+        lib._shows_total = 100
+        lib._shows_loaded = 50
+        lib._current_section_key = "3"
+
+        submit_calls: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submit_calls.append(fn)  # type: ignore[method-assign]
+
+        lib.loadMoreShows()
+
+        assert len(submit_calls) == 0
+
+    def test_submits_with_correct_offset(self) -> None:
+        """loadMoreShows passes the current _shows_loaded as the start offset."""
+        lib = self._make_lib()
+        lib._shows_total = 200
+        lib._shows_loaded = 50
+        lib._current_section_key = "3"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib.loadMoreShows()
+
+        assert len(submitted) == 1
+        fn, args = submitted[0]
+        # args: (client, section_key, start, sort, genre)
+        assert 50 in args  # start offset
+
+    def test_loading_more_flag_cleared_after_shows_ready(self) -> None:
+        """_shows_loading_more is reset to False when _on_shows_ready is called."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._shows_loading_more = True
+        lib._shows_loaded = 0
+        lib._client = None  # prevent poster fetch attempts
+
+        show = PlexShow(rating_key="1", title="Test", year=2020)
+        lib._on_shows_ready([show], 1)
+
+        assert lib._shows_loading_more is False
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._worker_load_more_shows — failure resets flag (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadMoreShowsFailureResetsFlag:
+    """_shows_loading_more must be reset to False when _worker_load_more_shows fails."""
+
+    def test_loading_more_reset_on_exception(self) -> None:
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        lib._shows_loading_more = True
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.side_effect = RuntimeError("network error")
+
+        # Run the worker directly (synchronously) to test the failure path.
+        lib._worker_load_more_shows(mock_client, "3", 0)
+
+        assert lib._shows_loading_more is False
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.sortShows (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestSortShows:
+    """sortShows re-fetches shows with the correct Plex API sort param."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_sort_az_maps_to_correct_api_param(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert lib._shows_sort == "titleSort:asc"
+        assert len(submitted) == 1
+        assert "titleSort:asc" in submitted[0][1]
+
+    def test_sort_resets_show_pagination(self) -> None:
+        """sortShows resets _shows_loaded and _shows_total."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._shows_loaded = 100
+        lib._shows_total = 500
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert lib._shows_loaded == 0
+        assert lib._shows_total == 0
+
+    def test_sort_does_not_reset_movie_pagination(self) -> None:
+        """sortShows must not affect movie pagination state."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._movies_loaded = 50
+        lib._movies_total = 200
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert lib._movies_loaded == 50
+        assert lib._movies_total == 200
+
+    def test_sort_noop_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+        lib._current_section_key = "3"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert len(submitted) == 0
+
+    def test_sort_noop_when_no_section_key(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = ""
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert len(submitted) == 0
+
+    def test_sort_uses_shows_sort_state_not_movies(self) -> None:
+        """sortShows updates _shows_sort, not _current_sort (movies)."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._current_sort = "addedAt:desc"  # movie sort should be untouched
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.sortShows("rating")
+
+        assert lib._shows_sort == "audienceRating:desc"
+        assert lib._current_sort == "addedAt:desc"  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.filterShowsByGenre (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestFilterShowsByGenre:
+    """filterShowsByGenre re-fetches shows filtered by genre."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_filter_sets_shows_genre(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("42")
+
+        assert lib._shows_genre == "42"
+
+    def test_filter_passes_genre_to_worker(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("42")
+
+        assert len(submitted) == 1
+        assert "42" in submitted[0][1]
+
+    def test_filter_empty_string_clears_genre(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._shows_genre = "42"
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("")
+
+        assert lib._shows_genre == ""
+
+    def test_filter_resets_show_pagination(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._shows_loaded = 50
+        lib._shows_total = 200
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("7")
+
+        assert lib._shows_loaded == 0
+        assert lib._shows_total == 0
+
+    def test_filter_does_not_reset_movie_pagination(self) -> None:
+        """filterShowsByGenre must not affect movie pagination state."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._movies_loaded = 50
+        lib._movies_total = 200
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("7")
+
+        assert lib._movies_loaded == 50
+        assert lib._movies_total == 200
+
+    def test_filter_noop_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+        lib._current_section_key = "3"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("42")
+
+        assert len(submitted) == 0
+
+    def test_filter_uses_shows_genre_state_not_movies(self) -> None:
+        """filterShowsByGenre updates _shows_genre, not _current_genre (movies)."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._current_genre = "99"  # movie genre should be untouched
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.filterShowsByGenre("42")
+
+        assert lib._shows_genre == "42"
+        assert lib._current_genre == "99"  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.loadMoreShows — passes sort/filter to worker (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadMoreShowsPassesSortFilter:
+    """loadMoreShows passes current shows sort/filter to the worker."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_sort_and_genre_passed_to_worker(self) -> None:
+        lib = self._make_lib()
+        lib._shows_total = 200
+        lib._shows_loaded = 50
+        lib._current_section_key = "3"
+        lib._shows_sort = "addedAt:desc"
+        lib._shows_genre = "7"
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib.loadMoreShows()
+
+        assert len(submitted) == 1
+        fn, args = submitted[0]
+        # args: (client, section_key, start, sort, genre)
+        assert "addedAt:desc" in args
+        assert "7" in args
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._worker_load_section — emits total for shows (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerLoadSectionShowsTotal:
+    """_worker_load_section emits total count for shows via _showsReady."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_shows_ready_receives_total_from_worker(self) -> None:
+        """_worker_load_section emits (shows, total) for show sections."""
+        lib = self._make_lib()
+
+        received: list = []
+        lib._showsReady.connect(lambda shows, total: received.append((shows, total)))
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = (
+            [{"ratingKey": "1", "title": "Show 1", "type": "show"}],
+            75,
+        )
+
+        lib._worker_load_section(mock_client, "3", "show")
+
+        assert len(received) == 1
+        shows, total = received[0]
+        assert total == 75
+        assert len(shows) == 1
+
+    def test_content_rating_filter_passed_to_load_more_shows(self) -> None:
+        """_worker_load_more_shows passes content_rating_filter to client.get_library_items."""
+        lib = self._make_lib()
+        lib._content_rating_filter = "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = ([], 0)
+
+        lib._worker_load_more_shows(mock_client, "3", 0)
+
+        mock_client.get_library_items.assert_called_once()
+        call_kwargs = mock_client.get_library_items.call_args[1]
+        assert call_kwargs.get("content_rating") == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"

@@ -218,6 +218,16 @@ class PlexShowListModel(QAbstractListModel):
         self._shows = shows
         self.endResetModel()
 
+    def append_shows(self, shows: list[PlexShow]) -> None:
+        """Append shows to the model. Must be called on the main thread."""
+        if not shows:
+            return
+        first = len(self._shows)
+        last = first + len(shows) - 1
+        self.beginInsertRows(QModelIndex(), first, last)
+        self._shows.extend(shows)
+        self.endInsertRows()
+
     def notify_poster_changed(self, row: int) -> None:
         """Emit dataChanged for the poster role at *row*."""
         if 0 <= row < len(self._shows):
@@ -365,7 +375,7 @@ class PlexLibrary(QObject):
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
     _moviesReady = Signal(list, int)   # (movies, total_size)
-    _showsReady = Signal(list)
+    _showsReady = Signal(list, int)    # (shows, total_size)
     _onDeckReady = Signal(list)
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
@@ -388,9 +398,14 @@ class PlexLibrary(QObject):
         self._movies_total = 0
         self._movies_loaded = 0
         self._loading_more = False
+        self._shows_total: int = 0
+        self._shows_loaded: int = 0
+        self._shows_loading_more: bool = False
         self._machine_identifier: str = ""
-        self._current_sort: str = ""   # Plex API sort param, e.g. 'titleSort:asc'
-        self._current_genre: str = ""  # genre key (integer as string)
+        self._current_sort: str = ""   # Plex API sort param for movies, e.g. 'titleSort:asc'
+        self._current_genre: str = ""  # genre key for movies (integer as string)
+        self._shows_sort: str = ""     # Plex API sort param for shows
+        self._shows_genre: str = ""    # genre key for shows (integer as string)
         self._content_rating_filter: str = ""  # comma-separated allowed ratings for restricted users
         self._cached_content_rating_filter: str = ""  # cached alongside user token
 
@@ -563,9 +578,13 @@ class PlexLibrary(QObject):
         self._current_section_type = section_type
         self._movies_total = 0
         self._movies_loaded = 0
+        self._shows_total = 0
+        self._shows_loaded = 0
         self._current_library = section_title
         self._current_sort = ""
         self._current_genre = ""
+        self._shows_sort = ""
+        self._shows_genre = ""
         self.currentLibraryChanged.emit(section_title)
 
         client = self._client
@@ -633,6 +652,63 @@ class PlexLibrary(QObject):
         section_key = self._current_section_key
         section_type = self._current_section_type
         sort = self._current_sort
+        self._executor.submit(
+            self._worker_load_section, client, section_key, section_type,
+            sort, genre_key
+        )
+
+    @Slot()
+    def loadMoreShows(self) -> None:
+        """Load the next page of shows (pagination)."""
+        if self._client is None:
+            return
+        if self._shows_loading_more:
+            return
+        if self._shows_loaded >= self._shows_total and self._shows_total > 0:
+            return
+        self._shows_loading_more = True
+        client = self._client
+        section_key = self._current_section_key
+        start = self._shows_loaded
+        sort = self._shows_sort
+        genre = self._shows_genre
+        self._executor.submit(
+            self._worker_load_more_shows, client, section_key, start, sort, genre
+        )
+
+    @Slot(str)
+    def sortShows(self, sort_key: str) -> None:
+        """Re-fetch shows with the given sort.
+
+        sort_key: 'az', 'za', 'recent', 'year_desc', 'year_asc', 'rating'
+        """
+        if self._client is None or not self._current_section_key:
+            return
+        api_sort = self._SORT_MAP.get(sort_key, "")
+        self._shows_sort = api_sort
+        self._shows_total = 0
+        self._shows_loaded = 0
+        client = self._client
+        section_key = self._current_section_key
+        section_type = self._current_section_type
+        genre = self._shows_genre
+        self._executor.submit(
+            self._worker_load_section, client, section_key, section_type,
+            api_sort, genre
+        )
+
+    @Slot(str)
+    def filterShowsByGenre(self, genre_key: str) -> None:
+        """Re-fetch shows filtered by genre. Empty string clears the filter."""
+        if self._client is None or not self._current_section_key:
+            return
+        self._shows_genre = genre_key
+        self._shows_total = 0
+        self._shows_loaded = 0
+        client = self._client
+        section_key = self._current_section_key
+        section_type = self._current_section_type
+        sort = self._shows_sort
         self._executor.submit(
             self._worker_load_section, client, section_key, section_type,
             sort, genre_key
@@ -858,7 +934,7 @@ class PlexLibrary(QObject):
             self._moviesReady.emit(movies, total)
         elif section_type == "show":
             shows = [parse_show(item) for item in items]
-            self._showsReady.emit(shows)
+            self._showsReady.emit(shows, total)
 
     def _worker_load_more_movies(
         self,
@@ -879,6 +955,26 @@ class PlexLibrary(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load more movies: %s", exc)
             self._loading_more = False
+
+    def _worker_load_more_shows(
+        self,
+        client: PlexClient,
+        section_key: str,
+        start: int,
+        sort: str = "",
+        genre: str = "",
+    ) -> None:
+        """Worker: load the next page of shows."""
+        try:
+            items, total = client.get_library_items(
+                section_key, start, _PAGE_SIZE, sort=sort, genre=genre,
+                content_rating=self._content_rating_filter,
+            )
+            shows = [parse_show(item) for item in items]
+            self._showsReady.emit(shows, total)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PlexLibrary: failed to load more shows: %s", exc)
+            self._shows_loading_more = False
 
     def _worker_fetch_poster(
         self,
@@ -932,17 +1028,28 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, movie.thumb_path, "movie", row
                     )
 
-    def _on_shows_ready(self, shows: list) -> None:
-        self._shows_model.set_shows(shows)
-        self.showsModelChanged.emit()
+    def _on_shows_ready(self, shows: list, total: int) -> None:
+        self._shows_loading_more = False
+        if self._shows_loaded == 0:
+            # First page — replace model
+            self._shows_model.set_shows(shows)
+            self.showsModelChanged.emit()
+        else:
+            # Subsequent pages — append
+            self._shows_model.append_shows(shows)
 
-        # Kick off poster downloads
+        self._shows_total = total
+        self._shows_loaded += len(shows)
+
+        # Kick off poster downloads for new items
         client = self._client
         if client is not None:
+            start_row = self._shows_loaded - len(shows)
             for i, show in enumerate(shows):
                 if show.thumb_path:
+                    row = start_row + i
                     self._executor.submit(
-                        self._worker_fetch_poster, client, show.thumb_path, "show", i
+                        self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
 
     def _on_on_deck_ready(self, raw_items: list) -> None:

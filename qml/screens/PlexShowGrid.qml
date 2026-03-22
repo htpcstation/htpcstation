@@ -55,6 +55,10 @@ FocusScope {
     readonly property int _cellH: 280
     readonly property int _cellSpacing: 12
 
+    // Approximate number of columns — used for infinite-scroll threshold.
+    // Computed from the grid width divided by cell width.
+    readonly property int _columns: Math.max(1, Math.floor(showGrid.width / (root.vpx(160) + root.vpx(12))))
+
     // ── Header bar ───────────────────────────────────────────────────────────
     Rectangle {
         id: headerBar
@@ -146,6 +150,14 @@ FocusScope {
 
         // Smooth highlight movement
         highlightMoveDuration: Theme.animDurationFast
+
+        // ── Infinite scroll ──────────────────────────────────────────────────
+        onCurrentIndexChanged: {
+            var threshold = showGrid.count - showGridView._columns * 2
+            if (showGrid.count > 0 && showGrid.currentIndex >= threshold) {
+                plex.loadMoreShows()
+            }
+        }
 
         Keys.onPressed: (event) => {
             if (keys.isContext2(event)) {
@@ -675,7 +687,7 @@ FocusScope {
                     var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
                     showGridView._currentSort = newSort
                     showGridView._loading = true
-                    plex.sortMovies(newSort)
+                    plex.sortShows(newSort)
                 } else {
                     // Apply genre filter
                     if (sortFilterOverlay._genreIndex === 0) {
@@ -683,14 +695,14 @@ FocusScope {
                         showGridView._currentGenreKey = ""
                         showGridView._currentGenreTitle = ""
                         showGridView._loading = true
-                        plex.filterByGenre("")
+                        plex.filterShowsByGenre("")
                     } else {
                         var gi = sortFilterOverlay._genreIndex - 1
                         var genre = sortFilterOverlay._genres[gi]
                         showGridView._currentGenreKey = genre.key
                         showGridView._currentGenreTitle = genre.title
                         showGridView._loading = true
-                        plex.filterByGenre(genre.key)
+                        plex.filterShowsByGenre(genre.key)
                     }
                 }
             }
