@@ -32,7 +32,7 @@ FocusScope {
         { type: "button",  label: "System Cores...",   action: "systemCores" },
         { type: "button",  label: "Rescan Library",    action: "rescan" },
         { type: "header",  label: "Plex" },
-        { type: "text",    label: "Token",             settingKey: "plexToken", masked: true },
+        { type: "button",  label: "Sign in with Plex", action: "plexSignIn" },
         { type: "button",  label: "Test Connection",   action: "testPlex" },
         { type: "select",  label: "Server",            settingKey: "plexServer" },
         { type: "select",  label: "User",              settingKey: "plexUser" },
@@ -65,7 +65,6 @@ FocusScope {
         if (key === "romDirectory")       return settings.romDirectory
         if (key === "retroarchCommand")   return settings.retroarchCommand
         if (key === "coresDirectory")     return settings.coresDirectory
-        if (key === "plexToken")          return settings.plexToken
         if (key === "plexServer") {
             if (!plex) return "Not selected"
             var servers = plex.getServerList()
@@ -94,7 +93,6 @@ FocusScope {
         if (key === "romDirectory")       settings.setRomDirectory(value)
         else if (key === "retroarchCommand")   settings.setRetroarchCommand(value)
         else if (key === "coresDirectory")     settings.setCoresDirectory(value)
-        else if (key === "plexToken")          settings.setPlexToken(value)
         else if (key === "plexServer") {
             if (plex) plex.selectServer(value)
             settings.setPlexServerId(value)
@@ -334,6 +332,9 @@ FocusScope {
                                 var ok = settings.testPlexConnection()
                                 actionButton.statusText = ok ? "Connected!" : "Failed"
                             })
+                        } else if (action === "plexSignIn") {
+                            actionButton.statusText = "Opening browser..."
+                            settings.signInWithPlex()
                         } else if (action === "systemCores") {
                             settingsScreen._showToast("Coming soon")
                         }

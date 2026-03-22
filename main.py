@@ -58,7 +58,7 @@ def main() -> None:
     engine.rootContext().setContextProperty("plex", plex_library)
 
     # Settings manager — exposed to QML as `settings`
-    settings_manager = SettingsManager(config, library, plex_library)
+    settings_manager = SettingsManager(config, library, plex_library, browser_launcher)
     engine.rootContext().setContextProperty("settings", settings_manager)
 
     # Allow QML files to import siblings and the Theme singleton via `import "."`

@@ -90,6 +90,8 @@ FocusScope {
                 movieGrid.forceActiveFocus()
             } else if (selectedLibraryType === "show") {
                 showGrid.forceActiveFocus()
+            } else if (selectedLibraryType === "ondeck") {
+                onDeckGrid.forceActiveFocus()
             } else {
                 contentPlaceholder.forceActiveFocus()
             }
@@ -126,12 +128,12 @@ FocusScope {
         // completes and the server is unreachable.
         Text {
             anchors.centerIn: parent
-            text: "Plex server unavailable" + (plex.serverUrl ? " (" + plex.serverUrl + ")" : "")
+            text: "Plex server unavailable" + (plex && plex.serverUrl ? " (" + plex.serverUrl + ")" : "")
             color: Theme.colorPrimary
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
             visible: watchScreen._availabilityKnown
-                     && !plex.available
+                     && plex && !plex.available
                      && watchScreen._libraryEntries.length === 0
         }
 
@@ -413,7 +415,25 @@ FocusScope {
         }
     }
 
-    // ── Content placeholder (non-movie, non-show libraries) ───────────────────
+    // ── On-deck grid (Continue Watching) ─────────────────────────────────────
+    PlexOnDeckGrid {
+        id: onDeckGrid
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "ondeck"
+        focus: false
+
+        onItemSelected: (ratingKey) => {
+            plex.launchContent(ratingKey)
+        }
+
+        onBack: {
+            watchScreen.currentView = "libraries"
+        }
+    }
+
+    // ── Content placeholder (non-movie, non-show, non-ondeck libraries) ───────
     FocusScope {
         id: contentPlaceholder
 
@@ -421,6 +441,7 @@ FocusScope {
         visible: watchScreen.currentView === "content"
                  && watchScreen.selectedLibraryType !== "movie"
                  && watchScreen.selectedLibraryType !== "show"
+                 && watchScreen.selectedLibraryType !== "ondeck"
         focus: false
 
         Keys.onPressed: (event) => {

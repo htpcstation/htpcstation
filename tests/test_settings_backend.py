@@ -24,6 +24,32 @@ import pytest
 
 from backend.config import Config
 
+# ---------------------------------------------------------------------------
+# Helpers shared across SettingsManager tests
+# ---------------------------------------------------------------------------
+
+
+def _make_settings_manager(tmp_path: Path, plex_token: str = ""):
+    """Create a SettingsManager with a real Config and mock dependencies."""
+    from backend.settings_manager import SettingsManager
+
+    config_file = tmp_path / "config.json"
+    data = {}
+    if plex_token:
+        data["plex"] = {"token": plex_token}
+    config_file.write_text(json.dumps(data), encoding="utf-8")
+
+    with patch("backend.config.CONFIG_FILE", config_file), \
+         patch("backend.config.CONFIG_DIR", tmp_path):
+        config = Config()
+
+    config.save = MagicMock()
+    library = MagicMock()
+    plex_library = MagicMock()
+    browser_launcher = MagicMock()
+    manager = SettingsManager(config, library, plex_library, browser_launcher)
+    return manager, config, browser_launcher
+
 
 # ---------------------------------------------------------------------------
 # Config — video snap defaults
@@ -649,3 +675,136 @@ class TestGameLibraryRescan:
         # After rescan, systems model should have more entries (collections + real)
         new_count = library.systemsModel.rowCount()
         assert new_count > initial_count
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — signInWithPlex
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerSignInWithPlex:
+    def test_sign_in_calls_create_pin(self, tmp_path: Path) -> None:
+        """signInWithPlex calls PlexAccount.create_pin."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=None) as mock_create_pin:
+            manager.signInWithPlex()
+
+        mock_create_pin.assert_called_once()
+
+    def test_sign_in_opens_browser_with_oauth_url(self, tmp_path: Path) -> None:
+        """signInWithPlex opens the OAuth URL in the browser."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(42, "mycode")):
+            with patch("backend.settings_manager.QTimer"):
+                manager.signInWithPlex()
+
+        browser_launcher.launch.assert_called_once()
+        url_arg = browser_launcher.launch.call_args[0][0]
+        assert "mycode" in url_arg
+        assert "app.plex.tv/auth" in url_arg
+        assert "htpcstation" in url_arg
+
+    def test_sign_in_does_nothing_when_create_pin_fails(self, tmp_path: Path) -> None:
+        """signInWithPlex returns early if create_pin returns None."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin", return_value=None):
+            manager.signInWithPlex()
+
+        browser_launcher.launch.assert_not_called()
+
+    def test_sign_in_starts_polling_timer(self, tmp_path: Path) -> None:
+        """signInWithPlex creates a QTimer for polling."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(99, "code99")):
+            manager.signInWithPlex()
+
+        # Timer should be created after signInWithPlex
+        assert manager._oauth_timer is not None
+        manager._oauth_timer.stop()  # clean up
+
+    def test_poll_stores_token_and_emits_signal_on_success(self, tmp_path: Path) -> None:
+        """_poll_oauth_pin stores the token and emits plexTokenChanged when token arrives."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        emitted = []
+        manager.plexTokenChanged.connect(lambda: emitted.append(True))
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(1, "code1")):
+            manager.signInWithPlex()
+
+        # Simulate a successful poll
+        with patch("backend.settings_manager.PlexAccount.check_pin",
+                   return_value="received_token"):
+            manager._poll_oauth_pin()
+
+        assert config.plex_token == "received_token"
+        assert len(emitted) == 1
+        # Timer should be stopped after success
+        assert manager._oauth_timer is None
+
+    def test_poll_stops_after_max_polls(self, tmp_path: Path) -> None:
+        """_poll_oauth_pin gives up after _OAUTH_MAX_POLLS polls."""
+        from backend.settings_manager import _OAUTH_MAX_POLLS
+
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(1, "code1")):
+            manager.signInWithPlex()
+
+        # Simulate polls returning None (not yet authenticated)
+        with patch("backend.settings_manager.PlexAccount.check_pin", return_value=None):
+            # Exhaust all polls
+            for _ in range(_OAUTH_MAX_POLLS + 1):
+                manager._poll_oauth_pin()
+
+        # Timer should be stopped after timeout
+        assert manager._oauth_timer is None
+
+    def test_poll_does_not_store_token_when_none(self, tmp_path: Path) -> None:
+        """_poll_oauth_pin does not store a token when check_pin returns None."""
+        manager, config, browser_launcher = _make_settings_manager(tmp_path)
+
+        emitted = []
+        manager.plexTokenChanged.connect(lambda: emitted.append(True))
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(1, "code1")):
+            manager.signInWithPlex()
+
+        with patch("backend.settings_manager.PlexAccount.check_pin", return_value=None):
+            manager._poll_oauth_pin()
+
+        assert config.plex_token is None
+        assert len(emitted) == 0
+        # Timer should still be running
+        assert manager._oauth_timer is not None
+        manager._oauth_timer.stop()  # clean up
+
+    def test_sign_in_without_browser_launcher_does_not_crash(self, tmp_path: Path) -> None:
+        """signInWithPlex works even if browser_launcher is None."""
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+        config.save = MagicMock()
+
+        manager = SettingsManager(config, MagicMock(), MagicMock(), browser_launcher=None)
+
+        with patch("backend.settings_manager.PlexAccount.create_pin",
+                   return_value=(1, "code1")):
+            manager.signInWithPlex()  # should not raise
+
+        assert manager._oauth_timer is not None
+        manager._oauth_timer.stop()  # clean up

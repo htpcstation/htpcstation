@@ -293,7 +293,71 @@ class TestGetHomeUsers:
             "restricted": False,
             "protected": True,
             "thumb": "https://plex.tv/users/42/avatar",
+            "restrictionProfile": "",
         }
+
+    def test_restriction_profile_extracted_when_present(self) -> None:
+        """restrictionProfile attribute is extracted from the XML User element."""
+        account, mock_session = _make_account()
+
+        xml_text = (
+            '<MediaContainer>'
+            '<User id="2" title="Kids" username="" admin="0" restricted="1"'
+            ' protected="0" thumb="" restrictionProfile="older_kid"/>'
+            '</MediaContainer>'
+        )
+        mock_response = MagicMock()
+        mock_response.text = xml_text
+        mock_session.get.return_value = mock_response
+
+        result = account.get_home_users()
+
+        assert len(result) == 1
+        assert result[0]["restrictionProfile"] == "older_kid"
+
+    def test_restriction_profile_defaults_to_empty_string_when_absent(self) -> None:
+        """restrictionProfile defaults to empty string when not in XML attributes."""
+        account, mock_session = _make_account()
+
+        xml_text = (
+            '<MediaContainer>'
+            '<User id="1" title="Admin" username="admin@example.com" admin="1"'
+            ' restricted="0" protected="0" thumb=""/>'
+            '</MediaContainer>'
+        )
+        mock_response = MagicMock()
+        mock_response.text = xml_text
+        mock_session.get.return_value = mock_response
+
+        result = account.get_home_users()
+
+        assert len(result) == 1
+        assert result[0]["restrictionProfile"] == ""
+
+    def test_all_restriction_profile_values_extracted(self) -> None:
+        """All three standard restriction profiles are extracted correctly."""
+        account, mock_session = _make_account()
+
+        xml_text = (
+            '<MediaContainer>'
+            '<User id="1" title="Little Kid" username="" admin="0" restricted="1"'
+            ' protected="0" thumb="" restrictionProfile="little_kid"/>'
+            '<User id="2" title="Older Kid" username="" admin="0" restricted="1"'
+            ' protected="0" thumb="" restrictionProfile="older_kid"/>'
+            '<User id="3" title="Teen" username="" admin="0" restricted="1"'
+            ' protected="0" thumb="" restrictionProfile="teen"/>'
+            '</MediaContainer>'
+        )
+        mock_response = MagicMock()
+        mock_response.text = xml_text
+        mock_session.get.return_value = mock_response
+
+        result = account.get_home_users()
+
+        assert len(result) == 3
+        assert result[0]["restrictionProfile"] == "little_kid"
+        assert result[1]["restrictionProfile"] == "older_kid"
+        assert result[2]["restrictionProfile"] == "teen"
 
 
 # ---------------------------------------------------------------------------
@@ -430,3 +494,177 @@ class TestTestConnection:
         result = account.test_connection()
 
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# create_pin (static method)
+# ---------------------------------------------------------------------------
+
+
+class TestCreatePin:
+    def test_returns_pin_id_and_code_on_success(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 12345, "code": "abc123xyz"}
+
+        with patch("backend.plex_account.requests.post", return_value=mock_response) as mock_post:
+            result = PlexAccount.create_pin()
+
+        assert result == (12345, "abc123xyz")
+
+    def test_calls_correct_url_with_strong_param(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 1, "code": "code1"}
+
+        with patch("backend.plex_account.requests.post", return_value=mock_response) as mock_post:
+            PlexAccount.create_pin()
+
+        mock_post.assert_called_once()
+        call_url = mock_post.call_args[0][0]
+        assert call_url == "https://plex.tv/api/v2/pins"
+        call_params = mock_post.call_args[1].get("params", {})
+        assert call_params.get("strong") == "true"
+
+    def test_sends_correct_headers_without_token(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 1, "code": "code1"}
+
+        with patch("backend.plex_account.requests.post", return_value=mock_response) as mock_post:
+            PlexAccount.create_pin()
+
+        call_headers = mock_post.call_args[1].get("headers", {})
+        assert call_headers["X-Plex-Client-Identifier"] == "htpcstation"
+        assert call_headers["X-Plex-Product"] == "HTPC Station"
+        assert call_headers["Accept"] == "application/json"
+        assert "X-Plex-Token" not in call_headers
+
+    def test_returns_none_on_connection_error(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        with patch("backend.plex_account.requests.post",
+                   side_effect=req.exceptions.ConnectionError("refused")):
+            result = PlexAccount.create_pin()
+
+        assert result is None
+
+    def test_returns_none_on_timeout(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        with patch("backend.plex_account.requests.post",
+                   side_effect=req.exceptions.Timeout()):
+            result = PlexAccount.create_pin()
+
+        assert result is None
+
+    def test_returns_none_on_http_error(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = req.exceptions.HTTPError("400")
+
+        with patch("backend.plex_account.requests.post", return_value=mock_response):
+            result = PlexAccount.create_pin()
+
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# check_pin (static method)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckPin:
+    def test_returns_auth_token_when_present(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 12345, "authToken": "user_token_abc"}
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response):
+            result = PlexAccount.check_pin(12345)
+
+        assert result == "user_token_abc"
+
+    def test_returns_none_when_auth_token_is_null(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 12345, "authToken": None}
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response):
+            result = PlexAccount.check_pin(12345)
+
+        assert result is None
+
+    def test_returns_none_when_auth_token_is_empty_string(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"id": 12345, "authToken": ""}
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response):
+            result = PlexAccount.check_pin(12345)
+
+        assert result is None
+
+    def test_calls_correct_url(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"authToken": "tok"}
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response) as mock_get:
+            PlexAccount.check_pin(99)
+
+        mock_get.assert_called_once()
+        call_url = mock_get.call_args[0][0]
+        assert call_url == "https://plex.tv/api/v2/pins/99"
+
+    def test_sends_correct_headers_without_token(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"authToken": "tok"}
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response) as mock_get:
+            PlexAccount.check_pin(1)
+
+        call_headers = mock_get.call_args[1].get("headers", {})
+        assert call_headers["X-Plex-Client-Identifier"] == "htpcstation"
+        assert call_headers["X-Plex-Product"] == "HTPC Station"
+        assert call_headers["Accept"] == "application/json"
+        assert "X-Plex-Token" not in call_headers
+
+    def test_returns_none_on_connection_error(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        with patch("backend.plex_account.requests.get",
+                   side_effect=req.exceptions.ConnectionError("refused")):
+            result = PlexAccount.check_pin(1)
+
+        assert result is None
+
+    def test_returns_none_on_timeout(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        with patch("backend.plex_account.requests.get",
+                   side_effect=req.exceptions.Timeout()):
+            result = PlexAccount.check_pin(1)
+
+        assert result is None
+
+    def test_returns_none_on_http_error(self) -> None:
+        from backend.plex_account import PlexAccount
+
+        mock_response = MagicMock()
+        mock_response.raise_for_status.side_effect = req.exceptions.HTTPError("404")
+
+        with patch("backend.plex_account.requests.get", return_value=mock_response):
+            result = PlexAccount.check_pin(1)
+
+        assert result is None

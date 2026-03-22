@@ -14,6 +14,7 @@ from typing import Optional
 from PySide6.QtCore import (
     QObject,
     Property,
+    QTimer,
     Signal,
     Slot,
 )
@@ -25,13 +26,26 @@ from backend.plex_account import PlexAccount
 logger = logging.getLogger(__name__)
 
 
+_OAUTH_POLL_INTERVAL_MS = 2000   # 2 seconds between polls
+_OAUTH_MAX_POLLS = 60            # give up after 60 × 2 s = 120 s
+
+_OAUTH_URL_TEMPLATE = (
+    "https://app.plex.tv/auth#?clientID=htpcstation"
+    "&code={code}"
+    "&context[device][product]=HTPC%20Station"
+    "&context[device][device]=PC"
+    "&context[device][deviceName]=HTPC%20Station"
+)
+
+
 class SettingsManager(QObject):
     """Exposes application settings to QML.
 
     Constructor arguments:
-        config       — the application :class:`Config` instance
-        library      — the :class:`GameLibrary` instance (for rescan)
-        plex_library — the :class:`PlexLibrary` instance (for connection test)
+        config           — the application :class:`Config` instance
+        library          — the :class:`GameLibrary` instance (for rescan)
+        plex_library     — the :class:`PlexLibrary` instance (for connection test)
+        browser_launcher — the :class:`BrowserLauncher` instance (for OAuth)
     """
 
     # One signal per property so Q_PROPERTY NOTIFY works correctly.
@@ -51,12 +65,17 @@ class SettingsManager(QObject):
         config: Config,
         library: GameLibrary,
         plex_library: object,
+        browser_launcher: object = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._config = config
         self._library = library
         self._plex_library = plex_library
+        self._browser_launcher = browser_launcher
+        self._oauth_timer: Optional[QTimer] = None
+        self._oauth_pin_id: Optional[int] = None
+        self._oauth_poll_count: int = 0
 
     # ------------------------------------------------------------------
     # Property getters
@@ -288,3 +307,62 @@ class SettingsManager(QObject):
         """Trigger a library rescan."""
         logger.info("rescanLibrary: rescanning ROM directory")
         self._library.rescan()
+
+    @Slot()
+    def signInWithPlex(self) -> None:
+        """Start the Plex PIN-based OAuth flow.
+
+        1. Creates a PIN via the plex.tv API.
+        2. Opens the OAuth URL in the browser.
+        3. Polls every 2 seconds (up to 120 s) for the auth token.
+        4. On success, stores the token and emits ``plexTokenChanged``.
+        """
+        result = PlexAccount.create_pin()
+        if result is None:
+            logger.error("signInWithPlex: failed to create PIN")
+            return
+
+        pin_id, code = result
+        oauth_url = _OAUTH_URL_TEMPLATE.format(code=code)
+        logger.info("signInWithPlex: opening OAuth URL (pin_id=%s)", pin_id)
+
+        if self._browser_launcher is not None:
+            self._browser_launcher.launch(oauth_url)
+        else:
+            logger.warning("signInWithPlex: no browser_launcher — cannot open OAuth URL")
+
+        # Stop any previous polling timer before starting a new one.
+        if self._oauth_timer is not None:
+            self._oauth_timer.stop()
+
+        self._oauth_pin_id = pin_id
+        self._oauth_poll_count = 0
+
+        self._oauth_timer = QTimer(self)
+        self._oauth_timer.setInterval(_OAUTH_POLL_INTERVAL_MS)
+        self._oauth_timer.timeout.connect(self._poll_oauth_pin)
+        self._oauth_timer.start()
+
+    def _poll_oauth_pin(self) -> None:
+        """Timer callback — check whether the user has completed OAuth login."""
+        self._oauth_poll_count += 1
+
+        if self._oauth_poll_count > _OAUTH_MAX_POLLS:
+            logger.warning("signInWithPlex: timed out waiting for OAuth token")
+            self._stop_oauth_timer()
+            return
+
+        token = PlexAccount.check_pin(self._oauth_pin_id)
+        if token:
+            logger.info("signInWithPlex: received auth token")
+            self._config.set_plex_token(token)
+            self.plexTokenChanged.emit()
+            self._stop_oauth_timer()
+
+    def _stop_oauth_timer(self) -> None:
+        """Stop and discard the OAuth polling timer."""
+        if self._oauth_timer is not None:
+            self._oauth_timer.stop()
+            self._oauth_timer = None
+        self._oauth_pin_id = None
+        self._oauth_poll_count = 0

@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 _POSTER_CACHE_DIR = CONFIG_DIR / "poster_cache"
 _PAGE_SIZE = 50
 
+# Maps Plex restriction profile names to comma-separated allowed content ratings.
+# Used to filter library items server-side for managed/restricted users.
+_RESTRICTION_RATINGS: dict[str, str] = {
+    "little_kid": "G,TV-Y,TV-Y7,TV-G,NR",
+    "older_kid": "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR",
+    "teen": "G,PG,PG-13,TV-Y,TV-Y7,TV-G,TV-PG,TV-14,NR",
+}
+
 
 # ---------------------------------------------------------------------------
 # PlexLibraryListModel
@@ -383,6 +391,8 @@ class PlexLibrary(QObject):
         self._machine_identifier: str = ""
         self._current_sort: str = ""   # Plex API sort param, e.g. 'titleSort:asc'
         self._current_genre: str = ""  # genre key (integer as string)
+        self._content_rating_filter: str = ""  # comma-separated allowed ratings for restricted users
+        self._cached_content_rating_filter: str = ""  # cached alongside user token
 
         # Build models
         self._libraries_model = PlexLibraryListModel(self)
@@ -812,11 +822,18 @@ class PlexLibrary(QObject):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("PlexLibrary: failed to fetch libraries: %s", exc)
 
-            try:
-                on_deck_raw = client.get_on_deck()
-                self._onDeckReady.emit(on_deck_raw)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("PlexLibrary: failed to fetch on-deck: %s", exc)
+            # On-deck (Continue Watching) is only available for the admin user.
+            # Managed/restricted users' tokens get 401 from the server, so we
+            # can't fetch their on-deck data.  Skip for restricted users.
+            if not self._content_rating_filter:
+                try:
+                    on_deck_raw = client.get_on_deck()
+                    self._onDeckReady.emit(on_deck_raw)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("PlexLibrary: failed to fetch on-deck: %s", exc)
+            else:
+                # Clear any stale on-deck data from the previous user
+                self._onDeckReady.emit([])
 
     def _worker_load_section(
         self,
@@ -829,7 +846,8 @@ class PlexLibrary(QObject):
         """Worker: load all items for a library section."""
         try:
             items, total = client.get_library_items(
-                section_key, 0, _PAGE_SIZE, sort=sort, genre=genre
+                section_key, 0, _PAGE_SIZE, sort=sort, genre=genre,
+                content_rating=self._content_rating_filter,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load section %s: %s", section_key, exc)
@@ -853,7 +871,8 @@ class PlexLibrary(QObject):
         """Worker: load the next page of movies."""
         try:
             items, total = client.get_library_items(
-                section_key, start, _PAGE_SIZE, sort=sort, genre=genre
+                section_key, start, _PAGE_SIZE, sort=sort, genre=genre,
+                content_rating=self._content_rating_filter,
             )
             movies = [parse_movie(item) for item in items]
             self._moviesReady.emit(movies, total)
@@ -1051,8 +1070,9 @@ class PlexLibrary(QObject):
         user_id = self._config.plex_user_id
         if user_id:
             if self._cached_user_id == user_id and self._cached_user_token:
-                # Reuse the cached token — no need to call switch_user again
+                # Reuse the cached token and restriction filter
                 user_token = self._cached_user_token
+                self._content_rating_filter = self._cached_content_rating_filter
                 logger.debug("PlexLibrary: reusing cached token for user %s", user_id)
             else:
                 switched_token = self._account.switch_user(user_id)
@@ -1060,12 +1080,15 @@ class PlexLibrary(QObject):
                     user_token = switched_token
                     self._cached_user_id = user_id
                     self._cached_user_token = switched_token
-                    # Look up and cache the user's display title for the launch URL
+                    # Look up and cache the user's display title and restriction profile
                     home_users = self._account.get_home_users()
                     matched = next(
                         (u for u in home_users if u.get("id") == user_id), None
                     )
                     self._cached_user_title = matched.get("title", "") if matched else ""
+                    restriction = matched.get("restrictionProfile", "") if matched else ""
+                    self._content_rating_filter = _RESTRICTION_RATINGS.get(restriction, "")
+                    self._cached_content_rating_filter = self._content_rating_filter
                     logger.info("PlexLibrary: switched to user %s", user_id)
                 else:
                     logger.warning(
@@ -1158,10 +1181,13 @@ class PlexLibrary(QObject):
         pick up the new user.
         """
         self._config.set_plex_user_id(user_id)
-        # Clear the cached user token and title so the next _setup_client() will re-switch
+        # Clear the cached user token, title, and content rating filter
+        # so the next _setup_client() will re-switch and re-resolve the restriction profile
         self._cached_user_id = None
         self._cached_user_token = ""
         self._cached_user_title = ""
+        self._cached_content_rating_filter = ""
+        self._content_rating_filter = ""
         # Invalidate the current client
         self._client = None
         logger.info("PlexLibrary: user selection changed to %s", user_id)

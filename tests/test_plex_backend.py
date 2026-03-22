@@ -2859,3 +2859,304 @@ class TestSelectServerAndUser:
         assert lib._client is None
         assert lib._cached_user_id is None
         assert lib._cached_user_token == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexClient.get_library_items — content_rating parameter (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestPlexClientContentRatingParam:
+    """get_library_items passes contentRating query param when content_rating is set."""
+
+    def _make_client_with_session(self, response_data: dict):
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = response_data
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            client._session = mock_session
+        return client, mock_session
+
+    def test_content_rating_param_sent_when_provided(self) -> None:
+        """contentRating query param is included when content_rating is non-empty."""
+        client, mock_session = self._make_client_with_session(
+            {"MediaContainer": {"Metadata": [], "totalSize": 0}}
+        )
+        client.get_library_items("4", content_rating="G,PG,TV-Y,TV-G,NR")
+
+        call_kwargs = mock_session.get.call_args[1]
+        params = call_kwargs.get("params", {})
+        assert params.get("contentRating") == "G,PG,TV-Y,TV-G,NR"
+
+    def test_content_rating_not_sent_when_empty(self) -> None:
+        """contentRating query param is omitted when content_rating is empty string."""
+        client, mock_session = self._make_client_with_session(
+            {"MediaContainer": {"Metadata": [], "totalSize": 0}}
+        )
+        client.get_library_items("4", content_rating="")
+
+        call_kwargs = mock_session.get.call_args[1]
+        params = call_kwargs.get("params", {})
+        assert "contentRating" not in params
+
+    def test_content_rating_not_sent_by_default(self) -> None:
+        """contentRating is not sent when content_rating parameter is omitted."""
+        client, mock_session = self._make_client_with_session(
+            {"MediaContainer": {"Metadata": [], "totalSize": 0}}
+        )
+        client.get_library_items("4")
+
+        call_kwargs = mock_session.get.call_args[1]
+        params = call_kwargs.get("params", {})
+        assert "contentRating" not in params
+
+    def test_content_rating_combined_with_sort_and_genre(self) -> None:
+        """content_rating works alongside sort and genre params."""
+        client, mock_session = self._make_client_with_session(
+            {"MediaContainer": {"Metadata": [], "totalSize": 0}}
+        )
+        client.get_library_items(
+            "4", sort="titleSort:asc", genre="7",
+            content_rating="G,PG,TV-Y,TV-G,NR"
+        )
+
+        call_kwargs = mock_session.get.call_args[1]
+        params = call_kwargs.get("params", {})
+        assert params.get("sort") == "titleSort:asc"
+        assert params.get("genre") == "7"
+        assert params.get("contentRating") == "G,PG,TV-Y,TV-G,NR"
+
+
+# ---------------------------------------------------------------------------
+# _RESTRICTION_RATINGS mapping (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestRestrictionRatingsMapping:
+    """_RESTRICTION_RATINGS maps profile names to correct comma-separated ratings."""
+
+    def test_little_kid_profile_ratings(self) -> None:
+        from backend.plex_library import _RESTRICTION_RATINGS
+
+        ratings = _RESTRICTION_RATINGS["little_kid"]
+        assert "G" in ratings.split(",")
+        assert "TV-Y" in ratings.split(",")
+        assert "TV-Y7" in ratings.split(",")
+        assert "TV-G" in ratings.split(",")
+        assert "NR" in ratings.split(",")
+        # Should NOT include PG or higher
+        assert "PG" not in ratings.split(",")
+        assert "PG-13" not in ratings.split(",")
+
+    def test_older_kid_profile_ratings(self) -> None:
+        from backend.plex_library import _RESTRICTION_RATINGS
+
+        ratings = _RESTRICTION_RATINGS["older_kid"]
+        assert "G" in ratings.split(",")
+        assert "PG" in ratings.split(",")
+        assert "TV-Y" in ratings.split(",")
+        assert "TV-Y7" in ratings.split(",")
+        assert "TV-G" in ratings.split(",")
+        assert "TV-PG" in ratings.split(",")
+        assert "NR" in ratings.split(",")
+        # Should NOT include PG-13 or higher
+        assert "PG-13" not in ratings.split(",")
+        assert "TV-14" not in ratings.split(",")
+
+    def test_teen_profile_ratings(self) -> None:
+        from backend.plex_library import _RESTRICTION_RATINGS
+
+        ratings = _RESTRICTION_RATINGS["teen"]
+        assert "G" in ratings.split(",")
+        assert "PG" in ratings.split(",")
+        assert "PG-13" in ratings.split(",")
+        assert "TV-Y" in ratings.split(",")
+        assert "TV-Y7" in ratings.split(",")
+        assert "TV-G" in ratings.split(",")
+        assert "TV-PG" in ratings.split(",")
+        assert "TV-14" in ratings.split(",")
+        assert "NR" in ratings.split(",")
+        # Should NOT include R or TV-MA
+        assert "R" not in ratings.split(",")
+        assert "TV-MA" not in ratings.split(",")
+
+    def test_unknown_profile_returns_empty_string(self) -> None:
+        """An unrecognized restriction profile results in no filter (empty string)."""
+        from backend.plex_library import _RESTRICTION_RATINGS
+
+        assert _RESTRICTION_RATINGS.get("unknown_profile", "") == ""
+        assert _RESTRICTION_RATINGS.get("", "") == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._setup_client — restriction profile stored (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupClientRestrictionProfile:
+    """_setup_client stores the content_rating_filter from the user's restrictionProfile."""
+
+    def _make_lib_with_restricted_user(self, restriction_profile: str):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = "user-specific-token"
+        mock_account.get_home_users.return_value = [
+            {
+                "id": 42,
+                "title": "Kids",
+                "admin": False,
+                "restricted": True,
+                "protected": False,
+                "thumb": "",
+                "restrictionProfile": restriction_profile,
+            }
+        ]
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+        return lib
+
+    def test_older_kid_profile_sets_content_rating_filter(self) -> None:
+        """older_kid restriction profile sets the correct content rating filter."""
+        lib = self._make_lib_with_restricted_user("older_kid")
+
+        assert lib._content_rating_filter == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+    def test_little_kid_profile_sets_content_rating_filter(self) -> None:
+        """little_kid restriction profile sets the correct content rating filter."""
+        lib = self._make_lib_with_restricted_user("little_kid")
+
+        assert lib._content_rating_filter == "G,TV-Y,TV-Y7,TV-G,NR"
+
+    def test_teen_profile_sets_content_rating_filter(self) -> None:
+        """teen restriction profile sets the correct content rating filter."""
+        lib = self._make_lib_with_restricted_user("teen")
+
+        assert lib._content_rating_filter == "G,PG,PG-13,TV-Y,TV-Y7,TV-G,TV-PG,TV-14,NR"
+
+    def test_no_restriction_profile_leaves_filter_empty(self) -> None:
+        """Empty restriction profile (admin/unrestricted user) leaves filter empty."""
+        lib = self._make_lib_with_restricted_user("")
+
+        assert lib._content_rating_filter == ""
+
+    def test_unknown_restriction_profile_leaves_filter_empty(self) -> None:
+        """Unrecognized restriction profile leaves filter empty (no filter applied)."""
+        lib = self._make_lib_with_restricted_user("custom_profile")
+
+        assert lib._content_rating_filter == ""
+
+    def test_content_rating_filter_initialized_to_empty(self) -> None:
+        """_content_rating_filter is initialized to empty string in __init__."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        assert lib._content_rating_filter == ""
+
+    def test_select_user_clears_content_rating_filter(self) -> None:
+        """selectUser() clears _content_rating_filter so next setup re-resolves it."""
+        lib = self._make_lib_with_restricted_user("older_kid")
+
+        # Filter should be set after init with restricted user
+        assert lib._content_rating_filter != ""
+
+        # selectUser clears the filter
+        lib.selectUser(99)
+
+        assert lib._content_rating_filter == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._worker_load_section — passes content_rating filter (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerLoadSectionContentRating:
+    """_worker_load_section passes _content_rating_filter to get_library_items."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_content_rating_filter_passed_to_get_library_items(self) -> None:
+        """_worker_load_section passes content_rating_filter to client.get_library_items."""
+        lib = self._make_lib()
+        lib._content_rating_filter = "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = ([], 0)
+
+        lib._worker_load_section(mock_client, "4", "movie")
+
+        mock_client.get_library_items.assert_called_once()
+        call_kwargs = mock_client.get_library_items.call_args[1]
+        assert call_kwargs.get("content_rating") == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+    def test_empty_content_rating_filter_passed_when_no_restriction(self) -> None:
+        """When no restriction is set, empty string is passed as content_rating."""
+        lib = self._make_lib()
+        lib._content_rating_filter = ""
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = ([], 0)
+
+        lib._worker_load_section(mock_client, "4", "movie")
+
+        call_kwargs = mock_client.get_library_items.call_args[1]
+        assert call_kwargs.get("content_rating") == ""
+
+    def test_content_rating_filter_passed_to_load_more_movies(self) -> None:
+        """_worker_load_more_movies passes content_rating_filter to client.get_library_items."""
+        lib = self._make_lib()
+        lib._content_rating_filter = "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = ([], 0)
+
+        lib._worker_load_more_movies(mock_client, "4", 0)
+
+        mock_client.get_library_items.assert_called_once()
+        call_kwargs = mock_client.get_library_items.call_args[1]
+        assert call_kwargs.get("content_rating") == "G,PG,TV-Y,TV-Y7,TV-G,TV-PG,NR"

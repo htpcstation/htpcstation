@@ -67,12 +67,14 @@ class PlexClient:
         size: int = 50,
         sort: str = "",
         genre: str = "",
+        content_rating: str = "",
     ) -> tuple[list[dict], int]:
         """GET /library/sections/<key>/all — paginated.
 
         Returns (items, totalSize).
         Uses X-Plex-Container-Start and X-Plex-Container-Size query params.
-        Optional sort (e.g. 'titleSort:asc') and genre (genre key ID) params.
+        Optional sort (e.g. 'titleSort:asc'), genre (genre key ID), and
+        content_rating (comma-separated MPAA/TV ratings) params.
         """
         params: dict = {
             "X-Plex-Container-Start": start,
@@ -82,6 +84,8 @@ class PlexClient:
             params["sort"] = sort
         if genre:
             params["genre"] = genre
+        if content_rating:
+            params["contentRating"] = content_rating
         data = self._get(f"/library/sections/{section_key}/all", params=params)
         if data is None:
             return [], 0

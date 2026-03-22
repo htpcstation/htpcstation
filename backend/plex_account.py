@@ -79,6 +79,7 @@ class PlexAccount:
                     "restricted": a.get("restricted", "0") == "1",
                     "protected": a.get("protected", "0") == "1",
                     "thumb": a.get("thumb", ""),
+                    "restrictionProfile": a.get("restrictionProfile", ""),
                 }
             )
         return users
@@ -116,6 +117,70 @@ class PlexAccount:
         """
         data = self._get("/user")
         return data is not None
+
+    # ------------------------------------------------------------------
+    # OAuth / PIN methods (no token required)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def create_pin() -> tuple[int, str] | None:
+        """POST /pins — create a new PIN for OAuth login.
+
+        Does not require an auth token.  Returns ``(pin_id, code)`` on
+        success, or ``None`` on error.
+        """
+        url = f"{_BASE_URL}/pins"
+        headers = {
+            "X-Plex-Client-Identifier": "htpcstation",
+            "X-Plex-Product": "HTPC Station",
+            "Accept": "application/json",
+        }
+        try:
+            response = requests.post(
+                url, params={"strong": "true"}, headers=headers, timeout=_TIMEOUT
+            )
+            response.raise_for_status()
+            data = response.json()
+            return (data["id"], data["code"])
+        except requests.exceptions.ConnectionError as exc:
+            logger.warning("PlexAccount.create_pin connection error: %s", exc)
+        except requests.exceptions.Timeout:
+            logger.warning("PlexAccount.create_pin request timed out")
+        except requests.exceptions.HTTPError as exc:
+            logger.warning("PlexAccount.create_pin HTTP error: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PlexAccount.create_pin unexpected error: %s", exc)
+        return None
+
+    @staticmethod
+    def check_pin(pin_id: int) -> str | None:
+        """GET /pins/{pin_id} — check whether the user has completed OAuth login.
+
+        Does not require an auth token.  Returns the ``authToken`` string if
+        the user has authenticated, or ``None`` if not yet authenticated or on
+        error.
+        """
+        url = f"{_BASE_URL}/pins/{pin_id}"
+        headers = {
+            "X-Plex-Client-Identifier": "htpcstation",
+            "X-Plex-Product": "HTPC Station",
+            "Accept": "application/json",
+        }
+        try:
+            response = requests.get(url, headers=headers, timeout=_TIMEOUT)
+            response.raise_for_status()
+            data = response.json()
+            token = data.get("authToken")
+            return token if token else None
+        except requests.exceptions.ConnectionError as exc:
+            logger.warning("PlexAccount.check_pin connection error: %s", exc)
+        except requests.exceptions.Timeout:
+            logger.warning("PlexAccount.check_pin request timed out")
+        except requests.exceptions.HTTPError as exc:
+            logger.warning("PlexAccount.check_pin HTTP error: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("PlexAccount.check_pin unexpected error: %s", exc)
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers

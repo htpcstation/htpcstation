@@ -137,7 +137,7 @@ FocusScope {
             margins: root.vpx(16)
         }
 
-        model: plex.showsModel
+        model: plex ? plex.showsModel : null
         clip: true
         focus: true
 
