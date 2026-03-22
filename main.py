@@ -20,6 +20,7 @@ from backend.launcher import Launcher
 from backend.library import GameLibrary
 from backend.plex_library import PlexLibrary
 from backend.settings_manager import SettingsManager
+from backend.steam_library import SteamLibrary
 
 QML_DIR = Path(__file__).parent / "qml"
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -57,6 +58,10 @@ def main() -> None:
     plex_library = PlexLibrary(config, browser_launcher)
     engine.rootContext().setContextProperty("plex", plex_library)
 
+    # Steam library — exposed to QML as `steam`
+    steam = SteamLibrary()
+    engine.rootContext().setContextProperty("steam", steam)
+
     # Settings manager — exposed to QML as `settings`
     settings_manager = SettingsManager(config, library, plex_library, browser_launcher)
     engine.rootContext().setContextProperty("settings", settings_manager)
@@ -85,6 +90,10 @@ def main() -> None:
     launcher.processFinished.connect(_show_window)
     browser_launcher.processStarted.connect(_hide_window)
     browser_launcher.processFinished.connect(_show_window)
+    # Steam launches are fire-and-forget — we don't hide or minimize the
+    # window.  The game takes focus and HTPC Station sits behind it.  When
+    # the game exits, the window manager returns focus to HTPC Station
+    # automatically.  No performance cost: Qt stops rendering when obscured.
 
     # Detect real keyboard input to switch hint labels.
     # Gamepad input is tracked by GamepadManager calling keys.setGamepadInput().

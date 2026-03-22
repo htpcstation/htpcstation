@@ -6,7 +6,7 @@ import "../components"
 // Game detail panel — shows full metadata for a selected game.
 //
 // Focus flow:
-//   Gains focus when GamesScreen switches to "detail" view.
+//   Gains focus when RetroGamesScreen switches to "detail" view.
 //   A (Return)  → emit launch()
 //   X (F1)      → emit toggleFavorite()
 //   B (Escape)  → emit back()
@@ -14,7 +14,7 @@ import "../components"
 FocusScope {
     id: gameDetailView
 
-    // The dict returned by library.getGame(index). Set by GamesScreen.
+    // The dict returned by library.getGame(index). Set by RetroGamesScreen.
     property var gameData: ({})
 
     // Emitted when the user presses B / Escape to return to the game grid.
@@ -368,7 +368,7 @@ FocusScope {
         }
     }
 
-    // Public function called by GamesScreen when library.favoriteToggled fires.
+    // Public function called by RetroGamesScreen when library.favoriteToggled fires.
     function showFavoriteToast(isFavorite) {
         toastText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
         favoriteToast.opacity = 1.0

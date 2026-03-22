@@ -2,26 +2,26 @@ import QtQuick
 import ".."
 import "../components"
 
-// Game grid view — shows a scrollable grid of game tiles for the selected system.
+// Steam game grid — shows a scrollable grid of game tiles for the selected source.
 //
 // Focus flow:
-//   Gains focus when RetroGamesScreen switches to "games" view.
+//   Gains focus when PcGamesScreen switches to "games" view.
 //   Arrow keys navigate the grid natively.
-//   A (Return) on a cell → emits gameSelected(index) (task 009 will connect to it).
-//   B (Escape) → emits back() so RetroGamesScreen can return to the system list.
+//   A (Return) on a cell → emits gameSelected(index).
+//   B (Escape) → emits back() so PcGamesScreen can return to the source list.
 //   Y (F2)     → opens the sort overlay panel.
 FocusScope {
-    id: gameGridView
+    id: steamGameGrid
 
-    // Emitted when the user presses B / Escape to return to the system list.
+    // Emitted when the user presses B / Escape to return to the source list.
     signal back()
 
     // Emitted when the user presses A / Return on a game cell.
-    // index is the row in library.gamesModel.
+    // index is the row in steam.gamesModel.
     signal gameSelected(int index)
 
-    // Display name of the currently selected system (set by RetroGamesScreen).
-    property string systemName: ""
+    // Display name of the currently selected source (set by PcGamesScreen).
+    property string sourceName: ""
 
     // ── Sort state (mirrors backend state for display) ─────────────────────────
     property string _currentSort: "az"
@@ -52,7 +52,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  " + gameGridView.systemName
+            text: "◀  " + steamGameGrid.sourceName
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -91,7 +91,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "Sorted: " + gameGridView._sortLabel
+            text: "Sorted: " + steamGameGrid._sortLabel
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -99,8 +99,8 @@ FocusScope {
     }
 
     // ── Game grid ────────────────────────────────────────────────────────────
-    // Cell dimensions (design-grid px, scaled via vpx)
-    readonly property int _cellW: 200
+    // Cell dimensions: portrait poster (160w × 240h)
+    readonly property int _cellW: 160
     readonly property int _cellH: 240
     readonly property int _cellSpacing: 12
 
@@ -115,12 +115,12 @@ FocusScope {
             margins: root.vpx(16)
         }
 
-        model: library.gamesModel
+        model: steam ? steam.gamesModel : null
         clip: true
         focus: true
 
-        cellWidth: root.vpx(gameGridView._cellW + gameGridView._cellSpacing)
-        cellHeight: root.vpx(gameGridView._cellH + gameGridView._cellSpacing)
+        cellWidth: root.vpx(steamGameGrid._cellW + steamGameGrid._cellSpacing)
+        cellHeight: root.vpx(steamGameGrid._cellH + steamGameGrid._cellSpacing)
 
         // Smooth highlight movement
         highlightMoveDuration: Theme.animDurationFast
@@ -131,10 +131,10 @@ FocusScope {
                 sortOverlay.open()
             } else if (keys.isAccept(event)) {
                 event.accepted = true
-                gameGridView.gameSelected(gameGrid.currentIndex)
+                steamGameGrid.gameSelected(gameGrid.currentIndex)
             } else if (keys.isCancel(event)) {
                 event.accepted = true
-                gameGridView.back()
+                steamGameGrid.back()
             }
         }
 
@@ -161,7 +161,7 @@ FocusScope {
 
                 anchors {
                     fill: parent
-                    margins: root.vpx(gameGridView._cellSpacing / 2)
+                    margins: root.vpx(steamGameGrid._cellSpacing / 2)
                 }
 
                 color: Theme.colorSecondary
@@ -179,7 +179,7 @@ FocusScope {
                     }
                 }
 
-                // ── Screenshot image ─────────────────────────────────────────
+                // ── Poster image area ────────────────────────────────────────
                 Item {
                     id: imageArea
 
@@ -188,15 +188,15 @@ FocusScope {
                         left: parent.left
                         right: parent.right
                     }
-                    // Image area takes ~75% of the card height
-                    height: Math.round(parent.height * 0.75)
+                    // Image area takes ~80% of the card height (portrait poster)
+                    height: Math.round(parent.height * 0.80)
 
-                    // Placeholder shown when there is no image or while loading
+                    // Text-only placeholder shown when imageLocal is empty or image not loaded
                     Rectangle {
                         anchors.fill: parent
                         color: Qt.darker(Theme.colorSecondary, 1.4)
                         radius: root.vpx(Theme.focusRingRadius)
-                        visible: gameImage.status !== Image.Ready || model.imagePath === ""
+                        visible: posterImage.status !== Image.Ready || model.imageLocal === ""
 
                         Text {
                             anchors.centerIn: parent
@@ -207,22 +207,24 @@ FocusScope {
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)
                             wrapMode: Text.Wrap
                             horizontalAlignment: Text.AlignHCenter
-                            maximumLineCount: 3
+                            maximumLineCount: 4
                             elide: Text.ElideRight
                         }
                     }
 
                     Image {
-                        id: gameImage
+                        id: posterImage
 
                         anchors.fill: parent
-                        source: model.imagePath
+                        source: model.imageLocal
+                            ? (model.imageLocal.startsWith("http") ? model.imageLocal : "file://" + model.imageLocal)
+                            : ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(gameGridView._cellW)
-                        sourceSize.height: Math.round(root.vpx(gameGridView._cellH) * 0.75)
-                        visible: status === Image.Ready && model.imagePath !== ""
+                        sourceSize.width: root.vpx(steamGameGrid._cellW)
+                        sourceSize.height: root.vpx(steamGameGrid._cellH)
+                        visible: status === Image.Ready && model.imageLocal !== ""
                     }
                 }
 
@@ -274,9 +276,10 @@ FocusScope {
         property int _sortIndex: 0
 
         function open() {
+            if (!steam) return
             // Sync selection index to current state
             var sortKeys = ["az", "za", "recent"]
-            var si = sortKeys.indexOf(gameGridView._currentSort)
+            var si = sortKeys.indexOf(steamGameGrid._currentSort)
             _sortIndex = si >= 0 ? si : 0
             visible = true
             forceActiveFocus()
@@ -387,7 +390,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === gameGridView._currentSort
+                                var isActive = modelData.key === steamGameGrid._currentSort
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -423,10 +426,11 @@ FocusScope {
 
             } else if (keys.isAccept(event)) {
                 event.accepted = true
+                if (!steam) return
                 var sortKeys = ["az", "za", "recent"]
                 var newSort = sortKeys[sortOverlay._sortIndex]
-                gameGridView._currentSort = newSort
-                library.sortGames(newSort)
+                steamGameGrid._currentSort = newSort
+                steam.sortGames(newSort)
                 sortOverlay.close()
             }
         }

@@ -10,7 +10,7 @@ import "../components"
 //   "detail"  — full metadata panel for the selected game
 //
 // Focus flow:
-//   Enter GamesScreen → systemList gets focus
+//   Enter RetroGamesScreen → systemList gets focus
 //   Up/Down           — navigate systems (ListView handles natively)
 //   A (Return)        — select system → switch to "games" view
 //                       select game   → switch to "detail" view
@@ -18,7 +18,7 @@ import "../components"
 //                       from "games":   return to "systems" view
 //                       from "detail":  return to "games" view
 FocusScope {
-    id: gamesScreen
+    id: retroGamesScreen
 
     // Emit when B (Escape) is pressed from the system list so HomeScreen can
     // return focus to the tab bar.
@@ -71,20 +71,20 @@ FocusScope {
         // Smooth focus movement between items
         highlightMoveDuration: Theme.animDurationFast
 
-        visible: gamesScreen.currentView === "systems"
+        visible: retroGamesScreen.currentView === "systems"
 
         Keys.onPressed: (event) => {
             if (keys.isAccept(event)) {
                 event.accepted = true
                 if (currentItem) {
                     library.selectSystem(currentItem.folderNameValue)
-                    gamesScreen.selectedSystemName = currentItem.displayNameValue
+                    retroGamesScreen.selectedSystemName = currentItem.displayNameValue
                     gameGridView._currentSort = "az"
-                    gamesScreen.currentView = "games"
+                    retroGamesScreen.currentView = "games"
                 }
             } else if (keys.isCancel(event)) {
                 event.accepted = true
-                gamesScreen.back()
+                retroGamesScreen.back()
             }
         }
 
@@ -152,9 +152,9 @@ FocusScope {
                 onDoubleClicked: {
                     systemList.currentIndex = index
                     library.selectSystem(model.folderName)
-                    gamesScreen.selectedSystemName = model.displayName
+                    retroGamesScreen.selectedSystemName = model.displayName
                     gameGridView._currentSort = "az"
-                    gamesScreen.currentView = "games"
+                    retroGamesScreen.currentView = "games"
                 }
             }
         }
@@ -165,14 +165,14 @@ FocusScope {
         id: gameGridView
 
         anchors.fill: parent
-        visible: gamesScreen.currentView === "games"
+        visible: retroGamesScreen.currentView === "games"
 
-        systemName: gamesScreen.selectedSystemName
+        systemName: retroGamesScreen.selectedSystemName
 
-        onBack: gamesScreen.currentView = "systems"
+        onBack: retroGamesScreen.currentView = "systems"
         onGameSelected: (index) => {
-            gamesScreen.selectedGameIndex = index
-            gamesScreen.currentView = "detail"
+            retroGamesScreen.selectedGameIndex = index
+            retroGamesScreen.currentView = "detail"
         }
     }
 
@@ -181,26 +181,26 @@ FocusScope {
         id: gameDetailView
 
         anchors.fill: parent
-        visible: gamesScreen.currentView === "detail"
+        visible: retroGamesScreen.currentView === "detail"
 
         // Load game data only when the detail view is active to avoid unnecessary
         // library.getGame() calls while browsing systems or the game grid.
-        gameData: gamesScreen.currentView === "detail" && gamesScreen.selectedGameIndex >= 0
-                  ? library.getGame(gamesScreen.selectedGameIndex)
+        gameData: retroGamesScreen.currentView === "detail" && retroGamesScreen.selectedGameIndex >= 0
+                  ? library.getGame(retroGamesScreen.selectedGameIndex)
                   : ({})
 
-        onBack: gamesScreen.currentView = "games"
-        onLaunch: library.launchGame(gamesScreen.selectedGameIndex)
-        onToggleFavorite: library.toggleFavorite(gamesScreen.selectedGameIndex)
+        onBack: retroGamesScreen.currentView = "games"
+        onLaunch: library.launchGame(retroGamesScreen.selectedGameIndex)
+        onToggleFavorite: library.toggleFavorite(retroGamesScreen.selectedGameIndex)
         onNavigatePrev: {
-            if (gamesScreen.selectedGameIndex > 0) {
-                gamesScreen.selectedGameIndex--
+            if (retroGamesScreen.selectedGameIndex > 0) {
+                retroGamesScreen.selectedGameIndex--
             }
         }
         onNavigateNext: {
             var count = library.gamesModel.rowCount()
-            if (gamesScreen.selectedGameIndex < count - 1) {
-                gamesScreen.selectedGameIndex++
+            if (retroGamesScreen.selectedGameIndex < count - 1) {
+                retroGamesScreen.selectedGameIndex++
             }
         }
     }

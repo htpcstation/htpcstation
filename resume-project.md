@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 4)
+# HTPC Station — Project Resume Document (Checkpoint 5)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening). This checkpoint covers Plex polish: OAuth login, Continue Watching view, and content restrictions.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish). This checkpoint covers M3 (Steam) and the Games→Retro Games rename.
 
 ---
 
@@ -20,12 +20,14 @@
 - **Location:** `***REMOVED***opencode/htpcstation/`
 - **Remote:** `git@github.com:htpcstation/htpcstation.git`
 - **Branch:** `main`
-- **Tests:** 350 passing (`python3 -m pytest tests/ -q`)
+- **Tests:** 410 passing (`python3 -m pytest tests/ -q`)
 - **Run:** `cd ***REMOVED***opencode/htpcstation && python3 main.py`
 - **Dependencies:** `pip install PySide6 evdev requests`
+- **Dev machine:** ThinkPad T460, dual-core CPU, Fedora Linux (lower spec than target J5005)
 
 **Reference data:**
 - ROMs: `***REMOVED***opencode/ROMs/` (3 systems: gb, ngpc, sega32x with gamelist.xml, screenshots, videos)
+- Steam: `***REMOVED***.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/` (Flatpak, 5 games)
 - Plex API spec: `***REMOVED***opencode/openapi.json` (Plex Media Server OpenAPI 3.1)
 - ES-DE reference: `***REMOVED***opencode/es-de/`
 - Pegasus reference: `***REMOVED***opencode/pegasus-frontend/`
@@ -39,6 +41,7 @@
 | **Framework** | Qt 6 / QML + PySide6 (Python backend) |
 | **Target Platform** | Linux x86_64, Xorg, optimized for Intel J5005 / UHD 605 |
 | **Emulator** | RetroArch via Flatpak (`flatpak run org.libretro.RetroArch --fullscreen -L <core> <rom>`) |
+| **Steam** | Steam Flatpak, launch via `xdg-open steam://rungameid/<id>` |
 | **Gamepad Input** | `evdev` → synthetic `QKeyEvent` injection (Pegasus Frontend pattern) |
 | **Browser** | Brave via Flatpak, dedicated `--user-data-dir` inside flatpak sandbox |
 | **Browser Extension** | Manifest V3 Chromium extension for gamepad control in Plex Web |
@@ -71,13 +74,16 @@ htpcstation/
     launcher.py                        # QProcess emulator launcher, async signal-based start
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
     models.py                          # Game and System dataclasses
-    plex_account.py                    # plex.tv API client: server discovery, home users, user switching
+    plex_account.py                    # plex.tv API client: OAuth, server discovery, home users, user switching
     plex_client.py                     # Plex Media Server HTTP client (requests)
     plex_library.py                    # PlexLibrary QObject: threaded data loading, models, sort/filter,
                                        # server discovery, user switching, browser launch
     plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode dataclasses
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
-    settings_manager.py                # SettingsManager QObject: wraps Config for QML access
+    settings_manager.py                # SettingsManager QObject: wraps Config for QML access, OAuth
+    steam_library.py                   # SteamLibrary QObject: models, sort, launch via xdg-open
+    steam_models.py                    # SteamGame dataclass
+    steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution
   extension/                           # Chromium browser extension (Manifest V3)
     manifest.json                      # Extension manifest, content scripts on all URLs
     content.js                         # Gamepad API polling loop, edge detection, auto-repeat, A/B swap
@@ -100,10 +106,13 @@ htpcstation/
       SettingTextInput.qml             # Text input row for settings (with edit mode)
       SettingToggle.qml                # Boolean toggle row for settings
     screens/
-      HomeScreen.qml                   # Tab bar (Games/Watch/Settings), content loader, clock
-      GamesScreen.qml                  # System list + game grid + detail view (3-state)
+      HomeScreen.qml                   # Tab bar (Retro Games/PC Games/Watch/Settings), content loader
+      RetroGamesScreen.qml             # System list + game grid + detail view (3-state) for ROMs
       GameGridView.qml                 # Scrollable game grid with screenshots, sort overlay
       GameDetailView.qml               # Game metadata, video snap playback, launch/favorite
+      PcGamesScreen.qml                # Source list + game grid + detail view (3-state) for Steam/PC
+      SteamGameGrid.qml                # Steam game poster grid with sort overlay
+      SteamGameDetail.qml              # Steam game metadata, launch action
       WatchScreen.qml                  # Plex library list + movie/show grids + detail views
       PlexMovieGrid.qml                # Movie poster grid, infinite scroll, sort/filter overlay
       PlexMovieDetail.qml              # Movie metadata, poster, play action
@@ -121,6 +130,7 @@ htpcstation/
     test_browser_launch.py             # ~40 tests
     test_settings_backend.py           # ~48 tests
     test_video_snap.py                 # ~5 tests
+    test_steam.py                      # ~60 tests
 ```
 
 ---
@@ -129,7 +139,7 @@ htpcstation/
 
 ### M0 — Shell ✅
 - Fullscreen PySide6 + QML application
-- Home screen with tab navigation: Games, Watch, Settings
+- Home screen with tab navigation: Retro Games, PC Games, Watch, Settings
 - Gamepad input via evdev (D-pad, face buttons, triggers, bumpers)
 - Keyboard fallback (arrow keys, Enter, Escape, F-keys)
 - Semantic key abstraction (`keys.isAccept()`, `keys.isCancel()`, etc.)
@@ -141,7 +151,7 @@ htpcstation/
 - Focus save/restore across dialog open/close
 - D-pad Down from tab bar enters content area
 
-### M1 — Games (ROMs) ✅
+### M1 — Retro Games (ROMs) ✅
 - Config system: JSON config with ROM directory, RetroArch flatpak command, per-system core mapping, 20 built-in system defaults
 - Gamelist parser: parses `gamelist.xml` per system, resolves relative `<image>` and `<video>` paths
 - System list view: navigable list of discovered platforms with game counts
@@ -176,6 +186,17 @@ htpcstation/
 - Window hide/show: HTPC Station hides when browser/emulator launches, restores on exit
 - Left/Right in movie detail navigates to prev/next movie
 - Poster images display in detail views (cached during `getMovie()`/`getShow()`)
+
+### M3 — Steam (PC Games) ✅
+- **ACF/VDF parser** (`backend/steam_parser.py`): Recursive descent parser for Valve Data Format. `discover_steam_games()` scans Flatpak (`***REMOVED***.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/`) and native (`***REMOVED***.steam/steam/steamapps/`, `***REMOVED***.local/share/Steam/steamapps/`) paths.
+- **Game filtering:** Excludes non-game entries (Proton, Steam Linux Runtime, Steamworks Redistributables, incomplete installs with StateFlags ≠ 4).
+- **Artwork resolution:** Local Steam cache (`appcache/librarycache/{appid}/library_600x900.jpg` → `header.jpg` fallback) → Steam CDN URL (`cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900_2x.jpg`). QML Image loads both local paths and URLs directly.
+- **SteamLibrary QObject** (`backend/steam_library.py`): `SteamSourceListModel` (source list, extensible for GOG/Epic) and `SteamGameListModel` (game grid). Slots: `refresh()`, `getGame(index)`, `launchGame(appId)`, `selectSource(source)`, `sortGames(sortKey)`.
+- **Launch:** `xdg-open steam://rungameid/{appId}` via `QProcess.startDetached()` (fire-and-forget). HTPC Station does not hide/minimize — the game takes focus and HTPC Station sits behind it. When the game exits, the window manager returns focus automatically.
+- **PC Games tab:** "PC Games" tab at index 1 (between "Retro Games" and "Watch"). `PcGamesScreen.qml` with 3-state view (sources → games → detail), following the same pattern as `RetroGamesScreen.qml`.
+- **SteamGameGrid.qml:** Portrait poster grid (160×240), text-only fallback for missing artwork, sort overlay (A-Z, Z-A, Recent).
+- **SteamGameDetail.qml:** Game metadata (name, install dir, size formatted as GB/MB, last played date), launch button, prev/next navigation.
+- **Tab rename:** "Games" → "Retro Games", `GamesScreen.qml` → `RetroGamesScreen.qml`.
 
 ### Browser Gamepad Extension ✅
 - **Manifest V3 Chromium extension** at `htpcstation/extension/`
@@ -270,11 +291,7 @@ Location: `***REMOVED***.config/htpcstation/config.json`
 }
 ```
 
-**Config changes from Checkpoint 2:**
-- `plex.server_url` removed — server URL is now resolved at runtime via plex.tv resources API
-- `plex.server_id` added — machine identifier of the selected Plex server (persisted)
-- `plex.user_id` added — integer ID of the selected Plex Home user (persisted, 0 = admin/default)
-- Old config files with `server_url` are handled gracefully (ignored, no crash)
+**Note:** Steam has no config — game discovery is fully automatic from standard Steam install paths. No user configuration needed.
 
 ---
 
@@ -292,6 +309,9 @@ A QML property binding like `options: plex.getServerList().map(...)` evaluates o
 ### QML Type Mismatch: QString to int
 Passing a JavaScript value from QML to a Python `@Slot(int)` can fail with "Unable to assign QString to int" if the value comes from a JS object property. **Fix:** Use `parseInt(value)` in QML before passing to the slot. Use `==` instead of `===` for comparisons between values that may be int or string.
 
+### QML Image Source: Local Paths vs URLs
+QML `Image.source` needs `"file://"` prefix for local paths but URLs must be passed as-is. When a model role can contain either a local path or a CDN URL, check with `startsWith("http")` before prepending `"file://"`. Without this, URLs become `file://https//...` which fails silently.
+
 ### Brave Flatpak Session Accumulation
 Brave saves session state on exit. Each `--kiosk <url>` launch adds a tab. Without cleanup, tabs accumulate. **Fix:** Before each launch, clear `Sessions/` and `Session Storage/` directories from the browser profile.
 
@@ -303,6 +323,9 @@ If Brave is already running (personal browsing), launching a new URL joins the e
 
 ### Brave Focus on Launch
 HTPC Station's fullscreen window keeps focus when launching Brave. **Fix:** Hide the HTPC Station window on process launch (`window.hide()`), restore on exit (`window.showFullScreen()`, `window.raise_()`, `window.requestActivate()`).
+
+### Steam Launch: Don't Hide the Window
+Steam games are launched via `xdg-open steam://rungameid/<id>` which is fire-and-forget — `xdg-open` exits immediately after handing off to Steam. We cannot track when the game actually exits. Hiding the window (`window.hide()`) removes it from the window manager, making it impossible to return to. Minimizing (`window.showMinimized()`) requires Alt+Tab to return. **Fix:** Don't hide or minimize at all for Steam launches. The game takes focus, HTPC Station sits behind it, and the window manager returns focus automatically when the game exits. No performance cost — Qt stops rendering when the window is obscured.
 
 ### Plex User Selection Screen Cannot Be Bypassed via URL
 Plex Web always shows the user selection screen for multi-user Plex Home accounts. Passing `X-Plex-Token` in the URL (query string or hash fragment) does not bypass it. The "automatically sign in" feature mentioned in Plex docs is a native app setting, not available in Plex Web. **Fix:** Browser extension auto-clicks the correct user tile by matching the `htpc_user` URL parameter against `.username` text in the `.user-select-modal` DOM.
@@ -341,7 +364,7 @@ Video snap playback logs harmless VAAPI hardware decoding errors when the iGPU d
 The `Video` QML type didn't render video despite loading the file. **Fix:** Use explicit `MediaPlayer` + `VideoOutput` components instead, with a 100ms+ delay before calling `play()`.
 
 ### QML Context Property Null on Startup
-QML evaluates bindings during component creation before context properties are set. Any binding that reads `plex.*` or `settings.*` will get null on first evaluation. **Fix:** Add null guards (`if (!settings) return ""`) in functions that read context properties eagerly.
+QML evaluates bindings during component creation before context properties are set. Any binding that reads `plex.*`, `steam.*`, or `settings.*` will get null on first evaluation. **Fix:** Add null guards (`if (!steam) return`, `plex ? plex.model : null`) in bindings and functions that read context properties eagerly.
 
 ### Bundled Emoji Font
 NotoEmoji-Regular.ttf is bundled and loaded via `QFontDatabase.addApplicationFont()`, but Qt doesn't reliably use it as a fallback for all emoji glyphs (particularly `🎮`). **Workaround:** Collection display names use plain text (no emoji prefixes). The font file remains bundled for potential future use.
@@ -363,18 +386,11 @@ These are intentional shortcuts that should be revisited:
 | No Continue Watching for managed users | `plex_library.py` | Managed user tokens get 401 from server on-deck endpoint | Plex platform limitation — no known workaround |
 | Auto-user-select 1.5s delay | `extension/mappings/plex.js` | Fixed delay before re-navigating after user selection | Detect navigation completion instead of fixed timeout |
 | Synchronous OAuth polling | `settings_manager.py` | `check_pin()` called synchronously in QTimer callback | Move to thread if UI lag is noticeable |
+| Steam games not fullscreen | `steam_library.py` | Game fullscreen is controlled by each game's own settings | Investigate Steam Big Picture mode or per-game launch options |
 
 ---
 
 ## 10. Remaining Milestones
-
-### M3 — Steam
-- Parse `***REMOVED***.steam/steam/steamapps/appmanifest_*.acf` for installed games
-- Display Steam games alongside ROM platforms in Games section
-- Header image artwork from `cdn.cloudflare.steamstatic.com`, cached locally
-- Launch via `xdg-open steam://rungameid/<id>`
-- Recently played from ACF `LastPlayed` timestamps
-- Degrade gracefully when offline (show text-only, no artwork)
 
 ### M4 — Moonlight
 - Read paired hosts from `***REMOVED***.config/Moonlight Game Streaming/`
@@ -414,12 +430,13 @@ These are intentional shortcuts that should be revisited:
 - On-screen keyboard for 10-foot text input
 - Gamepad extension: YouTube, Netflix, and other site mappings
 - Plex token encryption or OS keyring storage
+- Steam Big Picture mode integration for fullscreen game launches
+- GOG Galaxy, Epic Games Store integration under PC Games tab
 
 ### v2+ (Out of scope for v1)
 - YouTube — `youtube.com/tv` kiosk launch
 - Streaming services — Netflix, Hulu, Prime, Max, Disney+, Apple TV+
 - TMDB integration for streaming service metadata
-- GOG / Epic / other PC game stores
 - Wayland support
 - Pluggable theme system (Theme.qml singleton is designed for this)
 - Multi-user profiles / parental controls
@@ -437,26 +454,34 @@ These are intentional shortcuts that should be revisited:
 - RetroArch launches fullscreen
 - No emoji/symbol prefixes on collection names (rendering issues)
 - JSON config preferred over TOML for manual editing
-- Fedora Linux, flatpak RetroArch, flatpak Brave
+- Fedora Linux, flatpak RetroArch, flatpak Brave, flatpak Steam
 - Video snap delay: 1500ms
 - Keyboard navigation is a first-class citizen (adaptive hint labels)
 - Version control via git from this point forward
-- Settings sections: "Games" (not "Library" or "Emulators"), "Plex", "Browser", "User Interface" (not "Display")
+- Tab naming: "Retro Games" (ROMs), "PC Games" (Steam/GOG/Epic), "Watch" (Plex), "Settings"
 - Prefers Chromium/Brave for Plex playback over native players (hardware decoding quality)
 - Controller does not have analog sticks
 - Has multiple Plex servers (owns one, accesses friends' servers)
 - Uses Plex Home with multiple users (admin + managed "Kids" profile)
+- Wants PC Games tab to follow same layout pattern as Retro Games (system list → grid → detail)
+- Dev machine (ThinkPad T460) is lower spec than target (J5005) — good for performance validation
 
 ---
 
 ## 12. Architecture Notes for New Agent
 
 ### QML Context Properties
-Four Python objects are exposed to QML:
+Five Python objects are exposed to QML:
 - `keys` — `Keys` instance (semantic key checks + input source tracking)
 - `library` — `GameLibrary` instance (ROM data, models, launch, favorites)
+- `steam` — `SteamLibrary` instance (Steam game data, models, sort, launch)
 - `plex` — `PlexLibrary` instance (Plex data, models, sort/filter, browser launch, server/user management)
-- `settings` — `SettingsManager` instance (config read/write for settings UI)
+- `settings` — `SettingsManager` instance (config read/write for settings UI, OAuth)
+
+### Steam Architecture
+- **`steam_parser.py`** — VDF/ACF parser (recursive descent tokenizer), game discovery from multiple Steam install paths, non-game filtering, artwork resolution (local cache → CDN URL)
+- **`steam_models.py`** — `SteamGame` dataclass (app_id, name, install_dir, last_played, size_on_disk, image_path)
+- **`steam_library.py`** — `SteamLibrary` QObject with `SteamSourceListModel` (extensible source list) and `SteamGameListModel`. Fire-and-forget launch via `xdg-open`. No window hide/minimize — game takes focus, window manager handles return.
 
 ### Plex Architecture
 Two separate API layers:
@@ -490,12 +515,13 @@ Two separate API layers:
 - Plex API calls via `ThreadPoolExecutor(max_workers=2)` with results delivered via Qt signals
 - Poster downloads happen on thread pool, `dataChanged` emitted on main thread
 - Emulator/browser launch via `QProcess` (async signal-based, non-blocking)
+- Steam game discovery is synchronous (ACF files are small local reads)
 
 ### Process Lifecycle
-- When emulator or browser launches: `processStarted` signal → `window.hide()`
-- When process exits: `processFinished` signal → `window.showFullScreen()` + `raise_()` + `requestActivate()`
+- **Emulators/Browser:** `processStarted` signal → `window.hide()`, `processFinished` signal → `window.showFullScreen()` + `raise_()` + `requestActivate()`
+- **Steam:** No window management — game takes focus, window manager handles return on game exit
 - Browser session files cleared before each launch to prevent tab accumulation
-- `launchGame()` sets `_active_game` optimistically; clears on `FailedToStart`
+- `launchGame()` (ROMs) sets `_active_game` optimistically; clears on `FailedToStart`
 
 ### Task Brief Archive
 All task briefs from the implementation are at:
@@ -508,6 +534,7 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/browser-gamepad-extension/` (tasks 001–004)
 - `***REMOVED***opencode/misc/coding-team/plex-server-discovery/` (tasks 001–004)
 - `***REMOVED***opencode/misc/coding-team/plex-polish/` (tasks 001–003)
+- `***REMOVED***opencode/misc/coding-team/m3-steam/` (tasks 001–003)
 
 ---
 
