@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 3)
+# HTPC Station — Project Resume Document (Checkpoint 4)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (through Settings UI). This checkpoint covers all work through Plex server discovery, browser gamepad extension, and M6 hardening pull-forward.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening). This checkpoint covers Plex polish: OAuth login, Continue Watching view, and content restrictions.
 
 ---
 
@@ -20,7 +20,7 @@
 - **Location:** `***REMOVED***opencode/htpcstation/`
 - **Remote:** `git@github.com:htpcstation/htpcstation.git`
 - **Branch:** `main`
-- **Tests:** 307 passing (`python3 -m pytest tests/ -q`)
+- **Tests:** 350 passing (`python3 -m pytest tests/ -q`)
 - **Run:** `cd ***REMOVED***opencode/htpcstation && python3 main.py`
 - **Dependencies:** `pip install PySide6 evdev requests`
 
@@ -45,6 +45,7 @@
 | **Config** | JSON at `***REMOVED***.config/htpcstation/config.json` |
 | **Resolution** | 1920×1080 fullscreen, `vpx()` scaling function (base 1280×720) |
 | **Python** | 3.10+ |
+| **Plex Auth** | OAuth PIN flow via plex.tv (no manual token entry) |
 | **Plex API** | plex.tv for server discovery/user switching; local server for library data |
 
 ---
@@ -107,6 +108,7 @@ htpcstation/
       PlexMovieGrid.qml                # Movie poster grid, infinite scroll, sort/filter overlay
       PlexMovieDetail.qml              # Movie metadata, poster, play action
       PlexShowGrid.qml                 # TV show poster grid, sort/filter overlay
+      PlexOnDeckGrid.qml               # Continue Watching grid with progress bars
       PlexShowDetail.qml               # Show metadata, horizontal season tabs, episode list
       SettingsScreen.qml               # 4-section settings menu (Games, Plex, Browser, UI)
   tests/
@@ -114,10 +116,10 @@ htpcstation/
     test_emulator_launch.py            # ~25 tests
     test_collections.py                # ~24 tests
     test_filter_sort.py                # 12 tests
-    test_plex_backend.py               # ~150 tests
-    test_plex_account.py               # ~28 tests
+    test_plex_backend.py               # ~170 tests
+    test_plex_account.py               # ~42 tests
     test_browser_launch.py             # ~40 tests
-    test_settings_backend.py           # ~40 tests
+    test_settings_backend.py           # ~48 tests
     test_video_snap.py                 # ~5 tests
 ```
 
@@ -154,13 +156,16 @@ htpcstation/
 - Stale model guard: `_on_process_finished` skips QML notification if user navigated away during gameplay
 
 ### M2 — Plex ✅
-- **Server discovery:** Automatic via plex.tv resources API (`PlexAccount.get_resources()`). User provides only their plex.tv token. Connection URL selection prefers local direct IP > plex.direct > relay.
+- **OAuth login:** PIN-based OAuth flow via `PlexAccount.create_pin()` and `check_pin()`. "Sign in with Plex" button in Settings opens the Plex auth page in the browser; QTimer polls every 2s for up to 120s until the auth token arrives. No manual token entry needed.
+- **Server discovery:** Automatic via plex.tv resources API (`PlexAccount.get_resources()`). Connection URL selection prefers local direct IP > plex.direct > relay.
 - **User switching:** Home users listed via plex.tv API (`PlexAccount.get_home_users()`). Selected user's token obtained via `switch_user()`. Admin token used for server API calls (managed users lack direct server access); user-specific token used for browser deep links only.
-- **PlexAccount client** (`backend/plex_account.py`): plex.tv API for server discovery, home user listing, user switching, token validation. Old `/api/` endpoints use XML responses and token-as-query-parameter.
+- **Content restrictions:** Managed users' `restrictionProfile` (little_kid, older_kid, teen) is mapped to allowed content ratings. Server-side `contentRating` filter applied to all library queries so managed users only see age-appropriate content.
+- **Continue Watching:** `PlexOnDeckGrid.qml` displays in-progress items with poster images, titles (show name + episode title for episodes), and progress bars (`viewOffset/duration`). Hidden for managed users (server rejects managed user tokens for on-deck endpoint — Plex platform limitation).
+- **PlexAccount client** (`backend/plex_account.py`): plex.tv API for OAuth, server discovery, home user listing, user switching, token validation. Old `/api/` endpoints use XML responses and token-as-query-parameter. OAuth methods are `@staticmethod` (no token needed).
 - Plex API client: libraries, movies, shows, seasons, episodes, on-deck, identity
 - Data models: PlexMovie, PlexShow, PlexSeason, PlexEpisode with parsing helpers
 - Poster cache: thread-safe downloader, SHA256 hash filenames, `***REMOVED***.config/htpcstation/poster_cache/`
-- PlexLibrary QObject: threaded data loading (ThreadPoolExecutor), progressive poster loading, server discovery, user switching, lazy reconnect
+- PlexLibrary QObject: threaded data loading (ThreadPoolExecutor), progressive poster loading, server discovery, user switching, lazy reconnect, content rating filtering
 - Watch screen: library list with "Plex" header, Continue Watching, Movies, TV Shows, DVR
 - Movie grid: poster grid with infinite scroll (50 per page), portrait cells
 - Movie detail: poster, metadata (studio, rating, score, runtime, genre, director, cast), tagline, synopsis
@@ -190,7 +195,7 @@ htpcstation/
 - 4 sections: Games, Plex, Browser, User Interface
 - Reusable components: SettingTextInput (with edit mode), SettingToggle, SettingButton, SettingSlider, SettingSelect (cycle-through picker)
 - Games: ROMs Directory, RetroArch Command, Cores Directory, Rescan Library button
-- Plex: Token (masked), Test Connection button, Server selector (cycle through discovered servers), User selector (cycle through home users)
+- Plex: Sign in with Plex (OAuth), Test Connection button, Server selector (cycle through discovered servers), User selector (cycle through home users)
 - Browser: Browser Command
 - User Interface: Video Snap Autoplay toggle, Video Snap Delay slider (0-5000ms, 100ms steps)
 - All changes auto-save to config.json
@@ -312,7 +317,13 @@ The content script runs once at `document_idle`. When the auto-user-select re-na
 The plex.tv `/api/home/users` and `/api/home/users/{id}/switch` endpoints (no `v2`) reject the `X-Plex-Token` header. The token must be passed as a query parameter (`?X-Plex-Token=...`). These endpoints also return XML, not JSON, regardless of the `Accept` header. **Fix:** `PlexAccount` uses `params={"X-Plex-Token": self._token}` for old endpoints and parses responses with `xml.etree.ElementTree`.
 
 ### Plex Managed Users Cannot Access Server Directly
-Managed/restricted Plex Home users (e.g., "Kids") get a user-specific token from `switch_user()`, but this token returns 401 when used against the media server API. **Fix:** Always use the admin token for server API calls (library browsing, metadata, posters). The user-specific token is only used in browser deep links so Plex Web applies the correct user profile and content restrictions at playback time. **Consequence:** HTPC Station's library view shows the full catalog regardless of selected user; content restrictions are enforced only in Plex Web during playback.
+Managed/restricted Plex Home users (e.g., "Kids") get a user-specific token from `switch_user()`, but this token returns 401 when used against the media server API — both as a header and as a query parameter. This applies to ALL server endpoints (`/library/sections`, `/library/onDeck`, etc.). **Fix:** Always use the admin token for server API calls. Content restrictions are enforced server-side via `contentRating` filter parameter on library queries (mapped from the user's `restrictionProfile`). The user-specific token is only used in browser deep links.
+
+### Plex Managed Users Have No On-Deck Access
+Because managed user tokens get 401 from the server, there is no way to fetch a managed user's "Continue Watching" data. The admin token's `/library/onDeck` returns only the admin's in-progress items with no user/account identifier. **Fix:** Hide "Continue Watching" entirely for managed users. This is a Plex platform limitation with no known workaround.
+
+### Plex Content Rating Filter Caching
+The `_content_rating_filter` must be cached alongside the user token (`_cached_content_rating_filter`). Without caching, the filter is only set on a fresh `switch_user()` call. When the cached token path is used (on subsequent `_setup_client()` calls), the filter would be empty, showing the full catalog. **Fix:** Store and restore `_cached_content_rating_filter` in the same code paths as `_cached_user_token`.
 
 ### Plex User Token Caching and Rate Limiting
 `switch_user()` returns an ephemeral token. Calling it on every `refresh()` hammers the API and triggers 429 (Too Many Requests). **Fix:** Cache the user token (`_cached_user_id`, `_cached_user_token`, `_cached_user_title`). Only call `switch_user()` when the user ID changes. `selectUser()` clears the cache so the next `_setup_client()` gets a fresh token.
@@ -344,13 +355,14 @@ These are intentional shortcuts that should be revisited:
 | Decision | Location | Why | Future Fix |
 |---|---|---|---|
 | A/B button swap | `backend/gamepad.py` lines 48-49, `extension/content.js` | `BTN_EAST`=Accept, `BTN_SOUTH`=Cancel — matches user's controller | Add button remapping in settings |
-| Plex token in config.json | `config.json` | Plaintext token, editable via settings | Implement Plex OAuth flow |
+| Plex token in config.json | `config.json` | Plaintext token stored after OAuth | Encrypt or use OS keyring |
 | Synchronous `getMovie()`/`getShow()` | `plex_library.py` | Blocks main thread briefly for API call + poster download | Move to threaded worker |
 | Synchronous `testPlexConnection()` | `settings_manager.py` | Blocks main thread during connection test | Defer to thread (partially mitigated with `Qt.callLater`) |
 | Per-system core editor | `SettingsScreen.qml` | Shows "Coming soon" toast | Build sub-screen with system list and editable cores |
 | `--kiosk` + `--start-fullscreen` | `browser_launcher.py` | Both flags used for Brave fullscreen | May only need one; test on other Chromium browsers |
-| Full catalog for managed users | `plex_library.py` | Admin token used for API (managed user token gets 401) | Filter catalog client-side using user's restriction profile |
+| No Continue Watching for managed users | `plex_library.py` | Managed user tokens get 401 from server on-deck endpoint | Plex platform limitation — no known workaround |
 | Auto-user-select 1.5s delay | `extension/mappings/plex.js` | Fixed delay before re-navigating after user selection | Detect navigation completion instead of fixed timeout |
+| Synchronous OAuth polling | `settings_manager.py` | `check_pin()` called synchronously in QTimer callback | Move to thread if UI lag is noticeable |
 
 ---
 
@@ -396,14 +408,12 @@ These are intentional shortcuts that should be revisited:
 - Custom user-defined game collections
 - Standalone emulator support (Dolphin, PCSX2)
 - Per-system core editor sub-screen in settings
-- Plex OAuth authentication (replace plaintext token)
 - Plex search
 - Mark watched/unwatched in Plex
-- On Deck content view (browse Continue Watching items)
 - Gamepad button remapping in settings
 - On-screen keyboard for 10-foot text input
-- Filter Plex catalog for managed users (client-side restriction profile)
 - Gamepad extension: YouTube, Netflix, and other site mappings
+- Plex token encryption or OS keyring storage
 
 ### v2+ (Out of scope for v1)
 - YouTube — `youtube.com/tv` kiosk launch
@@ -450,9 +460,9 @@ Four Python objects are exposed to QML:
 
 ### Plex Architecture
 Two separate API layers:
-- **`PlexAccount`** (`plex_account.py`) — talks to `plex.tv` for server discovery, home user listing, user switching. Uses `/api/v2/` (JSON) for resources/user validation and `/api/` (XML) for home users/switching. Token passed as query parameter for old endpoints.
-- **`PlexClient`** (`plex_client.py`) — talks to the media server (resolved URL from resources API) for library data, metadata, posters. Always uses the admin token.
-- **`PlexLibrary`** (`plex_library.py`) — QObject that orchestrates both. Creates `PlexAccount` from config token, resolves server URL, switches user, creates `PlexClient`. Exposes QML slots for server/user selection. Stores `_active_token` (user-specific) for browser deep links separately from the admin token used by `PlexClient`.
+- **`PlexAccount`** (`plex_account.py`) — talks to `plex.tv` for OAuth, server discovery, home user listing, user switching. Uses `/api/v2/` (JSON) for resources/user validation/OAuth and `/api/` (XML) for home users/switching. Token passed as query parameter for old endpoints. OAuth methods (`create_pin`, `check_pin`) are `@staticmethod` — no token needed.
+- **`PlexClient`** (`plex_client.py`) — talks to the media server (resolved URL from resources API) for library data, metadata, posters. Always uses the admin token. Supports `contentRating` filter parameter for managed user content restrictions.
+- **`PlexLibrary`** (`plex_library.py`) — QObject that orchestrates both. Creates `PlexAccount` from config token, resolves server URL, switches user, creates `PlexClient`. Exposes QML slots for server/user selection. Stores `_active_token` (user-specific) for browser deep links separately from the admin token used by `PlexClient`. Caches user token, title, and content rating filter to avoid repeated API calls. On-deck data skipped for managed users (server rejects their tokens).
 
 ### Browser Extension Architecture
 - Content scripts injected on all URLs (Manifest V3, `run_at: document_idle`)
@@ -497,6 +507,7 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/m6-hardening-pullforward/` (tasks 001–003)
 - `***REMOVED***opencode/misc/coding-team/browser-gamepad-extension/` (tasks 001–004)
 - `***REMOVED***opencode/misc/coding-team/plex-server-discovery/` (tasks 001–004)
+- `***REMOVED***opencode/misc/coding-team/plex-polish/` (tasks 001–003)
 
 ---
 
