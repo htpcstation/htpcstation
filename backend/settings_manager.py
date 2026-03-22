@@ -61,6 +61,7 @@ class SettingsManager(QObject):
     moonlightHostUuidChanged = Signal()
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
+    showNetworkIndicatorChanged = Signal()
 
     def __init__(
         self,
@@ -121,6 +122,9 @@ class SettingsManager(QObject):
 
     def _get_video_snap_delay_ms(self) -> int:
         return self._config.video_snap_delay_ms
+
+    def _get_show_network_indicator(self) -> bool:
+        return self._config.show_network_indicator
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -185,6 +189,11 @@ class SettingsManager(QObject):
         int,
         fget=_get_video_snap_delay_ms,
         notify=videoSnapDelayMsChanged,
+    )
+    showNetworkIndicator = Property(
+        bool,
+        fget=_get_show_network_indicator,
+        notify=showNetworkIndicatorChanged,
     )
 
     # ------------------------------------------------------------------
@@ -268,6 +277,12 @@ class SettingsManager(QObject):
         """Set the video snap playback delay in milliseconds."""
         self._config.set_video_snap_delay_ms(delay)
         self.videoSnapDelayMsChanged.emit()
+
+    @Slot(bool)
+    def setShowNetworkIndicator(self, enabled: bool) -> None:
+        """Enable or disable the network status indicator."""
+        self._config.set_show_network_indicator(enabled)
+        self.showNetworkIndicatorChanged.emit()
 
     @Slot(str, str)
     def setSystemCore(self, folder_name: str, core: str) -> None:

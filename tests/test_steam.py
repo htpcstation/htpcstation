@@ -5,7 +5,7 @@ Covers:
   - steam_parser.parse_acf: valid ACF, nested blocks, malformed input
   - steam_parser.discover_steam_games: mock filesystem with ACF files
   - steam_parser: filtering non-games (Proton, runtimes, redistributables, StateFlags)
-  - steam_parser: artwork resolution (local cache found, not found)
+  - steam_parser: artwork resolution (custom override, scraped cache, Steam cache, CDN download)
   - SteamGameListModel: roles, data, set_games
   - SteamSourceListModel: roles, data, set_sources
   - SteamLibrary: model population, sorting (az, za, recent), getGame, launchGame
@@ -14,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -398,14 +399,224 @@ class TestFilterNonGames:
 
 
 # ---------------------------------------------------------------------------
-# Artwork resolution
+# Artwork resolution — _resolve_artwork unit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_http_response(data: bytes = b"fake image data") -> MagicMock:
+    """Return a mock HTTP response object suitable for use as urlopen context manager."""
+    mock_resp = MagicMock()
+    mock_resp.read.side_effect = [data, b""]
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return mock_resp
+
+
+class TestResolveArtwork:
+    """Unit tests for _resolve_artwork using monkeypatched steam_config.get_steam_dir."""
+
+    def test_custom_override_jpg_returned(self, tmp_path: Path, monkeypatch) -> None:
+        """Custom override file in artwork_custom/ is returned immediately."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+        override = tmp_path / "artwork_custom" / "440.jpg"
+        override.write_bytes(b"custom image")
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        result = sp._resolve_artwork(steamapps, "440")
+        assert result == str(override)
+
+    def test_custom_override_png_returned(self, tmp_path: Path, monkeypatch) -> None:
+        """Custom override with .png extension is found."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+        override = tmp_path / "artwork_custom" / "440.png"
+        override.write_bytes(b"custom png")
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        result = sp._resolve_artwork(steamapps, "440")
+        assert result == str(override)
+
+    def test_custom_override_takes_priority_over_scraped_cache(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Custom override takes priority even when scraped cache exists."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+        override = tmp_path / "artwork_custom" / "440.jpg"
+        override.write_bytes(b"custom image")
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        scraped.write_bytes(b"scraped image")
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        result = sp._resolve_artwork(steamapps, "440")
+        assert result == str(override)
+
+    def test_scraped_cache_returned_when_present(self, tmp_path: Path, monkeypatch) -> None:
+        """Scraped cache file is returned without network I/O."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        scraped.write_bytes(b"scraped image")
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = sp._resolve_artwork(steamapps, "440")
+            mock_urlopen.assert_not_called()
+        assert result == str(scraped)
+
+    def test_steam_local_cache_copied_to_scraped(self, tmp_path: Path, monkeypatch) -> None:
+        """Steam local cache hit is copied to artwork_scraped/ and that path is returned."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        steam_cache = tmp_path / "appcache" / "librarycache" / "440"
+        steam_cache.mkdir(parents=True)
+        poster = steam_cache / "library_600x900.jpg"
+        poster.write_bytes(b"steam local poster")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = sp._resolve_artwork(steamapps, "440")
+            mock_urlopen.assert_not_called()
+
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert scraped.is_file()
+        assert scraped.read_bytes() == b"steam local poster"
+        assert result == str(scraped)
+
+    def test_steam_local_cache_prefers_600x900_over_header(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """library_600x900.jpg is preferred over header.jpg in Steam local cache."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        steam_cache = tmp_path / "appcache" / "librarycache" / "440"
+        steam_cache.mkdir(parents=True)
+        poster = steam_cache / "library_600x900.jpg"
+        poster.write_bytes(b"poster data")
+        header = steam_cache / "header.jpg"
+        header.write_bytes(b"header data")
+
+        result = sp._resolve_artwork(steamapps, "440")
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert scraped.read_bytes() == b"poster data"
+        assert result == str(scraped)
+
+    def test_steam_local_cache_falls_back_to_header(self, tmp_path: Path, monkeypatch) -> None:
+        """header.jpg is used when library_600x900.jpg is absent in Steam local cache."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        steam_cache = tmp_path / "appcache" / "librarycache" / "440"
+        steam_cache.mkdir(parents=True)
+        header = steam_cache / "header.jpg"
+        header.write_bytes(b"header data")
+
+        result = sp._resolve_artwork(steamapps, "440")
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert scraped.read_bytes() == b"header data"
+        assert result == str(scraped)
+
+    def test_cdn_download_saves_to_scraped_cache(self, tmp_path: Path, monkeypatch) -> None:
+        """CDN download saves image to artwork_scraped/ and returns local path."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+
+        fake_image = b"downloaded image data"
+        mock_resp = _make_fake_http_response(fake_image)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            result = sp._resolve_artwork(steamapps, "440")
+
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert scraped.is_file()
+        assert scraped.read_bytes() == fake_image
+        assert result == str(scraped)
+
+    def test_cdn_download_failure_returns_empty_string(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """CDN download failure returns empty string (no artwork)."""
+        import backend.steam_parser as sp
+        import urllib.error
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            result = sp._resolve_artwork(steamapps, "440")
+
+        assert result == ""
+
+    def test_no_artwork_anywhere_returns_empty_string(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Returns empty string when no artwork is found and CDN fails."""
+        import backend.steam_parser as sp
+        import urllib.error
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("timeout"),
+        ):
+            result = sp._resolve_artwork(steamapps, "440")
+
+        assert result == ""
+
+
+# ---------------------------------------------------------------------------
+# Artwork resolution — integration via discover_steam_games
 # ---------------------------------------------------------------------------
 
 
 class TestArtworkResolution:
-    def test_finds_library_600x900_jpg(self, tmp_path: Path) -> None:
-        """Artwork resolution prefers library_600x900.jpg."""
-        from backend.steam_parser import discover_steam_games
+    def test_finds_library_600x900_jpg(self, tmp_path: Path, monkeypatch) -> None:
+        """Artwork resolution copies library_600x900.jpg to scraped cache."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
 
         steamapps = tmp_path / "steamapps"
         steamapps.mkdir()
@@ -417,13 +628,17 @@ class TestArtworkResolution:
         poster = cache_dir / "library_600x900.jpg"
         poster.write_bytes(b"fake image data")
 
-        games = discover_steam_games([steamapps])
+        games = sp.discover_steam_games([steamapps])
         assert len(games) == 1
-        assert games[0].image_path == str(poster)
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert games[0].image_path == str(scraped)
 
-    def test_falls_back_to_header_jpg(self, tmp_path: Path) -> None:
+    def test_falls_back_to_header_jpg(self, tmp_path: Path, monkeypatch) -> None:
         """Artwork resolution falls back to header.jpg when 600x900 is absent."""
-        from backend.steam_parser import discover_steam_games
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
 
         steamapps = tmp_path / "steamapps"
         steamapps.mkdir()
@@ -434,13 +649,17 @@ class TestArtworkResolution:
         header = cache_dir / "header.jpg"
         header.write_bytes(b"fake header image")
 
-        games = discover_steam_games([steamapps])
+        games = sp.discover_steam_games([steamapps])
         assert len(games) == 1
-        assert games[0].image_path == str(header)
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert games[0].image_path == str(scraped)
 
-    def test_prefers_600x900_over_header(self, tmp_path: Path) -> None:
+    def test_prefers_600x900_over_header(self, tmp_path: Path, monkeypatch) -> None:
         """library_600x900.jpg is preferred over header.jpg when both exist."""
-        from backend.steam_parser import discover_steam_games
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
 
         steamapps = tmp_path / "steamapps"
         steamapps.mkdir()
@@ -453,22 +672,53 @@ class TestArtworkResolution:
         header = cache_dir / "header.jpg"
         header.write_bytes(b"header")
 
-        games = discover_steam_games([steamapps])
+        games = sp.discover_steam_games([steamapps])
         assert len(games) == 1
-        assert games[0].image_path == str(poster)
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert games[0].image_path == str(scraped)
+        assert scraped.read_bytes() == b"poster"
 
-    def test_cdn_fallback_when_no_local_artwork(self, tmp_path: Path) -> None:
-        """image_path falls back to Steam CDN URL when no local artwork exists."""
-        from backend.steam_parser import discover_steam_games
+    def test_cdn_download_when_no_local_artwork(self, tmp_path: Path, monkeypatch) -> None:
+        """image_path is a local cached path after CDN download when no local artwork exists."""
+        import backend.steam_parser as sp
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
 
         steamapps = tmp_path / "steamapps"
         steamapps.mkdir()
         _write_acf(steamapps, "440", "Team Fortress 2")
 
-        games = discover_steam_games([steamapps])
+        fake_image = b"cdn image data"
+        mock_resp = _make_fake_http_response(fake_image)
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            games = sp.discover_steam_games([steamapps])
+
         assert len(games) == 1
-        assert "cdn.cloudflare.steamstatic.com" in games[0].image_path
-        assert "440" in games[0].image_path
+        scraped = tmp_path / "artwork_scraped" / "440.jpg"
+        assert games[0].image_path == str(scraped)
+        assert "cdn.cloudflare.steamstatic.com" not in games[0].image_path
+
+    def test_empty_image_path_when_cdn_fails(self, tmp_path: Path, monkeypatch) -> None:
+        """image_path is empty string when no local artwork and CDN download fails."""
+        import backend.steam_parser as sp
+        import urllib.error
+        monkeypatch.setattr(sp, "get_steam_dir", lambda: tmp_path)
+        (tmp_path / "artwork_custom").mkdir()
+        (tmp_path / "artwork_scraped").mkdir()
+
+        steamapps = tmp_path / "steamapps"
+        steamapps.mkdir()
+        _write_acf(steamapps, "440", "Team Fortress 2")
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("network error"),
+        ):
+            games = sp.discover_steam_games([steamapps])
+
+        assert len(games) == 1
+        assert games[0].image_path == ""
 
 
 # ---------------------------------------------------------------------------
@@ -980,3 +1230,343 @@ class TestSteamLibraryProperties:
             lib = SteamLibrary()
 
         assert isinstance(lib.gamesModel, SteamGameListModel)
+
+
+# ---------------------------------------------------------------------------
+# SteamLibrary — getRecentlyPlayed
+# ---------------------------------------------------------------------------
+
+
+class TestSteamLibraryGetRecentlyPlayed:
+    def _make_lib(self, games: list[SteamGame]):
+        from backend.steam_library import SteamLibrary
+
+        with patch("backend.steam_library.discover_steam_games", return_value=games):
+            return SteamLibrary()
+
+    def test_returns_empty_when_no_games_played(self) -> None:
+        """getRecentlyPlayed returns [] when no Steam games have been played."""
+        games = [
+            SteamGame("1", "Game A", "gamea", 0, 0, ""),
+            SteamGame("2", "Game B", "gameb", 0, 0, ""),
+        ]
+        lib = self._make_lib(games)
+        result = lib.getRecentlyPlayed()
+        assert result == []
+
+    def test_returns_steam_games_with_last_played(self) -> None:
+        """getRecentlyPlayed includes Steam games with last_played > 0."""
+        games = [
+            SteamGame("1", "Game A", "gamea", 1700000000, 0, "/img/a.jpg"),
+            SteamGame("2", "Game B", "gameb", 0, 0, ""),
+        ]
+        lib = self._make_lib(games)
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 1
+        assert result[0]["name"] == "Game A"
+        assert result[0]["source"] == "steam"
+        assert result[0]["appId"] == "1"
+        assert result[0]["imagePath"] == "/img/a.jpg"
+        assert result[0]["lastPlayed"] == 1700000000
+        assert result[0]["hostAddress"] == ""
+
+    def test_sorted_by_last_played_descending(self) -> None:
+        """getRecentlyPlayed returns games sorted by lastPlayed descending."""
+        games = [
+            SteamGame("1", "Alpha", "alpha", 1000, 0, ""),
+            SteamGame("2", "Beta", "beta", 3000, 0, ""),
+            SteamGame("3", "Gamma", "gamma", 2000, 0, ""),
+        ]
+        lib = self._make_lib(games)
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 3
+        assert result[0]["name"] == "Beta"   # 3000 — most recent
+        assert result[1]["name"] == "Gamma"  # 2000
+        assert result[2]["name"] == "Alpha"  # 1000
+
+    def test_merges_moonlight_items(self) -> None:
+        """getRecentlyPlayed merges Steam and Moonlight recently played items."""
+        games = [SteamGame("1", "Steam Game", "sg", 2000, 0, "")]
+        lib = self._make_lib(games)
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Moonlight Game",
+            "source": "moonlight",
+            "imagePath": "",
+            "lastPlayed": 3000,
+            "appId": "",
+            "hostAddress": "192.168.0.10",
+        }])
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 2
+        # Moonlight game is more recent (3000 > 2000)
+        assert result[0]["name"] == "Moonlight Game"
+        assert result[0]["source"] == "moonlight"
+        assert result[1]["name"] == "Steam Game"
+        assert result[1]["source"] == "steam"
+
+    def test_limited_to_20_entries(self) -> None:
+        """getRecentlyPlayed returns at most 20 entries."""
+        # Create 25 Steam games all with last_played > 0
+        games = [
+            SteamGame(str(i), f"Game {i}", f"game{i}", i + 1, 0, "")
+            for i in range(25)
+        ]
+        lib = self._make_lib(games)
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 20
+
+    def test_moonlight_items_sorted_with_steam(self) -> None:
+        """Moonlight items are sorted together with Steam items by lastPlayed."""
+        games = [
+            SteamGame("1", "Steam A", "sa", 5000, 0, ""),
+            SteamGame("2", "Steam B", "sb", 1000, 0, ""),
+        ]
+        lib = self._make_lib(games)
+        lib.setMoonlightRecentlyPlayed([
+            {
+                "name": "Moonlight X",
+                "source": "moonlight",
+                "imagePath": "",
+                "lastPlayed": 3000,
+                "appId": "",
+                "hostAddress": "10.0.0.1",
+            },
+        ])
+        result = lib.getRecentlyPlayed()
+        names = [r["name"] for r in result]
+        assert names == ["Steam A", "Moonlight X", "Steam B"]
+
+
+# ---------------------------------------------------------------------------
+# SteamLibrary — setMoonlightRecentlyPlayed
+# ---------------------------------------------------------------------------
+
+
+class TestSteamLibrarySetMoonlightRecentlyPlayed:
+    def _make_lib(self):
+        from backend.steam_library import SteamLibrary
+
+        with patch("backend.steam_library.discover_steam_games", return_value=[]):
+            return SteamLibrary()
+
+    def test_stores_items(self) -> None:
+        """setMoonlightRecentlyPlayed stores the provided items."""
+        lib = self._make_lib()
+        items = [{"name": "Game", "source": "moonlight", "imagePath": "",
+                  "lastPlayed": 1000, "appId": "", "hostAddress": "10.0.0.1"}]
+        lib.setMoonlightRecentlyPlayed(items)
+        assert lib._moonlight_recent == items
+
+    def test_replaces_previous_items(self) -> None:
+        """setMoonlightRecentlyPlayed replaces previously stored items."""
+        lib = self._make_lib()
+        lib.setMoonlightRecentlyPlayed([{"name": "Old", "source": "moonlight",
+                                          "imagePath": "", "lastPlayed": 1,
+                                          "appId": "", "hostAddress": ""}])
+        lib.setMoonlightRecentlyPlayed([{"name": "New", "source": "moonlight",
+                                          "imagePath": "", "lastPlayed": 2,
+                                          "appId": "", "hostAddress": ""}])
+        assert len(lib._moonlight_recent) == 1
+        assert lib._moonlight_recent[0]["name"] == "New"
+
+    def test_emits_sources_model_changed(self) -> None:
+        """setMoonlightRecentlyPlayed emits sourcesModelChanged."""
+        lib = self._make_lib()
+        signals: list[bool] = []
+        lib.sourcesModelChanged.connect(lambda: signals.append(True))
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Game", "source": "moonlight", "imagePath": "",
+            "lastPlayed": 1000, "appId": "", "hostAddress": "10.0.0.1",
+        }])
+        assert len(signals) == 1
+
+
+# ---------------------------------------------------------------------------
+# SteamLibrary — "Recently Played" source list entry
+# ---------------------------------------------------------------------------
+
+
+class TestSteamLibraryRecentlyPlayedSource:
+    def _make_lib(self, games: list[SteamGame] | None = None):
+        from backend.steam_library import SteamLibrary
+
+        with patch("backend.steam_library.discover_steam_games",
+                   return_value=games or []):
+            return SteamLibrary()
+
+    def test_recently_played_not_shown_when_no_games_played(self) -> None:
+        """'Recently Played' source is absent when no games have been played."""
+        from backend.steam_library import SteamSourceListModel
+
+        lib = self._make_lib()
+        sources = [
+            lib._sources_model.data(lib._sources_model.index(i, 0),
+                                    SteamSourceListModel.SourceRole)
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" not in sources
+
+    def test_recently_played_shown_when_steam_game_played(self) -> None:
+        """'Recently Played' source appears when at least one Steam game has been played."""
+        from backend.steam_library import SteamSourceListModel
+
+        games = [SteamGame("1", "Game A", "gamea", 1700000000, 0, "")]
+        lib = self._make_lib(games)
+
+        sources = [
+            lib._sources_model.data(lib._sources_model.index(i, 0),
+                                    SteamSourceListModel.SourceRole)
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" in sources
+
+    def test_recently_played_shown_when_moonlight_game_played(self) -> None:
+        """'Recently Played' source appears when Moonlight recently played data is injected."""
+        from backend.steam_library import SteamSourceListModel
+
+        lib = self._make_lib()
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Moonlight Game", "source": "moonlight", "imagePath": "",
+            "lastPlayed": 1000, "appId": "", "hostAddress": "10.0.0.1",
+        }])
+
+        sources = [
+            lib._sources_model.data(lib._sources_model.index(i, 0),
+                                    SteamSourceListModel.SourceRole)
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" in sources
+
+    def test_recently_played_appears_first(self) -> None:
+        """'Recently Played' source appears before 'Steam' in the source list."""
+        from backend.steam_library import SteamSourceListModel
+
+        games = [SteamGame("1", "Game A", "gamea", 1700000000, 0, "")]
+        lib = self._make_lib(games)
+
+        idx0 = lib._sources_model.index(0, 0)
+        first_source = lib._sources_model.data(idx0, SteamSourceListModel.SourceRole)
+        assert first_source == "recent"
+
+    def test_recently_played_game_count_correct(self) -> None:
+        """'Recently Played' source shows the correct game count."""
+        from backend.steam_library import SteamSourceListModel
+
+        games = [
+            SteamGame("1", "Game A", "gamea", 1700000000, 0, ""),
+            SteamGame("2", "Game B", "gameb", 1700000001, 0, ""),
+            SteamGame("3", "Game C", "gamec", 0, 0, ""),  # never played
+        ]
+        lib = self._make_lib(games)
+
+        # Find the "recent" source entry
+        for i in range(lib._sources_model.rowCount()):
+            idx = lib._sources_model.index(i, 0)
+            if lib._sources_model.data(idx, SteamSourceListModel.SourceRole) == "recent":
+                count = lib._sources_model.data(idx, SteamSourceListModel.GameCountRole)
+                assert count == 2
+                return
+        pytest.fail("'recently played' source not found in sources model")
+
+    def test_recently_played_count_capped_at_20(self) -> None:
+        """'Recently Played' game count is capped at 20."""
+        from backend.steam_library import SteamSourceListModel
+
+        # 25 played games
+        games = [
+            SteamGame(str(i), f"Game {i}", f"game{i}", i + 1, 0, "")
+            for i in range(25)
+        ]
+        lib = self._make_lib(games)
+
+        for i in range(lib._sources_model.rowCount()):
+            idx = lib._sources_model.index(i, 0)
+            if lib._sources_model.data(idx, SteamSourceListModel.SourceRole) == "recent":
+                count = lib._sources_model.data(idx, SteamSourceListModel.GameCountRole)
+                assert count == 20
+                return
+        pytest.fail("'recently played' source not found in sources model")
+
+    def test_recently_played_disappears_after_clear(self) -> None:
+        """'Recently Played' source disappears when Moonlight data is cleared and no Steam games played."""
+        from backend.steam_library import SteamSourceListModel
+
+        lib = self._make_lib()
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Game", "source": "moonlight", "imagePath": "",
+            "lastPlayed": 1000, "appId": "", "hostAddress": "",
+        }])
+
+        # Verify it's present
+        sources_before = [
+            lib._sources_model.data(lib._sources_model.index(i, 0),
+                                    SteamSourceListModel.SourceRole)
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" in sources_before
+
+        # Clear Moonlight data
+        lib.setMoonlightRecentlyPlayed([])
+
+        sources_after = [
+            lib._sources_model.data(lib._sources_model.index(i, 0),
+                                    SteamSourceListModel.SourceRole)
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" not in sources_after
+
+
+# ---------------------------------------------------------------------------
+# SteamLibrary — launchRecentGame
+# ---------------------------------------------------------------------------
+
+
+class TestSteamLibraryLaunchRecentGame:
+    def _make_lib(self):
+        from backend.steam_library import SteamLibrary
+
+        with patch("backend.steam_library.discover_steam_games", return_value=[]):
+            return SteamLibrary()
+
+    def test_launch_steam_game_calls_launch_game(self) -> None:
+        """launchRecentGame with source='steam' calls launchGame(appId)."""
+        lib = self._make_lib()
+
+        with patch("backend.steam_library.QProcess.startDetached") as mock_start:
+            lib.launchRecentGame("steam", "440", "", "Team Fortress 2")
+            mock_start.assert_called_once_with("xdg-open", ["steam://rungameid/440"])
+
+    def test_launch_moonlight_game_calls_moonlight_library(self) -> None:
+        """launchRecentGame with source='moonlight' calls MoonlightLibrary.launchApp."""
+        lib = self._make_lib()
+
+        mock_moonlight = MagicMock()
+        lib.setMoonlightLibrary(mock_moonlight)
+
+        lib.launchRecentGame("moonlight", "", "192.168.0.10", "Cyberpunk 2077")
+        mock_moonlight.launchApp.assert_called_once_with("192.168.0.10", "Cyberpunk 2077")
+
+    def test_launch_moonlight_without_library_logs_warning(self) -> None:
+        """launchRecentGame with source='moonlight' and no library set logs a warning."""
+        lib = self._make_lib()
+        # No moonlight library set — should not raise
+        lib.launchRecentGame("moonlight", "", "192.168.0.10", "Desktop")
+        # No assertion needed — just verifying it doesn't crash
+
+    def test_launch_unknown_source_is_noop(self) -> None:
+        """launchRecentGame with unknown source does nothing."""
+        lib = self._make_lib()
+        mock_moonlight = MagicMock()
+        lib.setMoonlightLibrary(mock_moonlight)
+
+        with patch("backend.steam_library.QProcess.startDetached") as mock_start:
+            lib.launchRecentGame("unknown", "123", "10.0.0.1", "Game")
+            mock_start.assert_not_called()
+            mock_moonlight.launchApp.assert_not_called()
+
+    def test_set_moonlight_library_stores_reference(self) -> None:
+        """setMoonlightLibrary stores the reference for later use."""
+        lib = self._make_lib()
+        mock_moonlight = MagicMock()
+        lib.setMoonlightLibrary(mock_moonlight)
+        assert lib._moonlight_library is mock_moonlight

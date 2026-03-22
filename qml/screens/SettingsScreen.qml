@@ -46,6 +46,7 @@ FocusScope {
         { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
         { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
           min: 0, max: 5000, step: 100, suffix: "ms" },
+        { type: "toggle",  label: "Network Indicator",   settingKey: "showNetworkIndicator" },
     ]
 
     // ── Toast notification ────────────────────────────────────────────────────
@@ -95,8 +96,9 @@ FocusScope {
             }
             return "Not selected"
         }
-        if (key === "videoSnapAutoplay")  return settings.videoSnapAutoplay
-        if (key === "videoSnapDelayMs")   return settings.videoSnapDelayMs
+        if (key === "videoSnapAutoplay")      return settings.videoSnapAutoplay
+        if (key === "videoSnapDelayMs")       return settings.videoSnapDelayMs
+        if (key === "showNetworkIndicator")   return settings.showNetworkIndicator
         return ""
     }
 
@@ -117,8 +119,9 @@ FocusScope {
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
         else if (key === "moonlightCommand")   settings.setMoonlightCommand(value)
         else if (key === "moonlightHost")      settings.setMoonlightHostUuid(value)
-        else if (key === "videoSnapAutoplay")  settings.setVideoSnapAutoplay(value)
-        else if (key === "videoSnapDelayMs")   settings.setVideoSnapDelayMs(value)
+        else if (key === "videoSnapAutoplay")      settings.setVideoSnapAutoplay(value)
+        else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
+        else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────

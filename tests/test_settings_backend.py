@@ -1132,3 +1132,147 @@ class TestSettingsManagerGetHostsList:
         for item in result:
             assert "id" in item
             assert "label" in item
+
+
+# ---------------------------------------------------------------------------
+# Config — show_network_indicator
+# ---------------------------------------------------------------------------
+
+
+class TestConfigShowNetworkIndicator:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_show_network_indicator_default_is_true(self, tmp_path: Path) -> None:
+        """Config.show_network_indicator defaults to True."""
+        config = self._make_config(tmp_path)
+        assert config.show_network_indicator is True
+
+    def test_show_network_indicator_loaded_from_json(self, tmp_path: Path) -> None:
+        """Config._load() reads show_network_indicator from the ui section."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"show_network_indicator": False}},
+        )
+        assert config.show_network_indicator is False
+
+    def test_show_network_indicator_saved_to_json(self, tmp_path: Path) -> None:
+        """Config.save() writes show_network_indicator to the ui section."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.show_network_indicator = False
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["ui"]["show_network_indicator"] is False
+
+    def test_set_show_network_indicator_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_network_indicator updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_network_indicator(False)
+
+        assert config.show_network_indicator is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["ui"]["show_network_indicator"] is False
+
+    def test_ui_section_missing_uses_default(self, tmp_path: Path) -> None:
+        """Config without show_network_indicator in ui section uses default True."""
+        config = self._make_config(tmp_path, {"ui": {"video_snap_autoplay": True}})
+        assert config.show_network_indicator is True
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — showNetworkIndicator property and setShowNetworkIndicator slot
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerShowNetworkIndicator:
+    def _make_manager(self, tmp_path: Path):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        library = MagicMock()
+        plex_library = MagicMock()
+        manager = SettingsManager(config, library, plex_library)
+        return manager, config
+
+    def test_show_network_indicator_property_default_true(self, tmp_path: Path) -> None:
+        """showNetworkIndicator property returns True by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.showNetworkIndicator is True
+
+    def test_set_show_network_indicator_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowNetworkIndicator updates config and emits showNetworkIndicatorChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted: list[bool] = []
+        manager.showNetworkIndicatorChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowNetworkIndicator(False)
+
+        assert config.show_network_indicator is False
+        assert len(emitted) == 1
+
+    def test_set_show_network_indicator_to_true_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowNetworkIndicator(True) also emits the signal."""
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"ui": {"show_network_indicator": False}}),
+            encoding="utf-8",
+        )
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        assert manager.showNetworkIndicator is False
+
+        emitted: list[bool] = []
+        manager.showNetworkIndicatorChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowNetworkIndicator(True)
+
+        assert config.show_network_indicator is True
+        assert len(emitted) == 1
+
+    def test_show_network_indicator_config_round_trip(self, tmp_path: Path) -> None:
+        """show_network_indicator survives a save/load round-trip."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_network_indicator(False)
+
+        # Reload from disk
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.show_network_indicator is False

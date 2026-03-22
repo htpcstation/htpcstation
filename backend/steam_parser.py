@@ -7,9 +7,15 @@ installed games from the local Steam library.
 from __future__ import annotations
 
 import logging
+import os
+import shutil
+import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Optional
 
+from backend.steam_config import get_steam_dir
 from backend.steam_models import SteamGame
 
 logger = logging.getLogger(__name__)
@@ -149,24 +155,80 @@ def _parse_block(tokens: list[str], pos: int) -> tuple[dict, int]:
 
 
 _STEAM_CDN_POSTER = "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900_2x.jpg"
+_OVERRIDE_EXTENSIONS = ("jpg", "jpeg", "png", "gif", "webp")
+_DOWNLOAD_TIMEOUT = 5  # seconds
 
 
 def _resolve_artwork(steamapps_path: Path, app_id: str) -> str:
-    """Return the best available poster image path/URL.
+    """Return the best available poster image as a local file path.
 
-    Checks local Steam cache first, falls back to Steam CDN URL.
-    QML's Image component can load both local paths and URLs.
+    Resolution order:
+    1. Custom override in artwork_custom/<app_id>.<ext>
+    2. HTPC Station scraped cache in artwork_scraped/<app_id>.jpg
+    3. Steam's own local cache (copied to scraped cache)
+    4. Download from CDN (saved to scraped cache)
+    5. Empty string if all else fails
+
+    Never returns a URL — always a local path or empty string.
     """
-    steam_root = steamapps_path.parent  # e.g. ***REMOVED***.local/share/Steam/
-    cache_dir = steam_root / "appcache" / "librarycache" / app_id
+    steam_dir = get_steam_dir()
 
-    for filename in ("library_600x900.jpg", "header.jpg"):
-        candidate = cache_dir / filename
+    # 1. Check custom override first
+    custom_dir = steam_dir / "artwork_custom"
+    for ext in _OVERRIDE_EXTENSIONS:
+        candidate = custom_dir / f"{app_id}.{ext}"
         if candidate.is_file():
             return str(candidate)
 
-    # Fall back to Steam CDN — QML Image can load URLs directly
-    return _STEAM_CDN_POSTER.format(app_id=app_id)
+    # 2. Check HTPC Station scraped cache
+    scraped_path = steam_dir / "artwork_scraped" / f"{app_id}.jpg"
+    if scraped_path.is_file():
+        return str(scraped_path)
+
+    # 3. Check Steam's own local cache and copy to scraped cache
+    steam_root = steamapps_path.parent  # e.g. ***REMOVED***.local/share/Steam/
+    steam_cache_dir = steam_root / "appcache" / "librarycache" / app_id
+    for filename in ("library_600x900.jpg", "header.jpg"):
+        candidate = steam_cache_dir / filename
+        if candidate.is_file():
+            try:
+                shutil.copy2(candidate, scraped_path)
+                return str(scraped_path)
+            except OSError as exc:
+                logger.warning(
+                    "_resolve_artwork: failed to copy Steam cache for app_id=%s: %s",
+                    app_id, exc,
+                )
+                return str(candidate)
+
+    # 4. Download from CDN and save atomically to scraped cache
+    url = _STEAM_CDN_POSTER.format(app_id=app_id)
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "htpcstation/1.0"})
+        with urllib.request.urlopen(req, timeout=_DOWNLOAD_TIMEOUT) as resp:
+            scraped_dir = steam_dir / "artwork_scraped"
+            tmp_fd, tmp_name = tempfile.mkstemp(dir=scraped_dir, suffix=".jpg.tmp")
+            try:
+                with os.fdopen(tmp_fd, "wb") as f:
+                    while True:
+                        chunk = resp.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                os.replace(tmp_name, scraped_path)
+            except OSError:
+                try:
+                    os.unlink(tmp_name)
+                except OSError:
+                    pass
+                raise
+        logger.debug("_resolve_artwork: downloaded poster for app_id=%s -> %s", app_id, scraped_path)
+        return str(scraped_path)
+    except (urllib.error.URLError, OSError) as exc:
+        logger.warning(
+            "_resolve_artwork: failed to download poster for app_id=%s: %s", app_id, exc
+        )
+        return ""
 
 
 # ---------------------------------------------------------------------------

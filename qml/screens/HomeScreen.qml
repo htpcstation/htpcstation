@@ -166,11 +166,24 @@ FocusScope {
 
     // ── Clock display ─────────────────────────────────────────────────────────
     ClockDisplay {
+        id: clockDisplay
         anchors {
             right: parent.right
             rightMargin: root.vpx(16)
             verticalCenter: tabBar.verticalCenter
         }
+    }
+
+    // ── Network status indicator ──────────────────────────────────────────────
+    NetworkIndicator {
+        id: networkIndicator
+        anchors {
+            right: clockDisplay.left
+            rightMargin: root.vpx(12)
+            verticalCenter: tabBar.verticalCenter
+        }
+        online: networkMonitor ? networkMonitor.online : true
+        visible: settings ? settings.showNetworkIndicator : true
     }
 
     // Thin separator line below the tab bar

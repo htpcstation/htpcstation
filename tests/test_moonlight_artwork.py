@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import backend.moonlight_artwork as artwork_module
+import backend.moonlight_config as moonlight_config_module
 from backend.moonlight_artwork import (
     get_artwork_path,
     refresh_artwork,
@@ -34,22 +35,24 @@ from backend.moonlight_artwork import (
 
 
 @pytest.fixture(autouse=True)
-def redirect_artwork_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def redirect_moonlight_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect all artwork I/O to a temporary directory for each test.
 
-    Also creates the ``custom/`` subdirectory to mirror what the real
-    ``_get_artwork_dir()`` does.
+    Creates ``artwork_scraped/`` and ``artwork_custom/`` subdirectories to
+    mirror what the real ``get_moonlight_dir()`` does.
     """
-    artwork_dir = tmp_path / "moonlight_artwork"
-    artwork_dir.mkdir()
-    (artwork_dir / "custom").mkdir()
-    monkeypatch.setattr(artwork_module, "_get_artwork_dir", lambda: artwork_dir)
-    return artwork_dir
+    moonlight_dir = tmp_path / "moonlight"
+    moonlight_dir.mkdir()
+    (moonlight_dir / "artwork_scraped").mkdir()
+    (moonlight_dir / "artwork_custom").mkdir()
+    monkeypatch.setattr(moonlight_config_module, "get_moonlight_dir", lambda: moonlight_dir)
+    monkeypatch.setattr(artwork_module, "get_moonlight_dir", lambda: moonlight_dir)
+    return moonlight_dir
 
 
 def _artwork_dir(tmp_path: Path) -> Path:
-    """Return the redirected artwork directory for the current test."""
-    return tmp_path / "moonlight_artwork"
+    """Return the redirected moonlight directory for the current test."""
+    return tmp_path / "moonlight"
 
 
 # ---------------------------------------------------------------------------
@@ -160,18 +163,19 @@ class TestSlugifyAppName:
 
 
 class TestArtworkDirSetup:
-    def test_custom_subdir_created_by_get_artwork_dir(
+    def test_subdirs_created_by_get_moonlight_dir(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """_get_artwork_dir() creates the custom/ subdirectory automatically."""
+        """get_moonlight_dir() creates artwork_scraped/ and artwork_custom/ subdirectories."""
         # Point XDG_CONFIG_HOME at a fresh temp dir and call the real function
         # directly (bypassing the autouse monkeypatch which replaces the whole function).
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
-        from backend.moonlight_artwork import _get_artwork_dir as real_get_artwork_dir
+        from backend.moonlight_config import get_moonlight_dir as real_get_moonlight_dir
 
-        result = real_get_artwork_dir()
+        result = real_get_moonlight_dir()
         assert result.is_dir()
-        assert (result / "custom").is_dir()
+        assert (result / "artwork_scraped").is_dir()
+        assert (result / "artwork_custom").is_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -181,10 +185,10 @@ class TestArtworkDirSetup:
 
 class TestManualOverride:
     def test_override_jpg_returned_immediately(self, tmp_path: Path) -> None:
-        """A pre-created custom/<slug>.jpg file is returned without any HTTP call."""
-        artwork_dir = _artwork_dir(tmp_path)
+        """A pre-created artwork_custom/<slug>.jpg file is returned without any HTTP call."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
-        override_file = artwork_dir / "custom" / f"{slug}.jpg"
+        override_file = moonlight_dir / "artwork_custom" / f"{slug}.jpg"
         override_file.write_bytes(b"FAKEIMAGE")
 
         with patch("urllib.request.urlopen") as mock_urlopen:
@@ -194,10 +198,10 @@ class TestManualOverride:
         assert result == override_file
 
     def test_override_png_returned(self, tmp_path: Path) -> None:
-        """A pre-created custom/<slug>.png file is also detected."""
-        artwork_dir = _artwork_dir(tmp_path)
+        """A pre-created artwork_custom/<slug>.png file is also detected."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("My Game")
-        override_file = artwork_dir / "custom" / f"{slug}.png"
+        override_file = moonlight_dir / "artwork_custom" / f"{slug}.png"
         override_file.write_bytes(b"PNGDATA")
 
         result = refresh_artwork("My Game")
@@ -205,26 +209,26 @@ class TestManualOverride:
 
     def test_override_updates_metadata_source_manual(self, tmp_path: Path) -> None:
         """When a manual override is found, metadata is updated with source='manual'."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
-        override_file = artwork_dir / "custom" / f"{slug}.jpg"
+        override_file = moonlight_dir / "artwork_custom" / f"{slug}.jpg"
         override_file.write_bytes(b"FAKEIMAGE")
 
         refresh_artwork("Desktop")
 
-        index_path = artwork_dir / "moonlight_artwork_index.json"
+        index_path = moonlight_dir / "artwork_index.json"
         assert index_path.exists()
         metadata = json.loads(index_path.read_text())
         assert metadata[slug]["source"] == "manual"
         assert metadata[slug]["filename"] == override_file.name
 
     def test_override_takes_priority_over_cached_metadata(self, tmp_path: Path) -> None:
-        """Manual override in custom/ takes priority even when metadata says source='steam'."""
-        artwork_dir = _artwork_dir(tmp_path)
+        """Manual override in artwork_custom/ takes priority even when metadata says source='steam'."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
 
-        # Pre-populate metadata with a steam entry pointing to a file in the main dir
-        steam_file = artwork_dir / f"{slug}.jpg"
+        # Pre-populate metadata with a steam entry pointing to a file in artwork_scraped/
+        steam_file = moonlight_dir / "artwork_scraped" / f"{slug}.jpg"
         steam_file.write_bytes(b"STEAMIMAGE")
         metadata = {
             slug: {
@@ -236,49 +240,49 @@ class TestManualOverride:
                 "updated_at": "2024-01-01T00:00:00Z",
             }
         }
-        (artwork_dir / "moonlight_artwork_index.json").write_text(
+        (moonlight_dir / "artwork_index.json").write_text(
             json.dumps(metadata), encoding="utf-8"
         )
 
         # Place a custom override — it must win over the steam-tracked file
-        override_file = artwork_dir / "custom" / f"{slug}.jpg"
+        override_file = moonlight_dir / "artwork_custom" / f"{slug}.jpg"
         override_file.write_bytes(b"CUSTOMIMAGE")
 
         result = refresh_artwork("Desktop")
         assert result == override_file
 
     def test_get_artwork_path_returns_override(self, tmp_path: Path) -> None:
-        """get_artwork_path also detects manual overrides in custom/."""
-        artwork_dir = _artwork_dir(tmp_path)
+        """get_artwork_path also detects manual overrides in artwork_custom/."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
-        override_file = artwork_dir / "custom" / f"{slug}.jpg"
+        override_file = moonlight_dir / "artwork_custom" / f"{slug}.jpg"
         override_file.write_bytes(b"FAKEIMAGE")
 
         result = get_artwork_path("Desktop")
         assert result == override_file
 
-    def test_file_in_main_dir_not_treated_as_override(self, tmp_path: Path) -> None:
-        """A file in the main artwork dir (not custom/) is NOT treated as a manual override."""
-        artwork_dir = _artwork_dir(tmp_path)
+    def test_file_in_scraped_dir_not_treated_as_override(self, tmp_path: Path) -> None:
+        """A file in artwork_scraped/ (not artwork_custom/) is NOT treated as a manual override."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
 
-        # File in main dir only — no metadata, no custom/ file
-        main_file = artwork_dir / f"{slug}.jpg"
-        main_file.write_bytes(b"MAINIMAGE")
+        # File in artwork_scraped/ only — no metadata, no artwork_custom/ file
+        scraped_file = moonlight_dir / "artwork_scraped" / f"{slug}.jpg"
+        scraped_file.write_bytes(b"SCRAPEDIMAGE")
 
-        # Without metadata, get_artwork_path should return None (not the main-dir file)
+        # Without metadata, get_artwork_path should return None (not the scraped file)
         result = get_artwork_path("Desktop")
         assert result is None
 
     def test_custom_file_takes_priority_over_steam_downloaded_same_slug(
         self, tmp_path: Path
     ) -> None:
-        """A file in custom/ takes priority over a Steam-downloaded file with the same slug."""
-        artwork_dir = _artwork_dir(tmp_path)
+        """A file in artwork_custom/ takes priority over a Steam-downloaded file with the same slug."""
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Cyberpunk 2077")
 
-        # Simulate a Steam-downloaded file in the main dir with metadata
-        steam_file = artwork_dir / f"{slug}.jpg"
+        # Simulate a Steam-downloaded file in artwork_scraped/ with metadata
+        steam_file = moonlight_dir / "artwork_scraped" / f"{slug}.jpg"
         steam_file.write_bytes(b"STEAMDOWNLOADED")
         metadata = {
             slug: {
@@ -290,12 +294,12 @@ class TestManualOverride:
                 "updated_at": "2024-01-01T00:00:00Z",
             }
         }
-        (artwork_dir / "moonlight_artwork_index.json").write_text(
+        (moonlight_dir / "artwork_index.json").write_text(
             json.dumps(metadata), encoding="utf-8"
         )
 
         # User places a custom override with the same slug
-        custom_file = artwork_dir / "custom" / f"{slug}.jpg"
+        custom_file = moonlight_dir / "artwork_custom" / f"{slug}.jpg"
         custom_file.write_bytes(b"USEROVERRIDE")
 
         result = get_artwork_path("Cyberpunk 2077")
@@ -311,9 +315,9 @@ class TestManualOverride:
 class TestCachedMetadata:
     def test_cached_entry_returns_without_http(self, tmp_path: Path) -> None:
         """If metadata + file exist, refresh_artwork returns without any HTTP call."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Cyberpunk 2077")
-        cached_file = artwork_dir / f"{slug}.jpg"
+        cached_file = moonlight_dir / "artwork_scraped" / f"{slug}.jpg"
         cached_file.write_bytes(b"CACHEDIMAGE")
 
         metadata = {
@@ -326,7 +330,7 @@ class TestCachedMetadata:
                 "updated_at": "2024-01-01T00:00:00Z",
             }
         }
-        (artwork_dir / "moonlight_artwork_index.json").write_text(
+        (moonlight_dir / "artwork_index.json").write_text(
             json.dumps(metadata), encoding="utf-8"
         )
 
@@ -338,9 +342,9 @@ class TestCachedMetadata:
 
     def test_get_artwork_path_returns_cached(self, tmp_path: Path) -> None:
         """get_artwork_path returns the cached file path from metadata."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Cyberpunk 2077")
-        cached_file = artwork_dir / f"{slug}.jpg"
+        cached_file = moonlight_dir / "artwork_scraped" / f"{slug}.jpg"
         cached_file.write_bytes(b"CACHEDIMAGE")
 
         metadata = {
@@ -353,7 +357,7 @@ class TestCachedMetadata:
                 "updated_at": "2024-01-01T00:00:00Z",
             }
         }
-        (artwork_dir / "moonlight_artwork_index.json").write_text(
+        (moonlight_dir / "artwork_index.json").write_text(
             json.dumps(metadata), encoding="utf-8"
         )
 
@@ -362,10 +366,10 @@ class TestCachedMetadata:
 
     def test_missing_file_triggers_redownload(self, tmp_path: Path) -> None:
         """If metadata exists but the file is gone, a new download is attempted."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Cyberpunk 2077")
 
-        # Metadata says file exists but it doesn't
+        # Metadata says file exists but it doesn't (file not created in artwork_scraped/)
         metadata = {
             slug: {
                 "app_name": "Cyberpunk 2077",
@@ -376,7 +380,7 @@ class TestCachedMetadata:
                 "updated_at": "2024-01-01T00:00:00Z",
             }
         }
-        (artwork_dir / "moonlight_artwork_index.json").write_text(
+        (moonlight_dir / "artwork_index.json").write_text(
             json.dumps(metadata), encoding="utf-8"
         )
 
@@ -407,7 +411,7 @@ class TestCachedMetadata:
 class TestSteamDownload:
     def test_steam_search_success_downloads_poster(self, tmp_path: Path) -> None:
         """Steam search success → downloads poster, saves file, metadata recorded."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Divinity: Original Sin II")
 
         search_resp = _fake_urlopen_search([{"id": 435150, "name": "Divinity: Original Sin 2"}])
@@ -428,9 +432,11 @@ class TestSteamDownload:
         assert result is not None
         assert result.exists()
         assert result.read_bytes() == b"POSTERDATA"
+        # Downloaded file should be in artwork_scraped/
+        assert result.parent == moonlight_dir / "artwork_scraped"
 
         # Verify metadata
-        index_path = artwork_dir / "moonlight_artwork_index.json"
+        index_path = moonlight_dir / "artwork_index.json"
         metadata = json.loads(index_path.read_text())
         assert metadata[slug]["steam_app_id"] == 435150
         assert metadata[slug]["source"] == "steam"
@@ -438,7 +444,7 @@ class TestSteamDownload:
 
     def test_steam_download_png_content_type(self, tmp_path: Path) -> None:
         """If the CDN returns image/png, the file is saved with .png extension."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("My Game")
 
         search_resp = _fake_urlopen_search([{"id": 99999, "name": "My Game"}])
@@ -461,7 +467,7 @@ class TestSteamDownload:
 
     def test_steam_download_webp_content_type(self, tmp_path: Path) -> None:
         """If the CDN returns image/webp, the file is saved with .webp extension."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
 
         search_resp = _fake_urlopen_search([{"id": 11111, "name": "WebP Game"}])
         image_resp = _fake_urlopen_image(b"WEBPDATA", content_type="image/webp")
@@ -483,7 +489,7 @@ class TestSteamDownload:
 
     def test_steam_download_uses_first_result(self, tmp_path: Path) -> None:
         """Steam search uses the first result's app ID."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
 
         search_resp = _fake_urlopen_search([
             {"id": 111, "name": "First Result"},
@@ -508,7 +514,7 @@ class TestSteamDownload:
 
     def test_metadata_updated_after_download(self, tmp_path: Path) -> None:
         """Metadata index is updated with steam_app_id and source='steam' after download."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Half-Life 2")
 
         search_resp = _fake_urlopen_search([{"id": 220, "name": "Half-Life 2"}])
@@ -527,7 +533,7 @@ class TestSteamDownload:
             refresh_artwork("Half-Life 2")
 
         metadata = json.loads(
-            (artwork_dir / "moonlight_artwork_index.json").read_text()
+            (moonlight_dir / "artwork_index.json").read_text()
         )
         assert metadata[slug]["steam_app_id"] == 220
         assert metadata[slug]["source"] == "steam"
@@ -551,7 +557,7 @@ class TestSteamNoResults:
 
     def test_no_results_metadata_source_none(self, tmp_path: Path) -> None:
         """When Steam returns no results, metadata entry has source='none'."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Totally Unknown Game XYZ")
 
         search_resp = _fake_urlopen_search([])
@@ -560,7 +566,7 @@ class TestSteamNoResults:
             refresh_artwork("Totally Unknown Game XYZ")
 
         metadata = json.loads(
-            (artwork_dir / "moonlight_artwork_index.json").read_text()
+            (moonlight_dir / "artwork_index.json").read_text()
         )
         assert metadata[slug]["source"] == "none"
         assert metadata[slug]["steam_app_id"] is None
@@ -577,7 +583,7 @@ class TestSteamNoResults:
 
     def test_network_error_metadata_source_none(self, tmp_path: Path) -> None:
         """A network error records source='none' in metadata."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Some Game")
 
         with patch(
@@ -587,7 +593,7 @@ class TestSteamNoResults:
             refresh_artwork("Some Game")
 
         metadata = json.loads(
-            (artwork_dir / "moonlight_artwork_index.json").read_text()
+            (moonlight_dir / "artwork_index.json").read_text()
         )
         assert metadata[slug]["source"] == "none"
 
@@ -605,7 +611,7 @@ class TestSteamNoResults:
 class TestDoubleRefreshSafety:
     def test_double_refresh_does_not_corrupt_metadata(self, tmp_path: Path) -> None:
         """Two sequential refresh calls for the same app don't corrupt metadata."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
         slug = slugify_app_name("Desktop")
 
         search_resp1 = _fake_urlopen_search([{"id": 12345, "name": "Desktop"}])
@@ -632,14 +638,14 @@ class TestDoubleRefreshSafety:
 
         # Metadata should still be valid JSON with one entry
         metadata = json.loads(
-            (artwork_dir / "moonlight_artwork_index.json").read_text()
+            (moonlight_dir / "artwork_index.json").read_text()
         )
         assert slug in metadata
         assert metadata[slug]["source"] == "steam"
 
     def test_metadata_written_atomically(self, tmp_path: Path) -> None:
         """Metadata is written atomically (temp file + rename) — no partial writes."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
 
         search_resp = _fake_urlopen_search([{"id": 99, "name": "Test"}])
         image_resp = _fake_urlopen_image(b"IMAGE")
@@ -657,14 +663,14 @@ class TestDoubleRefreshSafety:
             refresh_artwork("Test")
 
         # The index file should be valid JSON (not partial)
-        index_path = artwork_dir / "moonlight_artwork_index.json"
+        index_path = moonlight_dir / "artwork_index.json"
         assert index_path.exists()
         data = json.loads(index_path.read_text())
         assert isinstance(data, dict)
 
     def test_second_refresh_uses_cache_not_network(self, tmp_path: Path) -> None:
         """After a successful download, a second refresh uses the cached file."""
-        artwork_dir = _artwork_dir(tmp_path)
+        moonlight_dir = _artwork_dir(tmp_path)
 
         search_resp = _fake_urlopen_search([{"id": 42, "name": "Cached Game"}])
         image_resp = _fake_urlopen_image(b"IMAGE")

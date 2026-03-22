@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 6)
+# HTPC Station — Project Resume Document (Checkpoint 7)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam). This checkpoint covers M4 (Moonlight game streaming).
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight). This checkpoint covers M5 (Home Screen features), Plex TV Show infinite scroll, Plex Live TV, and Steam artwork caching.
 
 ---
 
@@ -20,7 +20,7 @@
 - **Location:** `***REMOVED***opencode/htpcstation/`
 - **Remote:** `git@github.com:htpcstation/htpcstation.git`
 - **Branch:** `main`
-- **Tests:** 612 passing (`python3 -m pytest tests/ -q`)
+- **Tests:** 758 passing (`python3 -m pytest tests/ -q`)
 - **Run:** `cd ***REMOVED***opencode/htpcstation && python3 main.py`
 - **Dependencies:** `pip install PySide6 evdev requests`
 - **Dev machine:** ThinkPad T460, dual-core CPU, Fedora Linux (lower spec than target J5005)
@@ -29,7 +29,8 @@
 - ROMs: `***REMOVED***opencode/ROMs/` (3 systems: gb, ngpc, sega32x with gamelist.xml, screenshots, videos)
 - Steam: `***REMOVED***.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/` (Flatpak, 5 games)
 - Moonlight: `***REMOVED***.var/app/com.moonlight_stream.Moonlight/config/Moonlight Game Streaming Project/Moonlight.conf` (Flatpak, 1 paired host, 7 apps)
-- Moonlight artwork cache: `***REMOVED***.config/htpcstation/moonlight_artwork/` (auto-downloaded) + `custom/` (user overrides)
+- Moonlight data: `***REMOVED***.config/htpcstation/moonlight/` (artwork_scraped/, artwork_custom/, artwork_index.json, play_history.json)
+- Steam artwork cache: `***REMOVED***.config/htpcstation/steam/` (artwork_scraped/, artwork_custom/)
 - Plex API spec: `***REMOVED***opencode/openapi.json` (Plex Media Server OpenAPI 3.1)
 - ES-DE reference: `***REMOVED***opencode/es-de/`
 - Pegasus reference: `***REMOVED***opencode/pegasus-frontend/`
@@ -85,13 +86,17 @@ htpcstation/
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
     moonlight_artwork.py               # Artwork cache: Steam Store lookup, CDN download, manual overrides
     moonlight_client.py                # Moonlight CLI wrapper: list_apps(), MoonlightLauncher (QProcess)
+    moonlight_config.py                # Shared Moonlight directory helper (***REMOVED***.config/htpcstation/moonlight/)
     moonlight_library.py               # MoonlightLibrary QObject: two-phase refresh, models, launch
     moonlight_models.py                # MoonlightHost, MoonlightApp dataclasses
     moonlight_parser.py                # Moonlight QSettings config parser, host discovery, TCP probe
+    moonlight_play_history.py          # Play timestamp recording/reading (play_history.json)
+    network_monitor.py                 # NetworkMonitor QObject: periodic connectivity check, online property
     settings_manager.py                # SettingsManager QObject: wraps Config for QML access, OAuth
-    steam_library.py                   # SteamLibrary QObject: models, sort, launch via xdg-open
+    steam_config.py                    # Shared Steam directory helper (***REMOVED***.config/htpcstation/steam/)
+    steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played
     steam_models.py                    # SteamGame dataclass
-    steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution
+    steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution + caching
   extension/                           # Chromium browser extension (Manifest V3)
     manifest.json                      # Extension manifest, content scripts on all URLs
     content.js                         # Gamepad API polling loop, edge detection, auto-repeat, A/B swap
@@ -107,6 +112,7 @@ htpcstation/
     components/
       ClockDisplay.qml                 # HH:MM clock, 1s timer
       FocusRing.qml                    # Reusable focus indicator
+      NetworkIndicator.qml             # Canvas-drawn WiFi icon (online/offline)
       QuitDialog.qml                   # Modal quit confirmation
       SettingButton.qml                # Action button row for settings
       SettingSelect.qml                # Cycle-through selector row for settings (server/user picker)
@@ -123,10 +129,12 @@ htpcstation/
       SteamGameDetail.qml              # Steam game metadata, launch action
       MoonlightAppGrid.qml             # Moonlight app poster grid with sort overlay
       MoonlightAppDetail.qml           # Moonlight app detail, poster, stream action
+      RecentlyPlayedGrid.qml           # Unified Steam+Moonlight recently played grid with source badges
+      RecentlyPlayedDetail.qml         # Recently played detail with source badge and launch
       WatchScreen.qml                  # Plex library list + movie/show grids + detail views
       PlexMovieGrid.qml                # Movie poster grid, infinite scroll, sort/filter overlay
       PlexMovieDetail.qml              # Movie metadata, poster, play action
-      PlexShowGrid.qml                 # TV show poster grid, sort/filter overlay
+      PlexShowGrid.qml                 # TV show poster grid, infinite scroll, sort/filter overlay
       PlexOnDeckGrid.qml               # Continue Watching grid with progress bars
       PlexShowDetail.qml               # Show metadata, horizontal season tabs, episode list
       SettingsScreen.qml               # 5-section settings menu (Games, Plex, Browser, Moonlight, UI)
@@ -136,16 +144,18 @@ htpcstation/
     test_emulator_launch.py            # 24 tests
     test_collections.py                # 22 tests
     test_filter_sort.py                # 12 tests
-    test_plex_backend.py               # 152 tests
+    test_plex_backend.py               # 191 tests
     test_plex_account.py               # 45 tests
     test_browser_launch.py             # 31 tests
-    test_settings_backend.py           # 75 tests
+    test_settings_backend.py           # 84 tests
     test_video_snap.py                 # 5 tests
-    test_steam.py                      # 63 tests
+    test_steam.py                      # 95 tests
     test_moonlight_parser.py           # 30 tests
     test_moonlight_client.py           # 24 tests
-    test_moonlight_library.py          # 86 tests
+    test_moonlight_library.py          # 119 tests
     test_moonlight_artwork.py          # 36 tests
+    test_moonlight_play_history.py     # 20 tests
+    test_network_monitor.py            # 13 tests
 ```
 
 ---
@@ -194,18 +204,19 @@ htpcstation/
 - Watch screen: library list with "Plex" header, Continue Watching, Movies, TV Shows, DVR
 - Movie grid: poster grid with infinite scroll (50 per page), portrait cells
 - Movie detail: poster, metadata (studio, rating, score, runtime, genre, director, cast), tagline, synopsis
-- TV show grid: poster grid with episode progress indicators
+- TV show grid: poster grid with infinite scroll (50 per page), episode progress indicators
 - TV show detail: show metadata + horizontal season tabs + episode list with watched indicators (●/○/◐)
 - Plex sort & filter: server-side sort (A-Z, Z-A, Recently Added, Year, Rating) + genre filter via Y button
 - **Browser launch:** Deep-link to `app.plex.tv` with user token. Auto-user-select and auto-play via browser extension. Dedicated Brave instance with isolated `--user-data-dir`.
 - Window hide/show: HTPC Station hides when browser/emulator launches, restores on exit
 - Left/Right in movie detail navigates to prev/next movie
 - Poster images display in detail views (cached during `getMovie()`/`getShow()`)
+- **Live TV:** "Live TV" entry in the Plex library list. Selecting it launches Plex Web at `#!/live-tv` (program guide). Always visible when server is connected. Supports HDHomeRun tuners via Plex DVR.
 
 ### M3 — Steam (PC Games) ✅
 - **ACF/VDF parser** (`backend/steam_parser.py`): Recursive descent parser for Valve Data Format. `discover_steam_games()` scans Flatpak (`***REMOVED***.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/`) and native (`***REMOVED***.steam/steam/steamapps/`, `***REMOVED***.local/share/Steam/steamapps/`) paths.
 - **Game filtering:** Excludes non-game entries (Proton, Steam Linux Runtime, Steamworks Redistributables, incomplete installs with StateFlags ≠ 4).
-- **Artwork resolution:** Local Steam cache (`appcache/librarycache/{appid}/library_600x900.jpg` → `header.jpg` fallback) → Steam CDN URL (`cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900_2x.jpg`). QML Image loads both local paths and URLs directly.
+- **Artwork resolution:** Custom override (`***REMOVED***.config/htpcstation/steam/artwork_custom/<appid>.<ext>`) → HTPC cache (`artwork_scraped/<appid>.jpg`) → local Steam cache (`appcache/librarycache/{appid}/`) → Steam CDN download (saved to `artwork_scraped/`). Always returns a local file path, never a URL. Works offline after first download.
 - **SteamLibrary QObject** (`backend/steam_library.py`): `SteamSourceListModel` (source list, extensible for GOG/Epic) and `SteamGameListModel` (game grid). Slots: `refresh()`, `getGame(index)`, `launchGame(appId)`, `selectSource(source)`, `sortGames(sortKey)`.
 - **Launch:** `xdg-open steam://rungameid/{appId}` via `QProcess.startDetached()` (fire-and-forget). HTPC Station does not hide/minimize — the game takes focus and HTPC Station sits behind it. When the game exits, the window manager returns focus automatically.
 - **PC Games tab:** "PC Games" tab at index 1 (between "Retro Games" and "Watch"). `PcGamesScreen.qml` with 3-state view (sources → games → detail), following the same pattern as `RetroGamesScreen.qml`.
@@ -221,17 +232,25 @@ htpcstation/
 - **Single source entry:** PC Games source list shows one "Moonlight Games" entry (not per-host). Apps come from the host selected in Settings. Source key is `"moonlight"`.
 - **App enumeration:** `list_apps()` in `backend/moonlight_client.py` runs `moonlight list <host>` via `subprocess.run` with 10s timeout. Parses stdout (one app name per line), ignores stderr (SDL/Qt noise). Returns empty list on any error.
 - **Artwork cache:** `backend/moonlight_artwork.py` resolves poster images for Moonlight apps:
-  - **Cache location:** `***REMOVED***.config/htpcstation/moonlight_artwork/` (auto-downloaded files managed by the app)
+  - **Cache location:** `***REMOVED***.config/htpcstation/moonlight/artwork_scraped/` (auto-downloaded) and `artwork_custom/` (user overrides)
   - **Steam Store lookup:** App name searched via `store.steampowered.com/api/storesearch/`; first result's app ID used to download poster from Steam CDN (`library_600x900_2x.jpg`). Downloaded atomically (temp file → rename).
-  - **Manual overrides:** Drop `<slug>.<ext>` into `***REMOVED***.config/htpcstation/moonlight_artwork/custom/`. The `custom/` subdirectory is created automatically on first run. Files in `custom/` always take priority over auto-downloaded artwork.
+  - **Manual overrides:** Drop `<slug>.<ext>` into `***REMOVED***.config/htpcstation/moonlight/artwork_custom/`. Created automatically on first run. Files in `artwork_custom/` always take priority.
   - **Slug convention:** Lowercase the app name, replace non-alphanumeric characters with hyphens, collapse multiple hyphens. Examples: "Steam Big Picture" → `steam-big-picture.jpg`, "Divinity: Original Sin II" → `divinity-original-sin-ii.jpg`.
-  - **Metadata index:** `moonlight_artwork_index.json` tracks each app's slug, Steam app ID, source (steam/manual/none), filename, and timestamp. Prevents redundant API calls on subsequent launches.
-- **MoonlightLibrary QObject** (`backend/moonlight_library.py`): `MoonlightAppListModel` with `name`, `hostUuid`, `imagePath` roles. Slots: `refresh()`, `getApp(index)` (returns `name`, `hostAddress`, `hostName`, `hostUuid`, `imagePath`), `launchApp(hostAddress, appName)`, `launchGui()`, `getPairedHosts()`, `setSelectedHost(uuid)`, `sortApps(sortKey)`. Properties: `appsModel`, `loading` (bool, True during Phase 2).
+  - **Metadata index:** `artwork_index.json` tracks each app's slug, Steam app ID, source (steam/manual/none), filename, and timestamp. Prevents redundant API calls on subsequent launches.
+- **Play history:** `backend/moonlight_play_history.py` records launch timestamps to `***REMOVED***.config/htpcstation/moonlight/play_history.json`. Updated on each `launchApp()` call. Used for "Recently Played" source in PC Games.
+- **MoonlightLibrary QObject** (`backend/moonlight_library.py`): `MoonlightAppListModel` with `name`, `hostUuid`, `imagePath`, `lastPlayed` roles. Slots: `refresh()`, `getApp(index)` (returns `name`, `hostAddress`, `hostName`, `hostUuid`, `imagePath`, `lastPlayed`), `launchApp(hostAddress, appName)`, `launchGui()`, `getPairedHosts()`, `setSelectedHost(uuid)`, `sortApps(sortKey)`. Properties: `appsModel`, `loading` (bool, True during Phase 2), `hostOnline` (bool, reflects TCP probe result).
 - **MoonlightAppGrid.qml:** Portrait poster grid (160×240) matching Steam card structure. Poster image when `imagePath` available; text-only placeholder otherwise. Sort overlay (A-Z, Z-A).
 - **MoonlightAppDetail.qml:** Left-side poster (30% width) matching Steam detail layout. Fallback rectangle with app name when no image. Host name metadata on the right. Stream action.
 - **Launch:** `flatpak run com.moonlight_stream.Moonlight stream <host> "<app>"` via `MoonlightLauncher` (QProcess-based, async signal-based start). HTPC Station hides during streaming, restores on exit (same pattern as emulator/browser launch).
 - **Settings:** Moonlight section with: Moonlight Command (text input, default `flatpak run com.moonlight_stream.Moonlight`), Host selector (cycle through paired hosts, same UX as Plex User selector), "Open Moonlight" button (launches Moonlight GUI for pairing). Host selection persisted as `moonlight.host_uuid` in config.json.
 - **Config:** `moonlight` section in config.json with `command` and `host_uuid` fields.
+
+### M5 — Home Screen (partial) ✅
+- **PC Games "Recently Played" source:** Unified source entry at the top of the PC Games source list combining Steam and Moonlight titles sorted by last played time (capped at 20). Each tile has a colored source badge in the top-left corner: blue "S" for Steam, orange "M" for Moonlight. Moonlight play timestamps recorded on launch via `play_history.json`. Steam `lastPlayed` comes from ACF manifests. Simplified detail view with launch dispatch to the correct backend.
+- **Network status indicator:** Canvas-drawn WiFi icon (`NetworkIndicator.qml`) next to the clock in the top-right. 3 concentric arcs + dot. Solid in `Theme.colorText` when online, dimmed in `Theme.colorTextDim` with diagonal strikethrough in `Theme.colorPrimary` when offline. `NetworkMonitor` QObject checks connectivity every 30s via TCP probe to `1.1.1.1:53`. Toggle in Settings → User Interface to show/hide.
+- **Graceful offline state:** Moonlight source shows "Unavailable" (in accent color) when host is offline, with helpful message in the grid ("Host unavailable — check that your streaming PC is powered on"). `hostOnline` property on `MoonlightLibrary` reflects TCP probe result. `OfflineRole` on `SteamSourceListModel`. Plex offline handling audited and confirmed solid.
+- **Steam artwork caching:** Steam poster images now cached locally at `***REMOVED***.config/htpcstation/steam/artwork_scraped/<appid>.jpg`. Downloaded from CDN on first access, served from disk thereafter. Works offline. Custom overrides in `artwork_custom/<appid>.<ext>`. Never returns a URL — always a local file path.
+- **Moonlight config directory refactor:** All Moonlight data consolidated under `***REMOVED***.config/htpcstation/moonlight/` with `artwork_scraped/`, `artwork_custom/`, `artwork_index.json`, and `play_history.json`. Shared directory helper in `backend/moonlight_config.py`.
 
 ### Browser Gamepad Extension ✅
 - **Manifest V3 Chromium extension** at `htpcstation/extension/`
@@ -254,7 +273,7 @@ htpcstation/
 - Plex: Sign in with Plex (OAuth), Test Connection button, Server selector (cycle through discovered servers), User selector (cycle through home users)
 - Browser: Browser Command
 - Moonlight: Moonlight Command, Host selector (cycle through paired hosts), Open Moonlight button
-- User Interface: Video Snap Autoplay toggle, Video Snap Delay slider (0-5000ms, 100ms steps)
+- User Interface: Video Snap Autoplay toggle, Video Snap Delay slider (0-5000ms, 100ms steps), Network Indicator toggle
 - All changes auto-save to config.json
 - Per-system core editor: placeholder ("Coming soon")
 - Server/user selection uses `optionsProvider` function (fetches fresh data on each A press, not a static binding)
@@ -326,7 +345,8 @@ Location: `***REMOVED***.config/htpcstation/config.json`
   },
   "ui": {
     "video_snap_autoplay": true,
-    "video_snap_delay_ms": 1500
+    "video_snap_delay_ms": 1500,
+    "show_network_indicator": true
   }
 }
 ```
@@ -417,13 +437,13 @@ The Moonlight config file uses Qt's `QSettings` INI format. Field names are **al
 `flatpak run com.moonlight_stream.Moonlight list <host>` outputs app names to stdout but also initializes SDL/Qt, emitting warnings to stderr. The `list` command exits after output; the `stream` command is long-running. Stderr must be ignored entirely. The `pair` command blocks waiting for host-side PIN confirmation — it cannot be automated from HTPC Station.
 
 ### Moonlight Artwork: Steam Search Accuracy
-The Steam Store search API (`storesearch`) returns fuzzy matches. Most game titles match correctly (e.g., "Slime Rancher", "Divinity: Original Sin II"), but non-game apps (e.g., "Desktop") may match incorrect results. Utility apps like "Playnite", "Steam Big Picture", and "Virtual Display" return no results. **Fix:** Users can drop custom artwork into `***REMOVED***.config/htpcstation/moonlight_artwork/custom/<slug>.<ext>` to override or supplement auto-downloaded images.
+The Steam Store search API (`storesearch`) returns fuzzy matches. Most game titles match correctly (e.g., "Slime Rancher", "Divinity: Original Sin II"), but non-game apps (e.g., "Desktop") may match incorrect results. Utility apps like "Playnite", "Steam Big Picture", and "Virtual Display" return no results. **Fix:** Users can drop custom artwork into `***REMOVED***.config/htpcstation/moonlight/artwork_custom/<slug>.<ext>` to override or supplement auto-downloaded images.
 
 ### Two-Phase Refresh for Perceived Performance
 Network-dependent data (host probing, app enumeration) causes multi-second delays. Showing "Loading..." immediately while background work completes dramatically improves perceived responsiveness. The pattern: Phase 1 (synchronous, local data) emits a signal to update the UI instantly; Phase 2 (threaded, network I/O) emits the same signal again when complete. The UI handler reads the current state each time.
 
 ### Artwork Override Ambiguity
-When auto-downloaded and user-provided artwork share the same directory and filename, the system cannot distinguish "user replaced the file" from "app downloaded the file." **Fix:** Use a separate `custom/` subdirectory for user overrides. Files in `custom/` always take priority. The directory is created automatically so users can discover it.
+When auto-downloaded and user-provided artwork share the same directory and filename, the system cannot distinguish "user replaced the file" from "app downloaded the file." **Fix:** Use separate directories: `artwork_scraped/` for auto-downloaded and `artwork_custom/` for user overrides. Files in `artwork_custom/` always take priority. Both directories are created automatically so users can discover them. This pattern is used for both Moonlight (`***REMOVED***.config/htpcstation/moonlight/`) and Steam (`***REMOVED***.config/htpcstation/steam/`).
 
 ---
 
@@ -450,20 +470,8 @@ These are intentional shortcuts that should be revisited:
 
 ## 10. Remaining Milestones
 
-### M4 — Moonlight (remaining items)
-- "Host Unavailable" graceful state indicator in the source list (currently shows "0 games" when host is offline)
-- Rich metadata for Moonlight apps (description, publisher, players, release year) — see deferred items
-
-### M5 — Home Screen
-- Unified "Recently Played / Continue Watching" row spanning all content types
-- Plex "On Deck" in-progress items
-- Recently played ROMs (from gamelist.xml `lastplayed`)
-- Recently played Steam games (from ACF `LastPlayed`)
-- Recent Moonlight sessions
-- "Recently Added" row (new Plex library additions)
-- Background fanart cycling from currently highlighted content
-- Network/host availability indicators
-- Graceful offline state
+### M5 — Home Screen (remaining items)
+- Rich metadata for Moonlight/Steam apps (description, publisher, players, release year) — see deferred items
 
 ### M6 — Hardening (remaining items)
 - Performance profiling on J5005 reference hardware (60fps, <200MB idle RAM)
@@ -530,25 +538,29 @@ These are intentional shortcuts that should be revisited:
 ## 12. Architecture Notes for New Agent
 
 ### QML Context Properties
-Six Python objects are exposed to QML:
+Seven Python objects are exposed to QML:
 - `keys` — `Keys` instance (semantic key checks + input source tracking)
 - `library` — `GameLibrary` instance (ROM data, models, launch, favorites)
 - `steam` — `SteamLibrary` instance (Steam game data, models, sort, launch)
 - `moonlight` — `MoonlightLibrary` instance (Moonlight host/app data, models, launch, artwork)
 - `plex` — `PlexLibrary` instance (Plex data, models, sort/filter, browser launch, server/user management)
+- `networkMonitor` — `NetworkMonitor` instance (periodic connectivity check, online property)
 - `settings` — `SettingsManager` instance (config read/write for settings UI, OAuth)
 
 ### Steam Architecture
-- **`steam_parser.py`** — VDF/ACF parser (recursive descent tokenizer), game discovery from multiple Steam install paths, non-game filtering, artwork resolution (local cache → CDN URL)
+- **`steam_config.py`** — Shared directory helper for `***REMOVED***.config/htpcstation/steam/` with `artwork_scraped/` and `artwork_custom/` subdirs.
+- **`steam_parser.py`** — VDF/ACF parser (recursive descent tokenizer), game discovery from multiple Steam install paths, non-game filtering, artwork resolution (custom override → HTPC cache → Steam local cache → CDN download)
 - **`steam_models.py`** — `SteamGame` dataclass (app_id, name, install_dir, last_played, size_on_disk, image_path)
-- **`steam_library.py`** — `SteamLibrary` QObject with `SteamSourceListModel` (extensible source list) and `SteamGameListModel`. Fire-and-forget launch via `xdg-open`. No window hide/minimize — game takes focus, window manager handles return.
+- **`steam_library.py`** — `SteamLibrary` QObject with `SteamSourceListModel` (extensible source list, includes "Recently Played" and Moonlight sources) and `SteamGameListModel`. Fire-and-forget launch via `xdg-open`. No window hide/minimize — game takes focus, window manager handles return. `getRecentlyPlayed()` merges Steam + Moonlight titles sorted by recency. `launchRecentGame()` dispatches to correct backend.
 
 ### Moonlight Architecture
 - **`moonlight_parser.py`** — Parses Moonlight's QSettings INI config file (Flatpak path: `***REMOVED***.var/app/com.moonlight_stream.Moonlight/config/Moonlight Game Streaming Project/Moonlight.conf`). Extracts paired hosts from `[hosts]` section. TCP probe for host availability on port 47984.
-- **`moonlight_models.py`** — `MoonlightHost` (name, uuid, addresses, custom_name, display_name property) and `MoonlightApp` (name, host_uuid, image_path) dataclasses.
+- **`moonlight_config.py`** — Shared directory helper for `***REMOVED***.config/htpcstation/moonlight/` with `artwork_scraped/`, `artwork_custom/` subdirs.
+- **`moonlight_models.py`** — `MoonlightHost` (name, uuid, addresses, custom_name, display_name property) and `MoonlightApp` (name, host_uuid, image_path, last_played) dataclasses.
 - **`moonlight_client.py`** — `list_apps()` wraps `moonlight list <host>` CLI (synchronous, designed for thread pool). `MoonlightLauncher` wraps `moonlight stream <host> "<app>"` via QProcess with signal-based lifecycle.
-- **`moonlight_artwork.py`** — Artwork cache at `***REMOVED***.config/htpcstation/moonlight_artwork/`. Steam Store search API → CDN poster download. Manual overrides in `custom/` subdirectory. Metadata index (`moonlight_artwork_index.json`) prevents redundant API calls.
-- **`moonlight_library.py`** — `MoonlightLibrary` QObject orchestrator. Two-phase refresh: Phase 1 (synchronous host discovery) → Phase 2 (threaded probe + app enumeration + artwork resolution). Single selected host (from config). `MoonlightAppListModel` with `name`, `hostUuid`, `imagePath` roles. Moonlight hosts injected into Steam's `SteamSourceListModel` via `setMoonlightSources()` as a single "Moonlight Games" entry.
+- **`moonlight_artwork.py`** — Artwork cache at `***REMOVED***.config/htpcstation/moonlight/artwork_scraped/`. Steam Store search API → CDN poster download. Manual overrides in `artwork_custom/`. Metadata index (`artwork_index.json`) prevents redundant API calls.
+- **`moonlight_play_history.py`** — Records launch timestamps to `play_history.json`. `record_play()`, `get_last_played()`, `get_all_history()` with atomic writes.
+- **`moonlight_library.py`** — `MoonlightLibrary` QObject orchestrator. Two-phase refresh: Phase 1 (synchronous host discovery) → Phase 2 (threaded probe + app enumeration + artwork resolution + play history). Single selected host (from config). `MoonlightAppListModel` with `name`, `hostUuid`, `imagePath`, `lastPlayed` roles. `hostOnline` property reflects TCP probe result. Moonlight hosts injected into Steam's `SteamSourceListModel` via `setMoonlightSources()` as a single "Moonlight Games" entry.
 
 ### Plex Architecture
 Two separate API layers:
@@ -606,23 +618,23 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/plex-polish/` (tasks 001–003)
 - `***REMOVED***opencode/misc/coding-team/m3-steam/` (tasks 001–003)
 - `***REMOVED***opencode/misc/coding-team/m4-moonlight/` (tasks 001–012)
+- `***REMOVED***opencode/misc/coding-team/plex-show-pagination/` (task 001)
+- `***REMOVED***opencode/misc/coding-team/plex-live-tv/` (task 001)
+- `***REMOVED***opencode/misc/coding-team/m5-home-screen/` (tasks 001–006)
 
 ---
 
-### Moonlight Custom Artwork — User Guide
-To add or replace artwork for Moonlight apps:
-1. Navigate to `***REMOVED***.config/htpcstation/moonlight_artwork/custom/` (created automatically on first run)
-2. Drop an image file named `<slug>.<ext>` where:
-   - `<slug>` is the app name lowercased with non-alphanumeric characters replaced by hyphens
-   - `<ext>` is any common image format: jpg, jpeg, png, gif, webp
-3. Examples:
-   - "Desktop" → `custom/desktop.jpg`
-   - "Steam Big Picture" → `custom/steam-big-picture.png`
-   - "Playnite" → `custom/playnite.jpg`
-   - "Divinity: Original Sin II" → `custom/divinity-original-sin-ii.jpg` (overrides auto-downloaded)
-4. Restart HTPC Station or navigate away from and back to the PC Games tab to pick up changes
+### Custom Artwork — User Guide
 
-Files in `custom/` always take priority over auto-downloaded artwork from Steam.
+**Moonlight apps** — `***REMOVED***.config/htpcstation/moonlight/artwork_custom/`
+- Files named `<slug>.<ext>` where slug = app name lowercased, non-alphanumeric → hyphens
+- Examples: `desktop.jpg`, `steam-big-picture.png`, `playnite.jpg`, `divinity-original-sin-ii.jpg`
+
+**Steam games** — `***REMOVED***.config/htpcstation/steam/artwork_custom/`
+- Files named `<app_id>.<ext>` where app_id = Steam application ID (found in Steam Store URLs)
+- Examples: `440.jpg` (TF2), `570.jpg` (Dota 2)
+
+Both directories are created automatically on first run. Custom files always take priority over auto-downloaded artwork. Supported formats: jpg, jpeg, png, gif, webp. Changes picked up on next tab navigation or restart.
 
 ---
 

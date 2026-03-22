@@ -23,6 +23,10 @@ FocusScope {
     // Display name of the currently selected source (set by PcGamesScreen).
     property string sourceName: ""
 
+    // Whether the Moonlight host is offline (set by PcGamesScreen).
+    // When true, the empty state shows "Host unavailable" instead of "No apps found".
+    property bool hostOffline: false
+
     // ── Sort state (mirrors backend state for display) ─────────────────────────
     property string _currentSort: "az"
 
@@ -141,10 +145,15 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             visible: appGrid.count === 0
-            text: "No apps found"
-            color: Theme.colorTextDim
+            text: moonlightAppGrid.hostOffline
+                  ? "Host unavailable — check that your streaming PC is powered on"
+                  : "No apps found"
+            color: moonlightAppGrid.hostOffline ? Theme.colorPrimary : Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            wrapMode: Text.Wrap
+            horizontalAlignment: Text.AlignHCenter
+            width: parent.width - root.vpx(64)
         }
 
         // ── App tile delegate ────────────────────────────────────────────────

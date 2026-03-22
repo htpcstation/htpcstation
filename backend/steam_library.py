@@ -7,7 +7,7 @@ Game discovery is synchronous (ACF files are small local reads).
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -23,10 +23,10 @@ from PySide6.QtCore import (
 from backend.steam_models import SteamGame
 from backend.steam_parser import discover_steam_games
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from backend.moonlight_library import MoonlightLibrary
 
-# Steam CDN URL for game artwork (portrait poster)
-_STEAM_CDN_URL = "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900_2x.jpg"
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +106,7 @@ class SteamSourceListModel(QAbstractListModel):
     GameCountRole = Qt.ItemDataRole.UserRole + 2
     SourceRole = Qt.ItemDataRole.UserRole + 3
     LoadingRole = Qt.ItemDataRole.UserRole + 4
+    OfflineRole = Qt.ItemDataRole.UserRole + 5
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -134,6 +135,8 @@ class SteamSourceListModel(QAbstractListModel):
             return source.get("source", "")
         if role == self.LoadingRole:
             return source.get("loading", False)
+        if role == self.OfflineRole:
+            return source.get("offline", False)
         if role == Qt.ItemDataRole.DisplayRole:
             return source.get("name", "")
         return None
@@ -144,6 +147,7 @@ class SteamSourceListModel(QAbstractListModel):
             self.GameCountRole: b"gameCount",
             self.SourceRole: b"source",
             self.LoadingRole: b"loading",
+            self.OfflineRole: b"offline",
         }
 
 
@@ -162,11 +166,14 @@ class SteamLibrary(QObject):
         gamesModel   — :class:`SteamGameListModel` (game grid)
 
     QML slots:
-        refresh()           — re-scan ACF files, rebuild models
-        getGame(index)      — return game details dict for the detail view
-        launchGame(appId)   — launch via xdg-open steam://rungameid/{appId}
-        selectSource(source)— select which source to display
-        sortGames(sortKey)  — sort the games model (az, za, recent)
+        refresh()                       — re-scan ACF files, rebuild models
+        getGame(index)                  — return game details dict for the detail view
+        launchGame(appId)               — launch via xdg-open steam://rungameid/{appId}
+        selectSource(source)            — select which source to display
+        sortGames(sortKey)              — sort the games model (az, za, recent)
+        setMoonlightRecentlyPlayed(items) — inject Moonlight recently played data
+        getRecentlyPlayed()             — return unified recently played list
+        launchRecentGame(source, appId, hostAddress, appName) — dispatch launch
     """
 
     sourcesModelChanged = Signal()
@@ -184,6 +191,15 @@ class SteamLibrary(QObject):
         self._current_games: list[SteamGame] = []
         self._current_source: str = "steam"
         self._current_sort: str = "az"
+
+        # Recently played: Moonlight items injected by main.py
+        self._moonlight_recent: list[dict] = []
+
+        # Moonlight sources injected by setMoonlightSources
+        self._moonlight_sources: list[dict] = []
+
+        # Reference to MoonlightLibrary for dispatching Moonlight launches
+        self._moonlight_library: Optional["MoonlightLibrary"] = None
 
         self._sources_model = SteamSourceListModel(self)
         self._games_model = SteamGameListModel(self)
@@ -217,14 +233,7 @@ class SteamLibrary(QObject):
         logger.info("SteamLibrary.refresh: found %d games", len(self._all_games))
 
         # Rebuild sources model with updated game count
-        self._sources_model.set_sources([
-            {
-                "name": "Steam",
-                "gameCount": len(self._all_games),
-                "source": "steam",
-            }
-        ])
-        self.sourcesModelChanged.emit()
+        self._rebuild_sources_model()
 
         # Rebuild games model with current sort applied
         self._current_games = list(self._all_games)
@@ -277,19 +286,90 @@ class SteamLibrary(QObject):
         """Inject Moonlight host entries into the source list.
 
         Accepts a list of ``{"name": ..., "gameCount": ..., "source": "moonlight:<uuid>"}``
-        dicts.  Rebuilds the full sources model (Steam entries + Moonlight entries)
+        dicts.  Rebuilds the full sources model (Recently Played + Steam + Moonlight)
         and emits ``sourcesModelChanged``.
 
         Called by ``main.py`` whenever ``MoonlightLibrary.hostsChanged`` fires.
         When *sources* is empty, only the Steam entry is shown.
         """
-        steam_entry = {
-            "name": "Steam",
-            "gameCount": len(self._all_games),
-            "source": "steam",
-        }
-        self._sources_model.set_sources([steam_entry] + list(sources))
-        self.sourcesModelChanged.emit()
+        self._moonlight_sources = list(sources)
+        self._rebuild_sources_model()
+
+    @Slot("QVariant")
+    def setMoonlightRecentlyPlayed(self, items: list) -> None:
+        """Inject Moonlight recently played items.
+
+        Accepts a list of dicts with keys: name, imagePath, lastPlayed (Unix epoch int),
+        hostAddress.  Called by ``main.py`` after Moonlight refresh completes.
+        Rebuilds the sources model to update the "Recently Played" count.
+        """
+        self._moonlight_recent = list(items)
+        self._rebuild_sources_model()
+
+    def setMoonlightLibrary(self, moonlight: "MoonlightLibrary") -> None:
+        """Store a reference to MoonlightLibrary for dispatching Moonlight launches.
+
+        Called by ``main.py`` after both libraries are constructed.
+        """
+        self._moonlight_library = moonlight
+
+    @Slot(result="QVariant")
+    def getRecentlyPlayed(self) -> list:
+        """Return a unified list of recently played games from Steam and Moonlight.
+
+        Returns a list of dicts sorted by lastPlayed descending, limited to 20 entries:
+        ``{"name", "source", "imagePath", "lastPlayed", "appId", "hostAddress"}``
+        """
+        items: list[dict] = []
+
+        # Steam: games with last_played > 0
+        for game in self._all_games:
+            if game.last_played > 0:
+                items.append({
+                    "name": game.name,
+                    "source": "steam",
+                    "imagePath": game.image_path,
+                    "lastPlayed": game.last_played,
+                    "appId": game.app_id,
+                    "hostAddress": "",
+                })
+
+        # Moonlight: items injected by main.py
+        items.extend(self._moonlight_recent)
+
+        # Sort by lastPlayed descending and limit to 20
+        items.sort(key=lambda x: x.get("lastPlayed", 0), reverse=True)
+        return items[:20]
+
+    @Slot(str, str, str, str)
+    def launchRecentGame(
+        self,
+        source: str,
+        app_id: str,
+        host_address: str,
+        app_name: str,
+    ) -> None:
+        """Dispatch a launch to the correct launcher based on *source*.
+
+        For Steam: calls ``launchGame(appId)``.
+        For Moonlight: calls ``MoonlightLibrary.launchApp(hostAddress, appName)``.
+        """
+        if source == "steam":
+            self.launchGame(app_id)
+        elif source == "moonlight":
+            if self._moonlight_library is not None:
+                self._moonlight_library.launchApp(host_address, app_name)
+            else:
+                logger.warning(
+                    "SteamLibrary.launchRecentGame: no MoonlightLibrary set — "
+                    "cannot launch Moonlight app '%s'",
+                    app_name,
+                )
+        else:
+            logger.warning(
+                "SteamLibrary.launchRecentGame: unknown source '%s' — ignoring",
+                source,
+            )
 
     @Slot(str)
     def selectSource(self, source: str) -> None:
@@ -315,6 +395,41 @@ class SteamLibrary(QObject):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _rebuild_sources_model(self) -> None:
+        """Rebuild the sources model from current state and emit sourcesModelChanged.
+
+        Order: "Recently Played" (if any) → "Steam" → Moonlight sources.
+        """
+        sources: list[dict] = []
+
+        # "Recently Played" entry — only shown when there are recently played games
+        recent_count = self._count_recently_played()
+        if recent_count > 0:
+            sources.append({
+                "name": "Recently Played",
+                "gameCount": recent_count,
+                "source": "recent",
+            })
+
+        # Steam entry
+        sources.append({
+            "name": "Steam",
+            "gameCount": len(self._all_games),
+            "source": "steam",
+        })
+
+        # Moonlight entries
+        sources.extend(self._moonlight_sources)
+
+        self._sources_model.set_sources(sources)
+        self.sourcesModelChanged.emit()
+
+    def _count_recently_played(self) -> int:
+        """Return the total number of recently played games (Steam + Moonlight), capped at 20."""
+        steam_played = [g for g in self._all_games if g.last_played > 0]
+        combined = steam_played + self._moonlight_recent
+        return min(len(combined), 20)
 
     def _apply_sort(self) -> None:
         """Sort ``_current_games`` and push the result to ``_games_model``."""

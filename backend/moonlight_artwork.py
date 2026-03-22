@@ -5,8 +5,10 @@ Resolves artwork for Moonlight games by:
 2. Falling back to Steam CDN posters by searching the Steam Store API
 3. Downloading and caching the poster image locally for offline reuse
 
-Cache directory: ***REMOVED***.config/htpcstation/moonlight_artwork/
-Metadata index:  moonlight_artwork_index.json
+Cache directory: ***REMOVED***.config/htpcstation/moonlight/
+  artwork_scraped/  — auto-downloaded files
+  artwork_custom/   — user-provided overrides
+Metadata index:  artwork_index.json
 
 Public API:
     slugify_app_name(app_name) -> str
@@ -29,6 +31,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from backend.moonlight_config import get_moonlight_dir
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -42,28 +46,8 @@ _STEAM_POSTER_URL = (
     "https://cdn.cloudflare.steamstatic.com/steam/apps/{app_id}/library_600x900_2x.jpg"
 )
 _DOWNLOAD_TIMEOUT = 5  # seconds
-_METADATA_FILENAME = "moonlight_artwork_index.json"
+_METADATA_FILENAME = "artwork_index.json"
 _OVERRIDE_EXTENSIONS = ("jpg", "jpeg", "png", "gif", "webp")
-
-# ---------------------------------------------------------------------------
-# Cache directory helper (monkeypatchable in tests)
-# ---------------------------------------------------------------------------
-
-
-def _get_artwork_dir() -> Path:
-    """Return the artwork cache directory, creating it if needed.
-
-    Also creates the ``custom/`` subdirectory so users can discover it.
-
-    Respects XDG_CONFIG_HOME.  Monkeypatch this function in tests to redirect
-    all I/O to a temporary directory.
-    """
-    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    artwork_dir = config_home / "htpcstation" / "moonlight_artwork"
-    artwork_dir.mkdir(parents=True, exist_ok=True)
-    custom_dir = artwork_dir / "custom"
-    custom_dir.mkdir(parents=True, exist_ok=True)
-    return artwork_dir
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +79,13 @@ def slugify_app_name(app_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _metadata_path(artwork_dir: Path) -> Path:
-    return artwork_dir / _METADATA_FILENAME
+def _metadata_path(moonlight_dir: Path) -> Path:
+    return moonlight_dir / _METADATA_FILENAME
 
 
-def _load_metadata(artwork_dir: Path) -> dict:
+def _load_metadata(moonlight_dir: Path) -> dict:
     """Load the metadata index from disk.  Returns an empty dict on any error."""
-    path = _metadata_path(artwork_dir)
+    path = _metadata_path(moonlight_dir)
     if not path.exists():
         return {}
     try:
@@ -111,10 +95,10 @@ def _load_metadata(artwork_dir: Path) -> dict:
         return {}
 
 
-def _save_metadata(artwork_dir: Path, metadata: dict) -> None:
+def _save_metadata(moonlight_dir: Path, metadata: dict) -> None:
     """Atomically write *metadata* to the index file."""
-    path = _metadata_path(artwork_dir)
-    tmp_fd, tmp_name = tempfile.mkstemp(dir=artwork_dir, suffix=".json.tmp")
+    path = _metadata_path(moonlight_dir)
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=moonlight_dir, suffix=".json.tmp")
     try:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
@@ -136,16 +120,16 @@ def _now_utc() -> str:
 # ---------------------------------------------------------------------------
 
 
-def _find_override(artwork_dir: Path, slug: str) -> Optional[Path]:
-    """Return the first file matching ``custom/<slug>.<ext>`` for known image extensions.
+def _find_override(moonlight_dir: Path, slug: str) -> Optional[Path]:
+    """Return the first file matching ``artwork_custom/<slug>.<ext>`` for known image extensions.
 
-    Only looks in the ``custom/`` subdirectory of *artwork_dir*.  Files in the
-    main directory are never treated as overrides — they are auto-downloaded
+    Only looks in the ``artwork_custom/`` subdirectory of *moonlight_dir*.  Files in the
+    ``artwork_scraped/`` directory are never treated as overrides — they are auto-downloaded
     cache files managed by the app.
 
     Returns ``None`` if no override file is found.
     """
-    custom_dir = artwork_dir / "custom"
+    custom_dir = moonlight_dir / "artwork_custom"
     for ext in _OVERRIDE_EXTENSIONS:
         candidate = custom_dir / f"{slug}.{ext}"
         if candidate.exists():
@@ -245,14 +229,14 @@ def get_artwork_path(app_name: str) -> Optional[Path]:
     Checks for manual overrides first, then consults the metadata index.
     Does **not** perform any network requests.
     """
-    artwork_dir = _get_artwork_dir()
+    moonlight_dir = get_moonlight_dir()
     slug = slugify_app_name(app_name)
 
-    # 1. Manual override: any custom/<slug>.<ext> file always takes priority.
-    #    Files in custom/ are unambiguously user-provided — no metadata check needed.
-    override = _find_override(artwork_dir, slug)
+    # 1. Manual override: any artwork_custom/<slug>.<ext> file always takes priority.
+    #    Files in artwork_custom/ are unambiguously user-provided — no metadata check needed.
+    override = _find_override(moonlight_dir, slug)
     if override is not None:
-        metadata = _load_metadata(artwork_dir)
+        metadata = _load_metadata(moonlight_dir)
         entry = metadata.get(slug, {})
         if entry.get("source") != "manual" or entry.get("filename") != override.name:
             entry.update(
@@ -266,14 +250,14 @@ def get_artwork_path(app_name: str) -> Optional[Path]:
                 }
             )
             metadata[slug] = entry
-            _save_metadata(artwork_dir, metadata)
+            _save_metadata(moonlight_dir, metadata)
         return override
 
-    # 2. Cached metadata + file
-    metadata = _load_metadata(artwork_dir)
+    # 2. Cached metadata + file (in artwork_scraped/)
+    metadata = _load_metadata(moonlight_dir)
     entry = metadata.get(slug)
     if entry and entry.get("filename"):
-        cached_file = artwork_dir / entry["filename"]
+        cached_file = moonlight_dir / "artwork_scraped" / entry["filename"]
         if cached_file.exists():
             return cached_file
 
@@ -284,19 +268,19 @@ def refresh_artwork(app_name: str) -> Optional[Path]:
     """Ensure artwork exists locally (download if needed) and return the path.
 
     Lookup flow:
-    1. Check custom/<slug>.<ext> — if found, return it (source="manual")
-    2. Check metadata index + cached file in main dir — if found, return it
-    3. Search Steam Store → download poster to main dir → cache
+    1. Check artwork_custom/<slug>.<ext> — if found, return it (source="manual")
+    2. Check metadata index + cached file in artwork_scraped/ — if found, return it
+    3. Search Steam Store → download poster to artwork_scraped/ → cache
     4. If Steam fails → record ``source="none"`` in metadata, return ``None``
     """
-    artwork_dir = _get_artwork_dir()
+    moonlight_dir = get_moonlight_dir()
     slug = slugify_app_name(app_name)
 
-    # 1. Manual override: any custom/<slug>.<ext> file always takes priority.
-    #    Files in custom/ are unambiguously user-provided — no metadata check needed.
-    override = _find_override(artwork_dir, slug)
+    # 1. Manual override: any artwork_custom/<slug>.<ext> file always takes priority.
+    #    Files in artwork_custom/ are unambiguously user-provided — no metadata check needed.
+    override = _find_override(moonlight_dir, slug)
     if override is not None:
-        metadata = _load_metadata(artwork_dir)
+        metadata = _load_metadata(moonlight_dir)
         entry = metadata.get(slug, {})
         if entry.get("source") != "manual" or entry.get("filename") != override.name:
             entry.update(
@@ -310,21 +294,22 @@ def refresh_artwork(app_name: str) -> Optional[Path]:
                 }
             )
             metadata[slug] = entry
-            _save_metadata(artwork_dir, metadata)
+            _save_metadata(moonlight_dir, metadata)
         return override
 
-    # 2. Cached metadata + file
-    metadata = _load_metadata(artwork_dir)
+    # 2. Cached metadata + file (in artwork_scraped/)
+    metadata = _load_metadata(moonlight_dir)
     entry = metadata.get(slug)
     if entry and entry.get("filename"):
-        cached_file = artwork_dir / entry["filename"]
+        cached_file = moonlight_dir / "artwork_scraped" / entry["filename"]
         if cached_file.exists():
             return cached_file
 
-    # 3. Steam Store search + download
+    # 3. Steam Store search + download to artwork_scraped/
     app_id = _steam_search(app_name)
     if app_id is not None:
-        dest_stem = artwork_dir / slug  # extension determined by content-type
+        scraped_dir = moonlight_dir / "artwork_scraped"
+        dest_stem = scraped_dir / slug  # extension determined by content-type
         downloaded = _download_poster(app_id, dest_stem.with_suffix(".jpg"))
         if downloaded is not None:
             entry = {
@@ -336,7 +321,7 @@ def refresh_artwork(app_name: str) -> Optional[Path]:
                 "updated_at": _now_utc(),
             }
             metadata[slug] = entry
-            _save_metadata(artwork_dir, metadata)
+            _save_metadata(moonlight_dir, metadata)
             return downloaded
 
     # 4. No results or download failed
@@ -349,5 +334,5 @@ def refresh_artwork(app_name: str) -> Optional[Path]:
         "updated_at": _now_utc(),
     }
     metadata[slug] = entry
-    _save_metadata(artwork_dir, metadata)
+    _save_metadata(moonlight_dir, metadata)
     return None

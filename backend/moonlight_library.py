@@ -25,6 +25,7 @@ from backend.moonlight_artwork import get_artwork_path, refresh_artwork
 from backend.moonlight_client import MoonlightLauncher, list_apps
 from backend.moonlight_models import MoonlightApp, MoonlightHost
 from backend.moonlight_parser import check_host_available, discover_moonlight_hosts
+from backend.moonlight_play_history import get_all_history, record_play
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +41,13 @@ _DEFAULT_MOONLIGHT_COMMAND = "flatpak run com.moonlight_stream.Moonlight"
 class MoonlightAppListModel(QAbstractListModel):
     """QAbstractListModel wrapping a list of :class:`MoonlightApp` objects.
 
-    Roles: name (str), hostUuid (str), imagePath (str)
+    Roles: name (str), hostUuid (str), imagePath (str), lastPlayed (str)
     """
 
     NameRole = Qt.ItemDataRole.UserRole + 1
     HostUuidRole = Qt.ItemDataRole.UserRole + 2
     ImagePathRole = Qt.ItemDataRole.UserRole + 3
+    LastPlayedRole = Qt.ItemDataRole.UserRole + 4
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -72,6 +74,8 @@ class MoonlightAppListModel(QAbstractListModel):
             return app.host_uuid
         if role == self.ImagePathRole:
             return app.image_path
+        if role == self.LastPlayedRole:
+            return app.last_played
         if role == Qt.ItemDataRole.DisplayRole:
             return app.name
         return None
@@ -81,6 +85,7 @@ class MoonlightAppListModel(QAbstractListModel):
             self.NameRole: b"name",
             self.HostUuidRole: b"hostUuid",
             self.ImagePathRole: b"imagePath",
+            self.LastPlayedRole: b"lastPlayed",
         }
 
 
@@ -123,6 +128,7 @@ class MoonlightLibrary(QObject):
 
     appsModelChanged = Signal()
     hostsChanged = Signal()
+    hostOnlineChanged = Signal()
     loadingChanged = Signal()
     processStarted = Signal()
     processFinished = Signal(int, int)
@@ -151,6 +157,7 @@ class MoonlightLibrary(QObject):
         self._current_host_uuid: str = ""              # kept for sortApps filter compat
         self._current_sort: str = "az"
         self._loading: bool = False
+        self._host_online: bool = False
 
         # App list model
         self._apps_model = MoonlightAppListModel(self)
@@ -181,6 +188,12 @@ class MoonlightLibrary(QObject):
         bool,
         fget=lambda self: self._loading,
         notify=loadingChanged,
+    )
+
+    hostOnline = Property(
+        bool,
+        fget=lambda self: self._host_online,
+        notify=hostOnlineChanged,
     )
 
     # ------------------------------------------------------------------
@@ -238,6 +251,7 @@ class MoonlightLibrary(QObject):
             "hostName": host.display_name if host else "",
             "hostUuid": app.host_uuid,
             "imagePath": app.image_path,
+            "lastPlayed": app.last_played,
         }
 
     @Slot(str, str)
@@ -251,6 +265,15 @@ class MoonlightLibrary(QObject):
         logger.info(
             "MoonlightLibrary.launchApp: launching '%s' on %s", app_name, host_address
         )
+        # Record play intent before launching (timestamp recorded even if launch fails)
+        try:
+            record_play(app_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "MoonlightLibrary.launchApp: failed to record play for '%s': %s",
+                app_name,
+                exc,
+            )
         self._launcher.launch(host_address, app_name, self._moonlight_command)
 
     @Slot()
@@ -331,7 +354,7 @@ class MoonlightLibrary(QObject):
             self._appsDone.emit([], {selected.uuid: False})
             return
 
-        # TCP probe
+        # TCP probe — reset host_online to False before probing
         available = check_host_available(address)
         host_availability = {selected.uuid: available}
         logger.debug(
@@ -354,10 +377,25 @@ class MoonlightLibrary(QObject):
                 )
                 app_names = []
 
+            # Load play history once for all apps
+            try:
+                play_history = get_all_history()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "MoonlightLibrary: failed to load play history: %s", exc
+                )
+                play_history = {}
+
             for name in app_names:
                 image_path = self._resolve_artwork(name)
+                last_played = play_history.get(name, "")
                 all_apps.append(
-                    MoonlightApp(name=name, host_uuid=selected.uuid, image_path=image_path)
+                    MoonlightApp(
+                        name=name,
+                        host_uuid=selected.uuid,
+                        image_path=image_path,
+                        last_played=last_played,
+                    )
                 )
 
         logger.info(
@@ -399,6 +437,18 @@ class MoonlightLibrary(QObject):
         """Handle Phase 2 results on the main thread."""
         self._host_availability = host_availability
         self._all_apps = apps
+
+        # Determine host_online from the probe result for the selected host.
+        # If host_availability is empty (no host probed), host_online stays False.
+        if host_availability:
+            # Use the selected host's availability; fall back to the first entry.
+            online = host_availability.get(self._selected_host_uuid)
+            if online is None:
+                online = next(iter(host_availability.values()), False)
+            self._host_online = bool(online)
+        else:
+            self._host_online = False
+        self.hostOnlineChanged.emit()
 
         # Clear loading state BEFORE emitting hostsChanged so the final update
         # shows the real count (not "Loading...")

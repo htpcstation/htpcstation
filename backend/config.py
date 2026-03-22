@@ -84,6 +84,7 @@ class Config:
         # UI settings
         self.video_snap_autoplay: bool = True
         self.video_snap_delay_ms: int = 1500
+        self.show_network_indicator: bool = True
 
         if CONFIG_FILE.exists():
             self._load()
@@ -212,6 +213,11 @@ class Config:
         self.video_snap_delay_ms = delay
         self.save()
 
+    def set_show_network_indicator(self, enabled: bool) -> None:
+        """Set the network indicator visibility toggle and persist the config."""
+        self.show_network_indicator = enabled
+        self.save()
+
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
         ensure_config_dir()
@@ -244,6 +250,7 @@ class Config:
             "ui": {
                 "video_snap_autoplay": self.video_snap_autoplay,
                 "video_snap_delay_ms": self.video_snap_delay_ms,
+                "show_network_indicator": self.show_network_indicator,
             },
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -333,6 +340,8 @@ class Config:
                 self.video_snap_autoplay = bool(ui["video_snap_autoplay"])
             if "video_snap_delay_ms" in ui:
                 self.video_snap_delay_ms = int(ui["video_snap_delay_ms"])
+            if "show_network_indicator" in ui:
+                self.show_network_indicator = bool(ui["show_network_indicator"])
 
 
 def ensure_config_dir() -> None:

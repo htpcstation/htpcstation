@@ -259,7 +259,9 @@ class TestMoonlightLibraryRefresh:
              patch("backend.moonlight_library.get_artwork_path",
                    **patches.get("get_artwork_path", {"return_value": None})), \
              patch("backend.moonlight_library.refresh_artwork",
-                   **patches.get("refresh_artwork", {"return_value": None})):
+                   **patches.get("refresh_artwork", {"return_value": None})), \
+             patch("backend.moonlight_library.get_all_history",
+                   **patches.get("get_all_history", {"return_value": {}})):
             lib.refresh()
             # Phase 1 is synchronous — _hostsDiscovered signal is already queued.
             # Block until Phase 2 worker thread finishes (signal is now queued)
@@ -493,7 +495,8 @@ class TestMoonlightLibraryRefresh:
              patch("backend.moonlight_library.list_apps",
                    return_value=["Game A"]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.refresh()
             # After refresh() returns, Phase 1 signal should already be queued
             QCoreApplication.processEvents()
@@ -634,7 +637,8 @@ class TestMoonlightLibrarySetSelectedHost:
         with patch("backend.moonlight_library.check_host_available", return_value=False), \
              patch("backend.moonlight_library.list_apps", return_value=[]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.setSelectedHost("uuid-2")
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -662,7 +666,8 @@ class TestMoonlightLibrarySetSelectedHost:
         with patch("backend.moonlight_library.check_host_available", return_value=True), \
              patch("backend.moonlight_library.list_apps", side_effect=_list_apps), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.setSelectedHost("uuid-2")
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -686,7 +691,8 @@ class TestMoonlightLibrarySetSelectedHost:
         with patch("backend.moonlight_library.check_host_available", return_value=False), \
              patch("backend.moonlight_library.list_apps", return_value=[]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.setSelectedHost("uuid-1")
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -1171,7 +1177,9 @@ class TestMoonlightLibraryLoading:
              patch("backend.moonlight_library.get_artwork_path",
                    **patches.get("get_artwork_path", {"return_value": None})), \
              patch("backend.moonlight_library.refresh_artwork",
-                   **patches.get("refresh_artwork", {"return_value": None})):
+                   **patches.get("refresh_artwork", {"return_value": None})), \
+             patch("backend.moonlight_library.get_all_history",
+                   **patches.get("get_all_history", {"return_value": {}})):
             lib.refresh()
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -1202,7 +1210,8 @@ class TestMoonlightLibraryLoading:
              patch("backend.moonlight_library.list_apps",
                    return_value=["Game A"]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.refresh()
             # Process Phase 1 signal
             QCoreApplication.processEvents()
@@ -1259,7 +1268,8 @@ class TestMoonlightLibraryLoading:
              patch("backend.moonlight_library.list_apps",
                    return_value=["Game A"]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.refresh()
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -1289,7 +1299,8 @@ class TestMoonlightLibraryLoading:
              patch("backend.moonlight_library.list_apps",
                    return_value=["Game A"]), \
              patch("backend.moonlight_library.get_artwork_path", return_value=None), \
-             patch("backend.moonlight_library.refresh_artwork", return_value=None):
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.refresh()
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -1336,7 +1347,8 @@ class TestMoonlightLibraryArtworkIntegration:
              patch("backend.moonlight_library.get_artwork_path",
                    side_effect=get_artwork_path_mock), \
              patch("backend.moonlight_library.refresh_artwork",
-                   side_effect=refresh_artwork_mock):
+                   side_effect=refresh_artwork_mock), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
             lib.refresh()
             lib._executor.shutdown(wait=True)
             QCoreApplication.processEvents()
@@ -1486,3 +1498,639 @@ class TestMoonlightLibraryArtworkIntegration:
         apps_by_name = {a.name: a for a in lib._all_apps}
         assert apps_by_name["Game A"].image_path == str(Path("/art/game-a.jpg"))
         assert apps_by_name["Game B"].image_path == ""
+
+
+# ---------------------------------------------------------------------------
+# MoonlightLibrary — launchApp with record_play
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightLibraryLaunchAppRecordPlay:
+    def test_launch_app_calls_record_play(self) -> None:
+        """launchApp calls record_play with the app name before launching."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary(moonlight_command="/usr/bin/moonlight")
+        lib._launcher.launch = MagicMock()
+
+        with patch("backend.moonlight_library.record_play") as mock_record:
+            lib.launchApp("192.168.0.10", "Cyberpunk 2077")
+
+        mock_record.assert_called_once_with("Cyberpunk 2077")
+
+    def test_launch_app_record_play_called_before_launch(self) -> None:
+        """record_play is called before the launcher.launch call."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary(moonlight_command="/usr/bin/moonlight")
+        call_order: list[str] = []
+
+        def _record(name: str) -> None:
+            call_order.append(f"record:{name}")
+
+        def _launch(addr: str, name: str, cmd: str) -> None:
+            call_order.append(f"launch:{name}")
+
+        lib._launcher.launch = _launch
+
+        with patch("backend.moonlight_library.record_play", side_effect=_record):
+            lib.launchApp("192.168.0.10", "Desktop")
+
+        assert call_order == ["record:Desktop", "launch:Desktop"]
+
+    def test_launch_app_skips_record_play_when_empty_host(self) -> None:
+        """record_play is NOT called when host_address is empty."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        lib._launcher.launch = MagicMock()
+
+        with patch("backend.moonlight_library.record_play") as mock_record:
+            lib.launchApp("", "Desktop")
+
+        mock_record.assert_not_called()
+
+    def test_launch_app_skips_record_play_when_empty_app_name(self) -> None:
+        """record_play is NOT called when app_name is empty."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        lib._launcher.launch = MagicMock()
+
+        with patch("backend.moonlight_library.record_play") as mock_record:
+            lib.launchApp("192.168.0.10", "")
+
+        mock_record.assert_not_called()
+
+    def test_launch_app_continues_if_record_play_raises(self) -> None:
+        """launchApp still launches even if record_play raises an exception."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary(moonlight_command="/usr/bin/moonlight")
+        mock_launch = MagicMock()
+        lib._launcher.launch = mock_launch
+
+        with patch("backend.moonlight_library.record_play", side_effect=OSError("disk full")):
+            lib.launchApp("192.168.0.10", "Desktop")
+
+        # Launch should still be called despite record_play failing
+        mock_launch.assert_called_once_with("192.168.0.10", "Desktop", "/usr/bin/moonlight")
+
+
+# ---------------------------------------------------------------------------
+# MoonlightLibrary — Phase 2 last_played loading
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightLibraryLastPlayed:
+    def _refresh_and_wait_with_history(
+        self,
+        lib,
+        app_names: list[str],
+        history: dict,
+    ) -> None:
+        """Run a full Phase 2 refresh with controlled play history."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        host = _make_host("PC1", "uuid-1", "192.168.0.10")
+        lib._paired_hosts = [host]
+
+        with patch("backend.moonlight_library.discover_moonlight_hosts",
+                   return_value=[host]), \
+             patch("backend.moonlight_library.check_host_available",
+                   return_value=True), \
+             patch("backend.moonlight_library.list_apps",
+                   return_value=app_names), \
+             patch("backend.moonlight_library.get_artwork_path", return_value=None), \
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value=history):
+            lib.refresh()
+            lib._executor.shutdown(wait=True)
+            QCoreApplication.processEvents()
+            lib._executor = ThreadPoolExecutor(max_workers=2)
+
+    def test_last_played_set_from_history(self) -> None:
+        """Phase 2 sets last_played on apps that have a history entry."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        history = {"Desktop": "2026-03-22T18:45:00Z"}
+
+        self._refresh_and_wait_with_history(lib, ["Desktop"], history)
+
+        assert len(lib._all_apps) == 1
+        assert lib._all_apps[0].last_played == "2026-03-22T18:45:00Z"
+
+    def test_last_played_empty_for_unplayed_app(self) -> None:
+        """Phase 2 leaves last_played empty for apps not in history."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        history = {}  # no history
+
+        self._refresh_and_wait_with_history(lib, ["Desktop"], history)
+
+        assert len(lib._all_apps) == 1
+        assert lib._all_apps[0].last_played == ""
+
+    def test_last_played_only_set_for_matching_apps(self) -> None:
+        """Phase 2 sets last_played only for apps that match history keys."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        history = {
+            "Desktop": "2026-03-22T18:45:00Z",
+            "Other Game": "2026-03-20T10:00:00Z",  # not in app list
+        }
+
+        self._refresh_and_wait_with_history(lib, ["Desktop", "New Game"], history)
+
+        apps_by_name = {a.name: a for a in lib._all_apps}
+        assert apps_by_name["Desktop"].last_played == "2026-03-22T18:45:00Z"
+        assert apps_by_name["New Game"].last_played == ""
+
+    def test_last_played_case_sensitive(self) -> None:
+        """last_played lookup is case-sensitive (matches original app name)."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        history = {"desktop": "2026-03-22T18:45:00Z"}  # lowercase key
+
+        self._refresh_and_wait_with_history(lib, ["Desktop"], history)
+
+        # "Desktop" != "desktop" — should not match
+        assert lib._all_apps[0].last_played == ""
+
+
+# ---------------------------------------------------------------------------
+# MoonlightAppListModel — LastPlayedRole
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightAppListModelLastPlayedRole:
+    def test_last_played_role_returns_timestamp(self) -> None:
+        """LastPlayedRole returns the last_played timestamp from the app."""
+        from backend.moonlight_library import MoonlightAppListModel
+
+        model = MoonlightAppListModel()
+        app = MoonlightApp(
+            name="Desktop",
+            host_uuid="uuid-1",
+            image_path="",
+            last_played="2026-03-22T18:45:00Z",
+        )
+        model.set_apps([app])
+
+        idx = model.index(0, 0)
+        assert model.data(idx, MoonlightAppListModel.LastPlayedRole) == "2026-03-22T18:45:00Z"
+
+    def test_last_played_role_empty_when_not_played(self) -> None:
+        """LastPlayedRole returns empty string when last_played is not set."""
+        from backend.moonlight_library import MoonlightAppListModel
+
+        model = MoonlightAppListModel()
+        app = MoonlightApp(name="Desktop", host_uuid="uuid-1")
+        model.set_apps([app])
+
+        idx = model.index(0, 0)
+        assert model.data(idx, MoonlightAppListModel.LastPlayedRole) == ""
+
+    def test_last_played_role_in_role_names(self) -> None:
+        """roleNames includes lastPlayed."""
+        from backend.moonlight_library import MoonlightAppListModel
+
+        model = MoonlightAppListModel()
+        names = model.roleNames()
+        assert b"lastPlayed" in names.values()
+
+    def test_last_played_role_constant_defined(self) -> None:
+        """LastPlayedRole constant is defined on MoonlightAppListModel."""
+        from backend.moonlight_library import MoonlightAppListModel
+
+        assert hasattr(MoonlightAppListModel, "LastPlayedRole")
+        assert MoonlightAppListModel.LastPlayedRole > MoonlightAppListModel.ImagePathRole
+
+
+# ---------------------------------------------------------------------------
+# MoonlightLibrary — getApp includes lastPlayed
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightLibraryGetAppLastPlayed:
+    def test_get_app_includes_last_played(self) -> None:
+        """getApp returns lastPlayed field from the app."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        host = _make_host("DESKTOP-PC", "uuid-1", "192.168.0.10")
+        app = MoonlightApp(
+            name="Desktop",
+            host_uuid="uuid-1",
+            last_played="2026-03-22T18:45:00Z",
+        )
+        lib._paired_hosts = [host]
+        lib._hosts = [host]
+        lib._all_apps = [app]
+        lib._current_apps = [app]
+        lib._apps_model.set_apps([app])
+
+        result = lib.getApp(0)
+        assert "lastPlayed" in result
+        assert result["lastPlayed"] == "2026-03-22T18:45:00Z"
+
+    def test_get_app_last_played_empty_when_not_played(self) -> None:
+        """getApp returns empty string for lastPlayed when app has never been played."""
+        from backend.moonlight_library import MoonlightLibrary
+
+        lib = MoonlightLibrary()
+        host = _make_host("DESKTOP-PC", "uuid-1", "192.168.0.10")
+        app = MoonlightApp(name="Desktop", host_uuid="uuid-1")
+        lib._paired_hosts = [host]
+        lib._hosts = [host]
+        lib._all_apps = [app]
+        lib._current_apps = [app]
+        lib._apps_model.set_apps([app])
+
+        result = lib.getApp(0)
+        assert result["lastPlayed"] == ""
+
+
+# ---------------------------------------------------------------------------
+# MoonlightLibrary — hostOnline property (Task 004)
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightLibraryHostOnline:
+    """Tests for the hostOnline Q_PROPERTY added in Task 004.
+
+    hostOnline reflects the TCP probe result from Phase 2:
+      - Starts False before any refresh
+      - Becomes True after a successful probe
+      - Stays False after a failed probe
+      - Emits hostOnlineChanged when the value changes
+    """
+
+    def _make_lib(self) -> "MoonlightLibrary":
+        from backend.moonlight_library import MoonlightLibrary
+        return MoonlightLibrary()
+
+    def _refresh_and_wait(self, lib, patches: dict) -> None:
+        """Helper: call refresh(), wait for both phases to finish, then pump events."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        with patch("backend.moonlight_library.discover_moonlight_hosts",
+                   **patches.get("discover", {"return_value": []})), \
+             patch("backend.moonlight_library.check_host_available",
+                   **patches.get("check", {"return_value": False})), \
+             patch("backend.moonlight_library.list_apps",
+                   **patches.get("list_apps", {"return_value": []})), \
+             patch("backend.moonlight_library.get_artwork_path",
+                   **patches.get("get_artwork_path", {"return_value": None})), \
+             patch("backend.moonlight_library.refresh_artwork",
+                   **patches.get("refresh_artwork", {"return_value": None})), \
+             patch("backend.moonlight_library.get_all_history",
+                   **patches.get("get_all_history", {"return_value": {}})):
+            lib.refresh()
+            lib._executor.shutdown(wait=True)
+            QCoreApplication.processEvents()
+            lib._executor = ThreadPoolExecutor(max_workers=2)
+
+    def test_host_online_starts_false(self) -> None:
+        """hostOnline is False before any refresh."""
+        lib = self._make_lib()
+        assert lib.hostOnline is False
+
+    def test_host_online_true_after_successful_probe(self) -> None:
+        """hostOnline becomes True after a successful TCP probe."""
+        lib = self._make_lib()
+        host = _make_host("PC1", "uuid-1", "192.168.0.10")
+
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": [host]},
+            "check": {"return_value": True},
+            "list_apps": {"return_value": ["Game A"]},
+        })
+
+        assert lib.hostOnline is True
+
+    def test_host_online_false_after_failed_probe(self) -> None:
+        """hostOnline stays False after a failed TCP probe."""
+        lib = self._make_lib()
+        host = _make_host("OFFLINE-PC", "uuid-offline", "10.0.0.1")
+
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": [host]},
+            "check": {"return_value": False},
+        })
+
+        assert lib.hostOnline is False
+
+    def test_host_online_false_when_no_hosts(self) -> None:
+        """hostOnline is False when no paired hosts are found."""
+        lib = self._make_lib()
+
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": []},
+        })
+
+        assert lib.hostOnline is False
+
+    def test_host_online_false_when_host_has_no_address(self) -> None:
+        """hostOnline is False when the selected host has no address."""
+        from backend.moonlight_models import MoonlightHost
+        lib = self._make_lib()
+
+        host = MoonlightHost(
+            name="PC",
+            uuid="uuid-1",
+            address="",
+            local_address="",
+            remote_address="",
+            manual_address="",
+            mac_address="",
+            custom_name="",
+        )
+
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": [host]},
+        })
+
+        assert lib.hostOnline is False
+
+    def test_host_online_changed_signal_emitted_after_probe(self) -> None:
+        """hostOnlineChanged is emitted after Phase 2 completes."""
+        from backend.moonlight_library import MoonlightLibrary
+        from concurrent.futures import ThreadPoolExecutor
+
+        lib = MoonlightLibrary()
+        signals: list[bool] = []
+        lib.hostOnlineChanged.connect(lambda: signals.append(lib.hostOnline))
+
+        host = _make_host("PC1", "uuid-1", "192.168.0.10")
+
+        with patch("backend.moonlight_library.discover_moonlight_hosts",
+                   return_value=[host]), \
+             patch("backend.moonlight_library.check_host_available",
+                   return_value=True), \
+             patch("backend.moonlight_library.list_apps",
+                   return_value=["Game A"]), \
+             patch("backend.moonlight_library.get_artwork_path", return_value=None), \
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
+            lib.refresh()
+            lib._executor.shutdown(wait=True)
+            QCoreApplication.processEvents()
+            lib._executor = ThreadPoolExecutor(max_workers=2)
+
+        assert len(signals) >= 1
+        assert signals[-1] is True
+
+    def test_host_online_changed_signal_emitted_on_failed_probe(self) -> None:
+        """hostOnlineChanged is emitted even when probe fails (value=False)."""
+        from backend.moonlight_library import MoonlightLibrary
+        from concurrent.futures import ThreadPoolExecutor
+
+        lib = MoonlightLibrary()
+        signals: list[bool] = []
+        lib.hostOnlineChanged.connect(lambda: signals.append(lib.hostOnline))
+
+        host = _make_host("OFFLINE-PC", "uuid-1", "10.0.0.1")
+
+        with patch("backend.moonlight_library.discover_moonlight_hosts",
+                   return_value=[host]), \
+             patch("backend.moonlight_library.check_host_available",
+                   return_value=False), \
+             patch("backend.moonlight_library.list_apps", return_value=[]), \
+             patch("backend.moonlight_library.get_artwork_path", return_value=None), \
+             patch("backend.moonlight_library.refresh_artwork", return_value=None), \
+             patch("backend.moonlight_library.get_all_history", return_value={}):
+            lib.refresh()
+            lib._executor.shutdown(wait=True)
+            QCoreApplication.processEvents()
+            lib._executor = ThreadPoolExecutor(max_workers=2)
+
+        assert len(signals) >= 1
+        assert signals[-1] is False
+
+    def test_host_online_transitions_online_to_offline(self) -> None:
+        """hostOnline transitions from True to False on a subsequent failed probe."""
+        lib = self._make_lib()
+        host = _make_host("PC1", "uuid-1", "192.168.0.10")
+
+        # First refresh: host is online
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": [host]},
+            "check": {"return_value": True},
+            "list_apps": {"return_value": ["Game A"]},
+        })
+        assert lib.hostOnline is True
+
+        # Second refresh: host goes offline
+        self._refresh_and_wait(lib, {
+            "discover": {"return_value": [host]},
+            "check": {"return_value": False},
+        })
+        assert lib.hostOnline is False
+
+
+# ---------------------------------------------------------------------------
+# SteamSourceListModel — OfflineRole (Task 004)
+# ---------------------------------------------------------------------------
+
+
+class TestSteamSourceListModelOfflineRole:
+    """Tests for the OfflineRole added to SteamSourceListModel in Task 004."""
+
+    def test_offline_role_returns_false_by_default(self) -> None:
+        """OfflineRole returns False when 'offline' key is absent."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        model.set_sources([{"name": "Moonlight Games", "gameCount": 0, "source": "moonlight"}])
+        idx = model.index(0, 0)
+        assert model.data(idx, SteamSourceListModel.OfflineRole) is False
+
+    def test_offline_role_returns_true_when_set(self) -> None:
+        """OfflineRole returns True when 'offline' key is True."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        model.set_sources([{
+            "name": "Moonlight Games",
+            "gameCount": 0,
+            "source": "moonlight",
+            "offline": True,
+        }])
+        idx = model.index(0, 0)
+        assert model.data(idx, SteamSourceListModel.OfflineRole) is True
+
+    def test_offline_role_returns_false_when_explicitly_false(self) -> None:
+        """OfflineRole returns False when 'offline' key is explicitly False."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        model.set_sources([{
+            "name": "Moonlight Games",
+            "gameCount": 5,
+            "source": "moonlight",
+            "offline": False,
+        }])
+        idx = model.index(0, 0)
+        assert model.data(idx, SteamSourceListModel.OfflineRole) is False
+
+    def test_offline_role_in_role_names(self) -> None:
+        """roleNames includes 'offline' key."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        names = model.roleNames()
+        assert b"offline" in names.values()
+
+    def test_offline_role_constant_defined(self) -> None:
+        """OfflineRole constant is defined and distinct from other roles."""
+        from backend.steam_library import SteamSourceListModel
+
+        assert hasattr(SteamSourceListModel, "OfflineRole")
+        assert SteamSourceListModel.OfflineRole != SteamSourceListModel.LoadingRole
+        assert SteamSourceListModel.OfflineRole != SteamSourceListModel.NameRole
+
+
+# ---------------------------------------------------------------------------
+# main.py _on_moonlight_hosts_changed — offline flag (Task 004)
+# ---------------------------------------------------------------------------
+
+
+class TestOnMoonlightHostsChangedOfflineFlag:
+    """Tests for the 'offline' flag set in _on_moonlight_hosts_changed (main.py).
+
+    We test the logic by simulating the conditions that main.py checks:
+      - Paired host exists, loading=False, hostOnline=False → offline=True
+      - Paired host exists, loading=False, hostOnline=True  → offline=False
+      - Paired host exists, loading=True                    → offline=False (loading takes precedence)
+      - No paired hosts                                     → setMoonlightSources([]) called
+    """
+
+    def _make_steam_lib(self):
+        from backend.steam_library import SteamLibrary
+        with patch("backend.steam_library.discover_steam_games", return_value=[]):
+            return SteamLibrary()
+
+    def _make_moonlight_lib(self, paired_hosts, all_apps=None, loading=False, host_online=False):
+        from backend.moonlight_library import MoonlightLibrary
+        lib = MoonlightLibrary()
+        lib._paired_hosts = paired_hosts
+        lib._all_apps = all_apps or []
+        lib._loading = loading
+        lib._host_online = host_online
+        return lib
+
+    def _run_handler(self, moonlight, steam):
+        """Simulate the _on_moonlight_hosts_changed closure from main.py."""
+        from datetime import datetime, timezone
+
+        if not moonlight._paired_hosts:
+            steam.setMoonlightSources([])
+            steam.setMoonlightRecentlyPlayed([])
+            return
+
+        app_count = len(moonlight._all_apps)
+        is_loading = moonlight.loading
+        is_offline = (not is_loading) and (not moonlight.hostOnline) and bool(moonlight._paired_hosts)
+        steam.setMoonlightSources([{
+            "name": "Moonlight Games",
+            "gameCount": app_count,
+            "source": "moonlight",
+            "loading": is_loading,
+            "offline": is_offline,
+        }])
+
+    def _get_moonlight_source(self, steam):
+        """Return the first Moonlight source dict from the sources model, or None."""
+        from backend.steam_library import SteamSourceListModel
+        model = steam._sources_model
+        for i in range(model.rowCount()):
+            idx = model.index(i, 0)
+            if model.data(idx, SteamSourceListModel.SourceRole) == "moonlight":
+                return {
+                    "loading": model.data(idx, SteamSourceListModel.LoadingRole),
+                    "offline": model.data(idx, SteamSourceListModel.OfflineRole),
+                    "gameCount": model.data(idx, SteamSourceListModel.GameCountRole),
+                }
+        return None
+
+    def test_offline_true_when_host_down_after_phase2(self) -> None:
+        """offline=True when paired host exists, loading=False, hostOnline=False."""
+        steam = self._make_steam_lib()
+        moonlight = self._make_moonlight_lib(
+            paired_hosts=[_make_host()],
+            loading=False,
+            host_online=False,
+        )
+
+        self._run_handler(moonlight, steam)
+
+        source = self._get_moonlight_source(steam)
+        assert source is not None
+        assert source["offline"] is True
+        assert source["loading"] is False
+
+    def test_offline_false_when_host_online(self) -> None:
+        """offline=False when paired host exists, loading=False, hostOnline=True."""
+        steam = self._make_steam_lib()
+        moonlight = self._make_moonlight_lib(
+            paired_hosts=[_make_host()],
+            all_apps=[_make_app("Game A")],
+            loading=False,
+            host_online=True,
+        )
+
+        self._run_handler(moonlight, steam)
+
+        source = self._get_moonlight_source(steam)
+        assert source is not None
+        assert source["offline"] is False
+        assert source["loading"] is False
+        assert source["gameCount"] == 1
+
+    def test_offline_false_during_loading(self) -> None:
+        """offline=False while loading=True (loading indicator takes precedence)."""
+        steam = self._make_steam_lib()
+        moonlight = self._make_moonlight_lib(
+            paired_hosts=[_make_host()],
+            loading=True,
+            host_online=False,
+        )
+
+        self._run_handler(moonlight, steam)
+
+        source = self._get_moonlight_source(steam)
+        assert source is not None
+        assert source["offline"] is False
+        assert source["loading"] is True
+
+    def test_no_moonlight_source_when_no_paired_hosts(self) -> None:
+        """setMoonlightSources([]) is called when no paired hosts exist."""
+        steam = self._make_steam_lib()
+        moonlight = self._make_moonlight_lib(paired_hosts=[])
+
+        self._run_handler(moonlight, steam)
+
+        source = self._get_moonlight_source(steam)
+        assert source is None
+
+    def test_game_count_zero_when_offline(self) -> None:
+        """gameCount is 0 when host is offline (no apps loaded)."""
+        steam = self._make_steam_lib()
+        moonlight = self._make_moonlight_lib(
+            paired_hosts=[_make_host()],
+            all_apps=[],  # no apps when offline
+            loading=False,
+            host_online=False,
+        )
+
+        self._run_handler(moonlight, steam)
+
+        source = self._get_moonlight_source(steam)
+        assert source is not None
+        assert source["gameCount"] == 0
+        assert source["offline"] is True

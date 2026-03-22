@@ -2,6 +2,7 @@
 
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Suppress harmless VAAPI hardware decoding errors in ffmpeg logs.
@@ -19,6 +20,7 @@ from backend.keys import Keys
 from backend.launcher import Launcher
 from backend.library import GameLibrary
 from backend.moonlight_library import MoonlightLibrary
+from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
 from backend.settings_manager import SettingsManager
 from backend.steam_library import SteamLibrary
@@ -70,9 +72,17 @@ def main() -> None:
     )
     engine.rootContext().setContextProperty("moonlight", moonlight)
 
+    # Give SteamLibrary a reference to MoonlightLibrary so it can dispatch
+    # Moonlight launches from the "Recently Played" source.
+    steam.setMoonlightLibrary(moonlight)
+
     # Settings manager — exposed to QML as `settings`
     settings_manager = SettingsManager(config, library, plex_library, browser_launcher, moonlight_library=moonlight)
     engine.rootContext().setContextProperty("settings", settings_manager)
+
+    # Network monitor — exposed to QML as `networkMonitor`
+    network_monitor = NetworkMonitor()
+    engine.rootContext().setContextProperty("networkMonitor", network_monitor)
 
     # Allow QML files to import siblings and the Theme singleton via `import "."`
     engine.addImportPath(str(QML_DIR))
@@ -108,17 +118,53 @@ def main() -> None:
     moonlight.processFinished.connect(_show_window)
 
     # When Moonlight host discovery completes, update the Steam source list
+    # and inject recently played Moonlight data.
     def _on_moonlight_hosts_changed() -> None:
         if not moonlight._paired_hosts:
             steam.setMoonlightSources([])
+            steam.setMoonlightRecentlyPlayed([])
             return
         app_count = len(moonlight._all_apps)
+        is_loading = moonlight.loading
+        # After Phase 2 completes (loading=False), check whether the host is online.
+        # During loading, offline is False so the "Loading..." indicator takes precedence.
+        is_offline = (not is_loading) and (not moonlight.hostOnline) and bool(moonlight._paired_hosts)
         steam.setMoonlightSources([{
             "name": "Moonlight Games",
             "gameCount": app_count,
             "source": "moonlight",
-            "loading": moonlight.loading,
+            "loading": is_loading,
+            "offline": is_offline,
         }])
+
+        # Build recently played list from Moonlight apps that have been played.
+        # Normalize ISO 8601 timestamps to Unix epoch ints for unified sorting.
+        recent_items = []
+        for app in moonlight._all_apps:
+            if not app.last_played:
+                continue
+            try:
+                dt = datetime.fromisoformat(app.last_played)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                last_played_epoch = int(dt.timestamp())
+            except (ValueError, OSError):
+                continue
+            # Find the host address for this app
+            host = next(
+                (h for h in moonlight._paired_hosts if h.uuid == app.host_uuid),
+                None,
+            )
+            host_address = host.address if host else ""
+            recent_items.append({
+                "name": app.name,
+                "source": "moonlight",
+                "imagePath": app.image_path,
+                "lastPlayed": last_played_epoch,
+                "appId": "",
+                "hostAddress": host_address,
+            })
+        steam.setMoonlightRecentlyPlayed(recent_items)
 
     moonlight.hostsChanged.connect(_on_moonlight_hosts_changed)
     moonlight.loadingChanged.connect(_on_moonlight_hosts_changed)

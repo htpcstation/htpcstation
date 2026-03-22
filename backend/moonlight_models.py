@@ -38,3 +38,4 @@ class MoonlightApp:
     name: str           # App/game name as reported by the host
     host_uuid: str      # UUID of the host that owns this app
     image_path: str = ""  # Local filesystem path to the artwork poster (empty if unavailable)
+    last_played: str = ""  # ISO 8601 UTC timestamp of last launch (empty if never played)
