@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "HTPC Station Gamepad",
+  "version": "0.1.0",
+  "description": "Gamepad navigation for HTPC Station browser content",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["mappings/default.js", "mappings/plex.js", "mappings/index.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

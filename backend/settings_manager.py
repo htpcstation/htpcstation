@@ -20,7 +20,7 @@ from PySide6.QtCore import (
 
 from backend.config import Config
 from backend.library import GameLibrary
-from backend.plex_client import PlexClient
+from backend.plex_account import PlexAccount
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,10 @@ class SettingsManager(QObject):
     romDirectoryChanged = Signal()
     retroarchCommandChanged = Signal()
     coresDirectoryChanged = Signal()
-    plexServerUrlChanged = Signal()
+    plexServerUrlChanged = Signal()  # kept for backward compat with existing QML
     plexTokenChanged = Signal()
+    plexServerIdChanged = Signal()
+    plexUserIdChanged = Signal()
     browserCommandChanged = Signal()
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
@@ -70,10 +72,17 @@ class SettingsManager(QObject):
         return str(self._config.cores_directory)
 
     def _get_plex_server_url(self) -> str:
-        return self._config.plex_server_url or ""
+        # Kept for backward compat — returns empty string (server URL is now runtime-resolved)
+        return ""
 
     def _get_plex_token(self) -> str:
         return self._config.plex_token or ""
+
+    def _get_plex_server_id(self) -> str:
+        return self._config.plex_server_id or ""
+
+    def _get_plex_user_id(self) -> int:
+        return self._config.plex_user_id or 0
 
     def _get_browser_command(self) -> str:
         return self._config.browser_command
@@ -112,6 +121,16 @@ class SettingsManager(QObject):
         str,
         fget=_get_plex_token,
         notify=plexTokenChanged,
+    )
+    plexServerId = Property(
+        str,
+        fget=_get_plex_server_id,
+        notify=plexServerIdChanged,
+    )
+    plexUserId = Property(
+        int,
+        fget=_get_plex_user_id,
+        notify=plexUserIdChanged,
     )
     browserCommand = Property(
         str,
@@ -157,15 +176,27 @@ class SettingsManager(QObject):
 
     @Slot(str)
     def setPlexServerUrl(self, url: str) -> None:
-        """Set the Plex server URL."""
-        self._config.set_plex_server_url(url)
-        self.plexServerUrlChanged.emit()
+        """Deprecated: server URL is now resolved at runtime. This is a no-op."""
+        # Server URL is no longer user-configured; use setPlexServerId instead.
+        logger.debug("setPlexServerUrl called but server URL is now runtime-resolved")
 
     @Slot(str)
     def setPlexToken(self, token: str) -> None:
         """Set the Plex authentication token."""
         self._config.set_plex_token(token)
         self.plexTokenChanged.emit()
+
+    @Slot(str)
+    def setPlexServerId(self, server_id: str) -> None:
+        """Set the Plex server machine identifier."""
+        self._config.set_plex_server_id(server_id)
+        self.plexServerIdChanged.emit()
+
+    @Slot(int)
+    def setPlexUserId(self, user_id: int) -> None:
+        """Set the Plex home user ID."""
+        self._config.set_plex_user_id(user_id)
+        self.plexUserIdChanged.emit()
 
     @Slot(str)
     def setBrowserCommand(self, cmd: str) -> None:
@@ -229,25 +260,24 @@ class SettingsManager(QObject):
 
     @Slot(result=bool)
     def testPlexConnection(self) -> bool:
-        """Test the Plex server connection synchronously.
+        """Test the plex.tv token connection synchronously.
 
-        Returns True if the server responds successfully, False otherwise.
+        Validates the plex.tv token by calling PlexAccount.test_connection().
+        Returns True if the token is valid, False otherwise.
         Blocks briefly — acceptable for a settings screen.
         """
-        url = self._config.plex_server_url
         token = self._config.plex_token
-        if not url or not token:
-            logger.info("testPlexConnection: no server URL or token configured")
+        if not token:
+            logger.info("testPlexConnection: no token configured")
             return False
 
         try:
-            client = PlexClient(url, token)
-            identity = client.get_identity()
-            success = bool(identity.get("machineIdentifier"))
+            account = PlexAccount(token)
+            success = account.test_connection()
             if success:
-                logger.info("testPlexConnection: connected to %s", url)
+                logger.info("testPlexConnection: plex.tv token is valid")
             else:
-                logger.warning("testPlexConnection: no machineIdentifier in response")
+                logger.warning("testPlexConnection: plex.tv token validation failed")
             return success
         except Exception as exc:  # noqa: BLE001
             logger.warning("testPlexConnection: failed — %s", exc)

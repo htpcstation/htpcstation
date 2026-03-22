@@ -114,32 +114,45 @@ class TestConfigSetters:
              patch("backend.config.CONFIG_DIR", tmp_path):
             return Config()
 
-    def test_set_plex_server_url_updates_and_saves(self, tmp_path: Path) -> None:
+    def test_set_plex_server_id_updates_and_saves(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps({}), encoding="utf-8")
 
         with patch("backend.config.CONFIG_FILE", config_file), \
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
-            config.set_plex_server_url("http://192.168.0.2:32400")
+            config.set_plex_server_id("machine-abc123")
 
-        assert config.plex_server_url == "http://192.168.0.2:32400"
+        assert config.plex_server_id == "machine-abc123"
         saved = json.loads(config_file.read_text(encoding="utf-8"))
-        assert saved["plex"]["server_url"] == "http://192.168.0.2:32400"
+        assert saved["plex"]["server_id"] == "machine-abc123"
 
-    def test_set_plex_server_url_empty_string_sets_none(self, tmp_path: Path) -> None:
+    def test_set_plex_server_id_empty_string_sets_none(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "http://server:32400", "token": ""}}),
+            json.dumps({"plex": {"server_id": "machine-abc", "token": ""}}),
             encoding="utf-8",
         )
 
         with patch("backend.config.CONFIG_FILE", config_file), \
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
-            config.set_plex_server_url("")
+            config.set_plex_server_id("")
 
-        assert config.plex_server_url is None
+        assert config.plex_server_id is None
+
+    def test_set_plex_user_id_updates_and_saves(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_plex_user_id(42)
+
+        assert config.plex_user_id == 42
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["user_id"] == 42
 
     def test_set_plex_token_updates_and_saves(self, tmp_path: Path) -> None:
         config_file = tmp_path / "config.json"
@@ -256,7 +269,7 @@ class TestSettingsManagerProperties:
             json.dumps({
                 "rom_directory": str(tmp_path),
                 "retroarch": {"command": "retroarch", "cores_directory": str(tmp_path)},
-                "plex": {"server_url": "http://server:32400", "token": "tok"},
+                "plex": {"token": "tok", "server_id": "machine-abc", "user_id": 5},
                 "browser": {"command": "firefox"},
                 "ui": {"video_snap_autoplay": False, "video_snap_delay_ms": 2500},
             }),
@@ -278,9 +291,18 @@ class TestSettingsManagerProperties:
         manager = self._make_manager(tmp_path)
         assert manager.retroarchCommand == "retroarch"
 
-    def test_plex_server_url_property(self, tmp_path: Path) -> None:
+    def test_plex_server_url_property_returns_empty(self, tmp_path: Path) -> None:
+        """plexServerUrl is now always empty (server URL is runtime-resolved)."""
         manager = self._make_manager(tmp_path)
-        assert manager.plexServerUrl == "http://server:32400"
+        assert manager.plexServerUrl == ""
+
+    def test_plex_server_id_property(self, tmp_path: Path) -> None:
+        manager = self._make_manager(tmp_path)
+        assert manager.plexServerId == "machine-abc"
+
+    def test_plex_user_id_property(self, tmp_path: Path) -> None:
+        manager = self._make_manager(tmp_path)
+        assert manager.plexUserId == 5
 
     def test_plex_token_property(self, tmp_path: Path) -> None:
         manager = self._make_manager(tmp_path)
@@ -323,14 +345,35 @@ class TestSettingsManagerSetters:
         plex_library = MagicMock()
         return SettingsManager(config, library, plex_library), config
 
-    def test_set_plex_server_url_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+    def test_set_plex_server_url_is_noop(self, tmp_path: Path) -> None:
+        """setPlexServerUrl is now a no-op (server URL is runtime-resolved)."""
         manager, config = self._make_manager(tmp_path)
         emitted = []
         manager.plexServerUrlChanged.connect(lambda: emitted.append(True))
 
         manager.setPlexServerUrl("http://***REMOVED***:32400")
 
-        assert config.plex_server_url == "http://***REMOVED***:32400"
+        # No signal emitted, no config change
+        assert len(emitted) == 0
+
+    def test_set_plex_server_id_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.plexServerIdChanged.connect(lambda: emitted.append(True))
+
+        manager.setPlexServerId("machine-xyz")
+
+        assert config.plex_server_id == "machine-xyz"
+        assert len(emitted) == 1
+
+    def test_set_plex_user_id_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.plexUserIdChanged.connect(lambda: emitted.append(True))
+
+        manager.setPlexUserId(7)
+
+        assert config.plex_user_id == 7
         assert len(emitted) == 1
 
     def test_set_plex_token_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
@@ -509,18 +552,18 @@ class TestSettingsManagerTestPlexConnection:
 
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "http://server:32400", "token": "tok"}}),
+            json.dumps({"plex": {"token": "tok"}}),
             encoding="utf-8",
         )
         with patch("backend.config.CONFIG_FILE", config_file), \
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        mock_client = MagicMock()
-        mock_client.get_identity.return_value = {"machineIdentifier": "abc123"}
+        mock_account = MagicMock()
+        mock_account.test_connection.return_value = True
 
         manager = SettingsManager(config, MagicMock(), MagicMock())
-        with patch("backend.settings_manager.PlexClient", return_value=mock_client):
+        with patch("backend.settings_manager.PlexAccount", return_value=mock_account):
             result = manager.testPlexConnection()
 
         assert result is True
@@ -530,18 +573,18 @@ class TestSettingsManagerTestPlexConnection:
 
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "http://server:32400", "token": "tok"}}),
+            json.dumps({"plex": {"token": "tok"}}),
             encoding="utf-8",
         )
         with patch("backend.config.CONFIG_FILE", config_file), \
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        mock_client = MagicMock()
-        mock_client.get_identity.return_value = {}  # no machineIdentifier
+        mock_account = MagicMock()
+        mock_account.test_connection.return_value = False
 
         manager = SettingsManager(config, MagicMock(), MagicMock())
-        with patch("backend.settings_manager.PlexClient", return_value=mock_client):
+        with patch("backend.settings_manager.PlexAccount", return_value=mock_account):
             result = manager.testPlexConnection()
 
         assert result is False

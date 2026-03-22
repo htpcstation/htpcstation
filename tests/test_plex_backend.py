@@ -11,9 +11,10 @@ Covers:
   - PosterCache: downloads and caches on first access
   - PosterCache: returns empty string on download failure
   - PosterCache: thread-safe (no duplicate downloads)
-  - Config: plex_server_url and plex_token properties
+  - Config: plex_server_id, plex_user_id, and plex_token properties
   - Config: plex section loaded from JSON
   - Config: plex section saved to JSON
+  - Config: backward compat with old server_url field
   - PlexLibraryListModel: roles and data
   - PlexMovieListModel: roles, data, append, poster update
   - PlexShowListModel: roles, data, poster update
@@ -39,6 +40,36 @@ from backend.plex_models import (
     parse_season,
     parse_show,
 )
+
+
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+_FAKE_SERVER_RESOURCES = [
+    {
+        "clientIdentifier": "server123",
+        "name": "Test Server",
+        "owned": True,
+        "provides": "server",
+        "connections": [
+            {
+                "uri": "http://server:32400",
+                "local": True,
+                "relay": False,
+                "protocol": "http",
+            }
+        ],
+    }
+]
+
+
+def _make_plex_account_mock():
+    """Return a MagicMock PlexAccount class whose instances return fake resources."""
+    mock_cls = MagicMock()
+    mock_cls.return_value.get_resources.return_value = _FAKE_SERVER_RESOURCES
+    mock_cls.return_value.switch_user.return_value = None
+    return mock_cls
 
 
 # ---------------------------------------------------------------------------
@@ -650,12 +681,12 @@ class TestPosterCache:
 
 
 class TestConfigPlexProperties:
-    def test_plex_server_url_loaded_from_json(self, tmp_path: Path) -> None:
+    def test_plex_token_loaded_from_json(self, tmp_path: Path) -> None:
         from backend.config import Config
 
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "http://192.168.0.2:32400", "token": "tok123"}}),
+            json.dumps({"plex": {"token": "tok123", "server_id": "abc123", "user_id": 42}}),
             encoding="utf-8",
         )
 
@@ -663,8 +694,9 @@ class TestConfigPlexProperties:
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        assert config.plex_server_url == "http://192.168.0.2:32400"
         assert config.plex_token == "tok123"
+        assert config.plex_server_id == "abc123"
+        assert config.plex_user_id == 42
 
     def test_plex_defaults_to_none_when_not_in_config(self, tmp_path: Path) -> None:
         from backend.config import Config
@@ -676,15 +708,16 @@ class TestConfigPlexProperties:
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        assert config.plex_server_url is None
         assert config.plex_token is None
+        assert config.plex_server_id is None
+        assert config.plex_user_id is None
 
     def test_plex_empty_string_treated_as_none(self, tmp_path: Path) -> None:
         from backend.config import Config
 
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "", "token": ""}}),
+            json.dumps({"plex": {"token": "", "server_id": "", "user_id": 0}}),
             encoding="utf-8",
         )
 
@@ -692,15 +725,16 @@ class TestConfigPlexProperties:
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        assert config.plex_server_url is None
         assert config.plex_token is None
+        assert config.plex_server_id is None
+        assert config.plex_user_id is None
 
     def test_plex_section_saved_to_json(self, tmp_path: Path) -> None:
         from backend.config import Config
 
         config_file = tmp_path / "config.json"
         config_file.write_text(
-            json.dumps({"plex": {"server_url": "http://server:32400", "token": "abc"}}),
+            json.dumps({"plex": {"token": "abc", "server_id": "srv1", "user_id": 7}}),
             encoding="utf-8",
         )
 
@@ -711,8 +745,44 @@ class TestConfigPlexProperties:
 
         saved = json.loads(config_file.read_text(encoding="utf-8"))
         assert "plex" in saved
-        assert saved["plex"]["server_url"] == "http://server:32400"
         assert saved["plex"]["token"] == "abc"
+        assert saved["plex"]["server_id"] == "srv1"
+        assert saved["plex"]["user_id"] == 7
+
+    def test_old_config_with_server_url_does_not_crash(self, tmp_path: Path) -> None:
+        """Backward compat: old config files with server_url field load without error."""
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"plex": {"server_url": "http://192.168.0.2:32400", "token": "tok"}}),
+            encoding="utf-8",
+        )
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        # Old server_url is ignored; token is still loaded
+        assert config.plex_token == "tok"
+        assert config.plex_server_id is None
+
+    def test_plex_server_id_and_user_id_persistence(self, tmp_path: Path) -> None:
+        """set_plex_server_id and set_plex_user_id persist to config file."""
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_plex_server_id("machine-abc")
+            config.set_plex_user_id(99)
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["server_id"] == "machine-abc"
+        assert saved["plex"]["user_id"] == 99
 
 
 # ---------------------------------------------------------------------------
@@ -935,11 +1005,13 @@ class TestLoadMoreMoviesGuard:
         from unittest.mock import patch, MagicMock
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
 
             lib = PlexLibrary(config)
             # Simulate state: one page already loaded, more available
@@ -967,11 +1039,13 @@ class TestLoadMoreMoviesGuard:
         from backend.plex_models import PlexMovie
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
 
             lib = PlexLibrary(config)
             lib._loading_more = True
@@ -1035,11 +1109,13 @@ class TestGetLibraryList:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1107,29 +1183,48 @@ class TestGetLibraryList:
 
 class TestServerUrlProperty:
     def test_server_url_exposed(self) -> None:
+        """serverUrl returns the resolved URL after _setup_client succeeds."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                ],
+            }
+        ]
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", return_value=mock_account), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://192.168.0.2:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
 
         assert lib.serverUrl == "http://192.168.0.2:32400"
 
     def test_server_url_empty_when_not_configured(self) -> None:
+        """serverUrl is empty when no token is configured."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = None
+            config.plex_server_id = None
             config.plex_token = None
+            config.plex_user_id = None
             lib = PlexLibrary(config)
 
         assert lib.serverUrl == ""
@@ -1148,11 +1243,13 @@ class TestLoadMoreMoviesFailureResetsFlag:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
 
         lib._loading_more = True
@@ -1179,11 +1276,13 @@ class TestGetShow:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1247,11 +1346,13 @@ class TestGetSeasons:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1334,11 +1435,13 @@ class TestGetEpisodes:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1439,11 +1542,13 @@ class TestSelectLibraryOnDeckGuard:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1498,11 +1603,13 @@ class TestGetMoviePosterCaching:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1576,11 +1683,13 @@ class TestGetShowPosterCaching:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1816,11 +1925,13 @@ class TestSortMovies:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -1939,11 +2050,13 @@ class TestFilterByGenre:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -2023,11 +2136,13 @@ class TestGetGenres:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -2092,11 +2207,13 @@ class TestSelectLibraryResetsSortFilter:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -2141,11 +2258,13 @@ class TestLoadMoreMoviesPassesSortFilter:
         from backend.config import Config
 
         with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
              patch("backend.config.CONFIG_DIR"):
             config = MagicMock(spec=Config)
-            config.plex_server_url = "http://server:32400"
+            config.plex_server_id = "server123"
             config.plex_token = "tok"
+            config.plex_user_id = None
             lib = PlexLibrary(config)
         return lib
 
@@ -2167,3 +2286,576 @@ class TestLoadMoreMoviesPassesSortFilter:
         # args: (client, section_key, start, sort, genre)
         assert "addedAt:desc" in args
         assert "7" in args
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._resolve_server_url — connection selection logic (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveServerUrl:
+    """_resolve_server_url picks the best connection URL from plex.tv resources."""
+
+    def _make_lib_with_account(self, resources):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = resources
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_prefers_local_connection(self) -> None:
+        """Local connections are preferred over non-local."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "https://relay.plex.tv/server", "local": False, "relay": True, "protocol": "https"},
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                    {"uri": "https://external.example.com:32400", "local": False, "relay": False, "protocol": "https"},
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == "http://192.168.0.2:32400"
+
+    def test_prefers_https_within_local(self) -> None:
+        """Among local connections, HTTPS is preferred over HTTP."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                    {"uri": "https://192.168.0.2:32443", "local": True, "relay": False, "protocol": "https"},
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == "https://192.168.0.2:32443"
+
+    def test_falls_back_to_non_relay_when_no_local(self) -> None:
+        """Non-relay external connections are preferred over relay."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "https://relay.plex.tv/server", "local": False, "relay": True, "protocol": "https"},
+                    {"uri": "https://external.example.com:32400", "local": False, "relay": False, "protocol": "https"},
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == "https://external.example.com:32400"
+
+    def test_falls_back_to_relay_as_last_resort(self) -> None:
+        """Relay connections are used when no better option exists."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "https://relay.plex.tv/server", "local": False, "relay": True, "protocol": "https"},
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == "https://relay.plex.tv/server"
+
+    def test_returns_empty_when_server_not_found(self) -> None:
+        """Returns empty string when the configured server ID is not in resources."""
+        resources = [
+            {
+                "clientIdentifier": "other-server",
+                "name": "Other Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://other:32400", "local": True, "relay": False, "protocol": "http"},
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == ""
+
+    def test_returns_empty_when_no_connections(self) -> None:
+        """Returns empty string when the server has no connections."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == ""
+
+    def test_prefers_direct_ip_over_plex_direct_within_local(self) -> None:
+        """Within local connections, direct IP URLs are preferred over plex.direct URLs."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {
+                        "uri": "https://192-168-0-3.abc123.plex.direct:32400",
+                        "local": True,
+                        "relay": False,
+                        "protocol": "https",
+                    },
+                    {
+                        "uri": "http://192.168.0.2:32400",
+                        "local": True,
+                        "relay": False,
+                        "protocol": "http",
+                    },
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        # The plain HTTP direct IP connection should be preferred over the
+        # plex.direct HTTPS URL, even though HTTPS normally ranks higher.
+        assert lib._server_url == "http://192.168.0.2:32400"
+
+    def test_plex_direct_https_preferred_over_plex_direct_http_within_local(self) -> None:
+        """Among plex.direct connections, HTTPS is still preferred over HTTP."""
+        resources = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {
+                        "uri": "http://192-168-0-2.abc123.plex.direct:32400",
+                        "local": True,
+                        "relay": False,
+                        "protocol": "http",
+                    },
+                    {
+                        "uri": "https://192-168-0-2.abc123.plex.direct:32400",
+                        "local": True,
+                        "relay": False,
+                        "protocol": "https",
+                    },
+                ],
+            }
+        ]
+        lib = self._make_lib_with_account(resources)
+        assert lib._server_url == "https://192-168-0-2.abc123.plex.direct:32400"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._setup_client — user switching (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupClientUserSwitching:
+    """_setup_client calls switch_user when plex_user_id is set."""
+
+    def test_switch_user_called_when_user_id_set(self) -> None:
+        """When plex_user_id is set, switch_user is called and user token is used."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = "user-specific-token"
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        mock_client_cls = MagicMock()
+
+        with patch("backend.plex_library.PlexClient", mock_client_cls), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+        mock_account.switch_user.assert_called_once_with(42)
+        # PlexClient uses the admin token for server API calls (managed users
+        # don't have direct server access).  The user-specific token is stored
+        # in _active_token for browser deep links only.
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        assert call_args[0][1] == "admin-token"
+        assert lib._active_token == "user-specific-token"
+
+    def test_admin_token_used_when_switch_user_fails(self) -> None:
+        """When switch_user returns None, the admin token is used as fallback."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = None  # switch failed
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        mock_client_cls = MagicMock()
+
+        with patch("backend.plex_library.PlexClient", mock_client_cls), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+        # PlexClient should be created with the admin token as fallback
+        mock_client_cls.assert_called_once()
+        call_args = mock_client_cls.call_args
+        assert call_args[0][1] == "admin-token"
+
+    def test_no_client_when_no_token(self) -> None:
+        """No client is created when no token is configured."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = None
+            config.plex_token = None
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        assert lib._client is None
+        assert lib._server_url == ""
+
+    def test_no_client_when_no_server_id(self) -> None:
+        """No client is created when no server ID is configured."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = None
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        assert lib._client is None
+        assert lib._server_url == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._setup_client — user token caching (Bug 2)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupClientTokenCaching:
+    """_setup_client caches the user token to avoid redundant switch_user calls."""
+
+    def _make_lib_with_user(self, user_id=42):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = "user-specific-token"
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        mock_client_cls = MagicMock()
+
+        with patch("backend.plex_library.PlexClient", mock_client_cls), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = user_id
+            lib = PlexLibrary(config)
+
+        return lib, mock_account, mock_client_cls
+
+    def test_switch_user_called_only_once_on_repeated_setup(self) -> None:
+        """Calling _setup_client() multiple times with the same user_id only calls
+        switch_user() once — subsequent calls reuse the cached token."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = "user-specific-token"
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+            # switch_user was called once during __init__
+            assert mock_account.switch_user.call_count == 1
+
+            # Call _setup_client() again (simulating refresh())
+            lib._setup_client()
+            lib._setup_client()
+
+            # switch_user should still only have been called once
+            assert mock_account.switch_user.call_count == 1
+
+    def test_cached_token_stored_after_first_switch(self) -> None:
+        """After a successful switch_user, the token is cached."""
+        lib, mock_account, _ = self._make_lib_with_user(42)
+
+        assert lib._cached_user_id == 42
+        assert lib._cached_user_token == "user-specific-token"
+
+    def test_select_user_clears_cache(self) -> None:
+        """selectUser() clears the cached token so the next _setup_client() re-switches."""
+        lib, mock_account, _ = self._make_lib_with_user(42)
+
+        # Cache is populated after init
+        assert lib._cached_user_id == 42
+        assert lib._cached_user_token == "user-specific-token"
+
+        # selectUser clears the cache
+        with patch.object(lib, "_setup_client"), patch.object(lib, "refresh"):
+            lib.selectUser(99)
+
+        assert lib._cached_user_id is None
+        assert lib._cached_user_token == ""
+
+    def test_switch_user_called_again_after_cache_cleared(self) -> None:
+        """After selectUser() clears the cache, the next _setup_client() calls switch_user()."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = "user-specific-token"
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+            # switch_user called once during init
+            assert mock_account.switch_user.call_count == 1
+
+            # Clear cache (as selectUser would do) and call _setup_client() again
+            lib._cached_user_id = None
+            lib._cached_user_token = ""
+            lib._setup_client()
+
+            # switch_user should have been called again
+            assert mock_account.switch_user.call_count == 2
+
+    def test_cache_not_populated_when_switch_fails(self) -> None:
+        """If switch_user returns None, the cache is not populated."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = _FAKE_SERVER_RESOURCES
+        mock_account.switch_user.return_value = None  # switch fails
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "admin-token"
+            config.plex_user_id = 42
+            lib = PlexLibrary(config)
+
+        # Cache should not be populated when switch fails
+        assert lib._cached_user_id is None
+        assert lib._cached_user_token == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getServerList / getHomeUsers (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestGetServerListAndHomeUsers:
+    """getServerList and getHomeUsers delegate to PlexAccount."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_get_server_list_returns_formatted_list(self) -> None:
+        lib = self._make_lib()
+        mock_account = MagicMock()
+        mock_account.get_resources.return_value = [
+            {"clientIdentifier": "srv1", "name": "Home Server", "owned": True},
+            {"clientIdentifier": "srv2", "name": "Friend's Server", "owned": False},
+        ]
+        lib._account = mock_account
+
+        result = lib.getServerList()
+
+        assert len(result) == 2
+        assert result[0] == {"id": "srv1", "name": "Home Server", "owned": True}
+        assert result[1] == {"id": "srv2", "name": "Friend's Server", "owned": False}
+
+    def test_get_server_list_returns_empty_when_no_account(self) -> None:
+        lib = self._make_lib()
+        lib._account = None
+
+        result = lib.getServerList()
+
+        assert result == []
+
+    def test_get_home_users_returns_formatted_list(self) -> None:
+        lib = self._make_lib()
+        mock_account = MagicMock()
+        mock_account.get_home_users.return_value = [
+            {"id": 1, "title": "Admin", "admin": True, "restricted": False},
+            {"id": 2, "title": "Kid", "admin": False, "restricted": True},
+        ]
+        lib._account = mock_account
+
+        result = lib.getHomeUsers()
+
+        assert len(result) == 2
+        assert result[0] == {"id": 1, "title": "Admin", "admin": True, "restricted": False}
+        assert result[1] == {"id": 2, "title": "Kid", "admin": False, "restricted": True}
+
+    def test_get_home_users_returns_empty_when_no_account(self) -> None:
+        lib = self._make_lib()
+        lib._account = None
+
+        result = lib.getHomeUsers()
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.selectServer / selectUser (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectServerAndUser:
+    """selectServer and selectUser update config and trigger reconnect."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_select_server_updates_config(self) -> None:
+        lib = self._make_lib()
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # suppress network calls
+
+        with patch.object(lib, "_setup_client"), \
+             patch.object(lib, "refresh"):
+            lib.selectServer("new-server-id")
+
+        lib._config.set_plex_server_id.assert_called_once_with("new-server-id")
+
+    def test_select_server_invalidates_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = MagicMock()
+        lib._server_url = "http://old-server"
+        lib._active_token = "old-token"
+
+        lib.selectServer("new-server-id")
+
+        assert lib._client is None
+        assert lib._server_url == ""
+        assert lib._active_token == ""
+
+    def test_select_user_updates_config(self) -> None:
+        lib = self._make_lib()
+
+        lib.selectUser(7)
+
+        lib._config.set_plex_user_id.assert_called_once_with(7)
+
+    def test_select_user_invalidates_client_and_cache(self) -> None:
+        lib = self._make_lib()
+        lib._client = MagicMock()
+        lib._cached_user_id = 5
+        lib._cached_user_token = "old-token"
+
+        lib.selectUser(7)
+
+        assert lib._client is None
+        assert lib._cached_user_id is None
+        assert lib._cached_user_token == ""

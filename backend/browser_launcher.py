@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import shutil
 import time
 from pathlib import Path
 from typing import Optional
@@ -36,11 +37,28 @@ class BrowserLauncher(QObject):
         self._browser_command = browser_command
         self._process: Optional[QProcess] = None
         self._start_time: float = 0.0
-        # Brave flatpak default profile — session files are cleared before
-        # each launch to prevent tab accumulation, but cookies/login persist.
-        self._browser_profile_dir = (
+        # Extension directory ships with the project at <project_root>/extension/
+        self._extension_dir = (Path(__file__).parent.parent / "extension").resolve()
+        # Deployed copy of the extension inside the Brave flatpak data directory.
+        # The flatpak sandbox cannot read arbitrary home directory paths, so the
+        # extension must be copied here before launch.
+        self._extension_deploy_dir = (
             Path.home() / ".var" / "app" / "com.brave.Browser"
-            / "config" / "BraveSoftware" / "Brave-Browser" / "Default"
+            / "config" / "htpcstation-extension"
+        )
+        # Dedicated user data directory inside the flatpak sandbox.
+        # This ensures HTPC Station's Brave instance is completely separate
+        # from any personal browsing session — kiosk mode, extensions, and
+        # command-line flags always apply, even if Brave is already running.
+        self._user_data_dir = (
+            Path.home() / ".var" / "app" / "com.brave.Browser"
+            / "config" / "htpcstation-browser"
+        )
+        # Browser profile directory within our dedicated user data dir.
+        # Session files are cleared before each launch to prevent tab
+        # accumulation, but cookies/login persist.
+        self._browser_profile_dir = (
+            self._user_data_dir / "Default"
         )
 
     # ------------------------------------------------------------------
@@ -93,7 +111,20 @@ class BrowserLauncher(QObject):
         # Clear session restore files to prevent tab accumulation,
         # but keep the profile (cookies, Plex login, etc.)
         self._clear_session_state()
-        return [*tokens, "--kiosk", "--start-fullscreen", url]
+        # Deploy the extension into the flatpak-accessible data directory.
+        deployed = self._deploy_extension()
+        # Ensure the user data directory exists.
+        self._user_data_dir.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            *tokens,
+            "--kiosk",
+            "--start-fullscreen",
+            f"--user-data-dir={self._user_data_dir}",
+        ]
+        if deployed is not None:
+            cmd.append(f"--load-extension={deployed}")
+        cmd.append(url)
+        return cmd
 
     def _clear_session_state(self) -> None:
         """Remove Chromium session restore files from the browser profile.
@@ -125,6 +156,41 @@ class BrowserLauncher(QObject):
                 logger.debug("BrowserLauncher: removed Session Storage dir")
             except OSError as e:
                 logger.warning("BrowserLauncher: failed to remove Session Storage: %s", e)
+
+    def _deploy_extension(self) -> Optional[Path]:
+        """Copy the extension into the Brave flatpak data directory.
+
+        The Brave flatpak sandbox cannot read arbitrary paths under the home
+        directory, so the extension must be deployed to a path the sandbox can
+        access (``***REMOVED***.var/app/com.brave.Browser/``).
+
+        Returns the deployed path on success, or ``None`` if the copy failed
+        (e.g. the source directory does not exist).  When ``None`` is returned
+        the caller should omit the ``--load-extension`` flag rather than
+        crashing.
+        """
+        src = self._extension_dir
+        dst = self._extension_deploy_dir
+        if not src.exists():
+            logger.warning(
+                "BrowserLauncher: extension source directory not found: %s — "
+                "omitting --load-extension flag",
+                src,
+            )
+            return None
+        try:
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            logger.debug("BrowserLauncher: extension deployed to %s", dst)
+            return dst
+        except OSError as exc:
+            logger.warning(
+                "BrowserLauncher: failed to deploy extension from %s to %s: %s — "
+                "omitting --load-extension flag",
+                src,
+                dst,
+                exc,
+            )
+            return None
 
     def _on_started(self) -> None:
         """Handle QProcess.started — browser process is confirmed running."""

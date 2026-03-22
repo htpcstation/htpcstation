@@ -11,6 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -24,6 +25,7 @@ from PySide6.QtCore import (
 
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config, CONFIG_DIR
+from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient
 from backend.plex_models import (
     PlexMovie,
@@ -394,6 +396,17 @@ class PlexLibrary(QObject):
         # Poster cache
         self._poster_cache = PosterCache(_POSTER_CACHE_DIR)
 
+        # PlexAccount for server discovery and user switching
+        self._account: Optional[PlexAccount] = None
+        # Resolved server URL (set by _setup_client after discovery)
+        self._server_url: str = ""
+        # Active token (user-specific or admin) used for deep-link URLs
+        self._active_token: str = ""
+        # Cache for user-switching to avoid redundant API calls on every refresh
+        self._cached_user_id: Optional[int] = None
+        self._cached_user_token: str = ""
+        self._cached_user_title: str = ""
+
         # Build Plex client if config is available
         self._client: Optional[PlexClient] = None
         self._setup_client()
@@ -467,7 +480,7 @@ class PlexLibrary(QObject):
     )
     serverUrl = Property(
         str,
-        fget=lambda self: self._config.plex_server_url or "",
+        fget=lambda self: self._server_url,
         constant=True,
     )
 
@@ -752,7 +765,7 @@ class PlexLibrary(QObject):
         if self._browser_launcher is None:
             logger.warning("PlexLibrary.launchContent: no browser launcher configured")
             return
-        if not self._config.plex_server_url:
+        if not self._server_url:
             logger.warning("PlexLibrary.launchContent: no Plex server URL configured")
             return
         if not rating_key:
@@ -760,14 +773,17 @@ class PlexLibrary(QObject):
             return
 
         machine_id = self._machine_identifier
-        server_url = self._config.plex_server_url
 
         url = (
-            f"{server_url}/web/index.html"
+            f"https://app.plex.tv/desktop"
+            f"?X-Plex-Token={self._active_token}"
             f"#!/server/{machine_id}/details"
             f"?key=/library/metadata/{rating_key}"
             f"&autoPlay=1"
         )
+        user_title = self._cached_user_title
+        if user_title:
+            url += f"&htpc_user={quote(user_title)}"
         logger.info("PlexLibrary.launchContent: launching %s", url)
         self._browser_launcher.launch(url)
 
@@ -955,12 +971,197 @@ class PlexLibrary(QObject):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _resolve_server_url(self) -> Optional[str]:
+        """Resolve the server URL from plex.tv resources API.
+
+        Finds the server matching config.plex_server_id and picks the best
+        connection URL using the priority: local > non-relay > relay, with
+        HTTPS preferred within each tier.
+
+        Returns the URI string, or None if not found.
+        """
+        if self._account is None or not self._config.plex_server_id:
+            return None
+
+        resources = self._account.get_resources()
+        server = next(
+            (r for r in resources if r.get("clientIdentifier") == self._config.plex_server_id),
+            None,
+        )
+        if server is None:
+            logger.warning(
+                "PlexLibrary: server %s not found in resources", self._config.plex_server_id
+            )
+            return None
+
+        connections = server.get("connections", [])
+        if not connections:
+            logger.warning("PlexLibrary: server %s has no connections", self._config.plex_server_id)
+            return None
+
+        # Sort connections by priority: local first, then non-relay, then relay.
+        # Within each tier, prefer direct IP connections over plex.direct URLs
+        # (which may have stale/wrong IPs), then prefer HTTPS over HTTP.
+        def _conn_priority(conn: dict) -> tuple:
+            is_local = bool(conn.get("local", False))
+            is_relay = bool(conn.get("relay", False))
+            is_https = conn.get("protocol", "") == "https"
+            is_plex_direct = "plex.direct" in conn.get("uri", "")
+            # Lower tuple = higher priority
+            tier = 0 if is_local else (2 if is_relay else 1)
+            # Within a tier, prefer non-plex.direct (direct IP) over plex.direct
+            plex_direct_pref = 1 if is_plex_direct else 0
+            https_pref = 0 if is_https else 1
+            return (tier, plex_direct_pref, https_pref)
+
+        sorted_conns = sorted(connections, key=_conn_priority)
+        best = sorted_conns[0]
+        uri = best.get("uri", "")
+        logger.info("PlexLibrary: resolved server URL: %s", uri)
+        return uri or None
+
     def _setup_client(self) -> None:
-        """Create the PlexClient from config if server URL and token are set."""
-        server_url = self._config.plex_server_url
+        """Create the PlexClient using PlexAccount server discovery."""
         token = self._config.plex_token
-        if server_url and token:
-            self._client = PlexClient(server_url, token)
-            logger.info("PlexLibrary: client configured for %s", server_url)
-        else:
-            logger.info("PlexLibrary: no Plex server configured")
+        if not token:
+            self._client = None
+            self._account = None
+            self._server_url = ""
+            logger.info("PlexLibrary: no Plex token configured")
+            return
+
+        if not self._config.plex_server_id:
+            self._client = None
+            self._account = PlexAccount(token)
+            self._server_url = ""
+            logger.info("PlexLibrary: no Plex server selected")
+            return
+
+        self._account = PlexAccount(token)
+        server_url = self._resolve_server_url()
+        if not server_url:
+            self._client = None
+            self._server_url = ""
+            logger.info("PlexLibrary: could not resolve server URL")
+            return
+
+        # If a user is selected, switch to get a user-specific token.
+        # Cache the result to avoid hammering the API on every refresh().
+        user_token = token
+        user_id = self._config.plex_user_id
+        if user_id:
+            if self._cached_user_id == user_id and self._cached_user_token:
+                # Reuse the cached token — no need to call switch_user again
+                user_token = self._cached_user_token
+                logger.debug("PlexLibrary: reusing cached token for user %s", user_id)
+            else:
+                switched_token = self._account.switch_user(user_id)
+                if switched_token:
+                    user_token = switched_token
+                    self._cached_user_id = user_id
+                    self._cached_user_token = switched_token
+                    # Look up and cache the user's display title for the launch URL
+                    home_users = self._account.get_home_users()
+                    matched = next(
+                        (u for u in home_users if u.get("id") == user_id), None
+                    )
+                    self._cached_user_title = matched.get("title", "") if matched else ""
+                    logger.info("PlexLibrary: switched to user %s", user_id)
+                else:
+                    logger.warning(
+                        "PlexLibrary: failed to switch to user %s, using admin token", user_id
+                    )
+
+        self._server_url = server_url
+        # The user-specific token is for browser deep links only (so Plex Web
+        # applies the correct user profile and content restrictions).
+        # The PlexClient uses the admin token for server API calls because
+        # managed/restricted users don't have direct server access.
+        self._active_token = user_token
+        self._client = PlexClient(server_url, token)
+        logger.info("PlexLibrary: client configured for %s", server_url)
+
+    def _ensure_account(self) -> PlexAccount | None:
+        """Return a PlexAccount, creating one if needed.
+
+        This allows getServerList/getHomeUsers to work even when _setup_client
+        failed (e.g. wrong server selected, server unreachable).
+        """
+        if self._account is not None:
+            return self._account
+        token = self._config.plex_token
+        if not token:
+            return None
+        self._account = PlexAccount(token)
+        return self._account
+
+    @Slot(result="QVariant")
+    def getServerList(self) -> list:
+        """Return list of available Plex servers from plex.tv resources API.
+
+        Returns list of {"id": clientIdentifier, "name": name, "owned": owned}.
+        """
+        account = self._ensure_account()
+        if account is None:
+            return []
+        resources = account.get_resources()
+        return [
+            {
+                "id": r.get("clientIdentifier", ""),
+                "name": r.get("name", ""),
+                "owned": bool(r.get("owned", False)),
+            }
+            for r in resources
+        ]
+
+    @Slot(result="QVariant")
+    def getHomeUsers(self) -> list:
+        """Return list of home users from plex.tv API.
+
+        Returns list of {"id": id, "title": title, "admin": admin, "restricted": restricted}.
+        """
+        account = self._ensure_account()
+        if account is None:
+            return []
+        users = account.get_home_users()
+        return [
+            {
+                "id": u.get("id", 0),
+                "title": u.get("title", ""),
+                "admin": bool(u.get("admin", False)),
+                "restricted": bool(u.get("restricted", False)),
+            }
+            for u in users
+        ]
+
+    @Slot(str)
+    def selectServer(self, server_id: str) -> None:
+        """Select a Plex server by its machine identifier.
+
+        Only saves the selection — does not reconnect immediately.
+        The next refresh() (e.g. when navigating to the Watch tab) will
+        pick up the new server.
+        """
+        self._config.set_plex_server_id(server_id)
+        # Invalidate the current client so the next refresh() reconnects
+        self._client = None
+        self._server_url = ""
+        self._active_token = ""
+        logger.info("PlexLibrary: server selection changed to %s", server_id)
+
+    @Slot(int)
+    def selectUser(self, user_id: int) -> None:
+        """Select a Plex home user by ID.
+
+        Only saves the selection — does not reconnect immediately.
+        The next refresh() (e.g. when navigating to the Watch tab) will
+        pick up the new user.
+        """
+        self._config.set_plex_user_id(user_id)
+        # Clear the cached user token and title so the next _setup_client() will re-switch
+        self._cached_user_id = None
+        self._cached_user_token = ""
+        self._cached_user_title = ""
+        # Invalidate the current client
+        self._client = None
+        logger.info("PlexLibrary: user selection changed to %s", user_id)

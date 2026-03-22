@@ -32,9 +32,10 @@ FocusScope {
         { type: "button",  label: "System Cores...",   action: "systemCores" },
         { type: "button",  label: "Rescan Library",    action: "rescan" },
         { type: "header",  label: "Plex" },
-        { type: "text",    label: "Server URL",        settingKey: "plexServerUrl" },
         { type: "text",    label: "Token",             settingKey: "plexToken", masked: true },
         { type: "button",  label: "Test Connection",   action: "testPlex" },
+        { type: "select",  label: "Server",            settingKey: "plexServer" },
+        { type: "select",  label: "User",              settingKey: "plexUser" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
         { type: "header",  label: "User Interface" },
@@ -64,8 +65,23 @@ FocusScope {
         if (key === "romDirectory")       return settings.romDirectory
         if (key === "retroarchCommand")   return settings.retroarchCommand
         if (key === "coresDirectory")     return settings.coresDirectory
-        if (key === "plexServerUrl")      return settings.plexServerUrl
         if (key === "plexToken")          return settings.plexToken
+        if (key === "plexServer") {
+            if (!plex) return "Not selected"
+            var servers = plex.getServerList()
+            for (var i = 0; i < servers.length; i++) {
+                if (servers[i].id === settings.plexServerId) return servers[i].name
+            }
+            return "Not selected"
+        }
+        if (key === "plexUser") {
+            if (!plex) return "Not selected"
+            var users = plex.getHomeUsers()
+            for (var j = 0; j < users.length; j++) {
+                if (users[j].id == settings.plexUserId) return users[j].title
+            }
+            return "Not selected"
+        }
         if (key === "browserCommand")     return settings.browserCommand
         if (key === "videoSnapAutoplay")  return settings.videoSnapAutoplay
         if (key === "videoSnapDelayMs")   return settings.videoSnapDelayMs
@@ -78,8 +94,15 @@ FocusScope {
         if (key === "romDirectory")       settings.setRomDirectory(value)
         else if (key === "retroarchCommand")   settings.setRetroarchCommand(value)
         else if (key === "coresDirectory")     settings.setCoresDirectory(value)
-        else if (key === "plexServerUrl")      settings.setPlexServerUrl(value)
         else if (key === "plexToken")          settings.setPlexToken(value)
+        else if (key === "plexServer") {
+            if (plex) plex.selectServer(value)
+            settings.setPlexServerId(value)
+        }
+        else if (key === "plexUser") {
+            if (plex) plex.selectUser(parseInt(value))
+            settings.setPlexUserId(parseInt(value))
+        }
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
         else if (key === "videoSnapAutoplay")  settings.setVideoSnapAutoplay(value)
         else if (key === "videoSnapDelayMs")   settings.setVideoSnapDelayMs(value)
@@ -195,6 +218,7 @@ FocusScope {
                     if (rowData.type === "toggle")  return toggleComp
                     if (rowData.type === "button")  return buttonComp
                     if (rowData.type === "slider")  return sliderComp
+                    if (rowData.type === "select")  return selectComp
                     return null
                 }
 
@@ -335,6 +359,34 @@ FocusScope {
 
                     onValueEdited: (newValue) => {
                         settingsScreen._setValue(rowData.settingKey, newValue)
+                    }
+                }
+            }
+
+            // ── Select component ──────────────────────────────────────────────
+            Component {
+                id: selectComp
+                SettingSelect {
+                    width: parent ? parent.width : 0
+                    label: rowData.label
+                    currentValue: settingsScreen._getValue(rowData.settingKey)
+                    optionsProvider: function() {
+                        if (!plex) return []
+                        if (rowData.settingKey === "plexServer") {
+                            return plex.getServerList().map(function(item) {
+                                return { id: item.id, label: item.name }
+                            })
+                        }
+                        if (rowData.settingKey === "plexUser") {
+                            return plex.getHomeUsers().map(function(item) {
+                                return { id: item.id, label: item.title }
+                            })
+                        }
+                        return []
+                    }
+
+                    onSelected: (id) => {
+                        settingsScreen._setValue(rowData.settingKey, id)
                     }
                 }
             }

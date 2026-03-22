@@ -72,8 +72,9 @@ class Config:
             key: SystemConfig(**values) for key, values in SYSTEM_DEFAULTS.items()
         }
         # Plex Media Server configuration
-        self._plex_server_url: Optional[str] = None
         self._plex_token: Optional[str] = None
+        self._plex_server_id: Optional[str] = None
+        self._plex_user_id: Optional[int] = None
         # Browser configuration
         self._browser_command: str = _DEFAULT_BROWSER_COMMAND
         # UI settings
@@ -113,14 +114,19 @@ class Config:
         return [*command_tokens, "--fullscreen", "-L", str(core_path), str(rom_path)]
 
     @property
-    def plex_server_url(self) -> Optional[str]:
-        """Plex Media Server URL, e.g. 'http://192.168.0.2:32400'. None if not configured."""
-        return self._plex_server_url
-
-    @property
     def plex_token(self) -> Optional[str]:
         """Plex authentication token. None if not configured."""
         return self._plex_token
+
+    @property
+    def plex_server_id(self) -> Optional[str]:
+        """Plex server machine identifier (clientIdentifier). None if not selected."""
+        return self._plex_server_id
+
+    @property
+    def plex_user_id(self) -> Optional[int]:
+        """Plex home user ID. None if not selected (uses admin account)."""
+        return self._plex_user_id
 
     @property
     def browser_command(self) -> str:
@@ -132,14 +138,19 @@ class Config:
         self.rom_directory = Path(path).expanduser()
         self.save()
 
-    def set_plex_server_url(self, url: str) -> None:
-        """Set the Plex server URL and persist the config."""
-        self._plex_server_url = url if url else None
-        self.save()
-
     def set_plex_token(self, token: str) -> None:
         """Set the Plex authentication token and persist the config."""
         self._plex_token = token if token else None
+        self.save()
+
+    def set_plex_server_id(self, server_id: str) -> None:
+        """Set the Plex server machine identifier and persist the config."""
+        self._plex_server_id = server_id if server_id else None
+        self.save()
+
+    def set_plex_user_id(self, user_id: int) -> None:
+        """Set the Plex home user ID and persist the config."""
+        self._plex_user_id = user_id if user_id else None
         self.save()
 
     def set_browser_command(self, command: str) -> None:
@@ -195,8 +206,9 @@ class Config:
                 for key, sc in self._systems.items()
             },
             "plex": {
-                "server_url": self._plex_server_url or "",
                 "token": self._plex_token or "",
+                "server_id": self._plex_server_id or "",
+                "user_id": self._plex_user_id or 0,
             },
             "browser": {
                 "command": self._browser_command,
@@ -260,12 +272,16 @@ class Config:
         # plex section
         plex = raw.get("plex", {})
         if isinstance(plex, dict):
-            server_url = plex.get("server_url", "")
-            if server_url:
-                self._plex_server_url = server_url
             token = plex.get("token", "")
             if token:
                 self._plex_token = token
+            server_id = plex.get("server_id", "")
+            if server_id:
+                self._plex_server_id = server_id
+            user_id = plex.get("user_id", 0)
+            if user_id:
+                self._plex_user_id = int(user_id)
+            # Backward compatibility: old configs may have server_url — ignore it gracefully
 
         # browser section
         browser = raw.get("browser", {})
