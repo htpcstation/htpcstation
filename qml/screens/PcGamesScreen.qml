@@ -5,9 +5,9 @@ import "../components"
 // PC Games section screen.
 //
 // Three views:
-//   "sources" — vertical list of game sources (Steam, etc.) with game counts
-//   "games"   — scrollable grid of game tiles for the selected source
-//   "detail"  — full metadata panel for the selected game
+//   "sources" — vertical list of game sources (Steam, Moonlight, etc.) with game counts
+//   "games"   — scrollable grid of game/app tiles for the selected source
+//   "detail"  — full metadata panel for the selected game/app
 //
 // Focus flow:
 //   Enter PcGamesScreen → sourceList gets focus (after steam.refresh())
@@ -36,8 +36,11 @@ FocusScope {
     // Source key of the currently selected source.
     property string selectedSourceKey: ""
 
-    // Index of the currently selected game in steam.gamesModel.
+    // Index of the currently selected game/app in the active model.
     property int selectedGameIndex: -1
+
+    // Track whether the current source is a Moonlight source.
+    property bool isMoonlightSource: false
 
     // Track whether we have already called steam.refresh() to avoid re-fetching
     // every time the user navigates back to this tab.
@@ -51,6 +54,7 @@ FocusScope {
             if (!_refreshed) {
                 _refreshed = true
                 if (steam) steam.refresh()
+                if (moonlight) moonlight.refresh()
             }
             _routeFocus()
         }
@@ -60,9 +64,17 @@ FocusScope {
         if (currentView === "sources") {
             sourceList.forceActiveFocus()
         } else if (currentView === "games") {
-            steamGameGrid.forceActiveFocus()
+            if (isMoonlightSource) {
+                moonlightAppGrid.forceActiveFocus()
+            } else {
+                steamGameGrid.forceActiveFocus()
+            }
         } else {
-            steamGameDetail.forceActiveFocus()
+            if (isMoonlightSource) {
+                moonlightAppDetail.forceActiveFocus()
+            } else {
+                steamGameDetail.forceActiveFocus()
+            }
         }
     }
 
@@ -93,10 +105,19 @@ FocusScope {
                 event.accepted = true
                 if (!steam) return
                 if (currentItem) {
-                    steam.selectSource(currentItem.sourceKeyValue)
-                    pcGamesScreen.selectedSourceName = currentItem.sourceNameValue
-                    pcGamesScreen.selectedSourceKey = currentItem.sourceKeyValue
-                    steamGameGrid._currentSort = "az"
+                    var sourceKey = currentItem.sourceKeyValue
+                    var sourceName = currentItem.sourceNameValue
+                    if (sourceKey === "moonlight") {
+                        if (!moonlight) return
+                        pcGamesScreen.isMoonlightSource = true
+                        moonlightAppGrid._currentSort = "az"
+                    } else {
+                        steam.selectSource(sourceKey)
+                        pcGamesScreen.isMoonlightSource = false
+                        steamGameGrid._currentSort = "az"
+                    }
+                    pcGamesScreen.selectedSourceName = sourceName
+                    pcGamesScreen.selectedSourceKey = sourceKey
                     pcGamesScreen.currentView = "games"
                 }
             } else if (keys.isCancel(event)) {
@@ -148,7 +169,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     verticalCenter: parent.verticalCenter
                 }
-                text: model.gameCount + " games"
+                text: model.loading ? "Loading..." : model.gameCount + " games"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeBody)
@@ -169,22 +190,31 @@ FocusScope {
                 onDoubleClicked: {
                     if (!steam) return
                     sourceList.currentIndex = index
-                    steam.selectSource(model.source)
-                    pcGamesScreen.selectedSourceName = model.name
-                    pcGamesScreen.selectedSourceKey = model.source
-                    steamGameGrid._currentSort = "az"
+                    var sourceKey = model.source
+                    var sourceName = model.name
+                    if (sourceKey === "moonlight") {
+                        if (!moonlight) return
+                        pcGamesScreen.isMoonlightSource = true
+                        moonlightAppGrid._currentSort = "az"
+                    } else {
+                        steam.selectSource(sourceKey)
+                        pcGamesScreen.isMoonlightSource = false
+                        steamGameGrid._currentSort = "az"
+                    }
+                    pcGamesScreen.selectedSourceName = sourceName
+                    pcGamesScreen.selectedSourceKey = sourceKey
                     pcGamesScreen.currentView = "games"
                 }
             }
         }
     }
 
-    // ── Game grid view ───────────────────────────────────────────────────────
+    // ── Steam game grid view ─────────────────────────────────────────────────
     SteamGameGrid {
         id: steamGameGrid
 
         anchors.fill: parent
-        visible: pcGamesScreen.currentView === "games"
+        visible: pcGamesScreen.currentView === "games" && !pcGamesScreen.isMoonlightSource
 
         sourceName: pcGamesScreen.selectedSourceName
 
@@ -195,16 +225,16 @@ FocusScope {
         }
     }
 
-    // ── Game detail view ──────────────────────────────────────────────────────
+    // ── Steam game detail view ────────────────────────────────────────────────
     SteamGameDetail {
         id: steamGameDetail
 
         anchors.fill: parent
-        visible: pcGamesScreen.currentView === "detail"
+        visible: pcGamesScreen.currentView === "detail" && !pcGamesScreen.isMoonlightSource
 
         // Load game data only when the detail view is active to avoid unnecessary
         // steam.getGame() calls while browsing sources or the game grid.
-        gameData: pcGamesScreen.currentView === "detail" && pcGamesScreen.selectedGameIndex >= 0
+        gameData: pcGamesScreen.currentView === "detail" && !pcGamesScreen.isMoonlightSource && pcGamesScreen.selectedGameIndex >= 0
                   ? (steam ? steam.getGame(pcGamesScreen.selectedGameIndex) : ({}))
                   : ({})
 
@@ -220,6 +250,52 @@ FocusScope {
         onNavigateNext: {
             if (!steam) return
             var count = steam.gamesModel.rowCount()
+            if (pcGamesScreen.selectedGameIndex < count - 1) {
+                pcGamesScreen.selectedGameIndex++
+            }
+        }
+    }
+
+    // ── Moonlight app grid view ──────────────────────────────────────────────
+    MoonlightAppGrid {
+        id: moonlightAppGrid
+
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isMoonlightSource
+
+        sourceName: pcGamesScreen.selectedSourceName
+
+        onBack: pcGamesScreen.currentView = "sources"
+        onAppSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+    }
+
+    // ── Moonlight app detail view ─────────────────────────────────────────────
+    MoonlightAppDetail {
+        id: moonlightAppDetail
+
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "detail" && pcGamesScreen.isMoonlightSource
+
+        // Load app data only when the detail view is active.
+        appData: pcGamesScreen.currentView === "detail" && pcGamesScreen.isMoonlightSource && pcGamesScreen.selectedGameIndex >= 0
+                 ? (moonlight ? moonlight.getApp(pcGamesScreen.selectedGameIndex) : ({}))
+                 : ({})
+
+        onBack: pcGamesScreen.currentView = "games"
+        onLaunch: (hostAddress, appName) => {
+            if (moonlight) moonlight.launchApp(hostAddress, appName)
+        }
+        onNavigatePrev: {
+            if (pcGamesScreen.selectedGameIndex > 0) {
+                pcGamesScreen.selectedGameIndex--
+            }
+        }
+        onNavigateNext: {
+            if (!moonlight) return
+            var count = moonlight.appsModel.rowCount()
             if (pcGamesScreen.selectedGameIndex < count - 1) {
                 pcGamesScreen.selectedGameIndex++
             }

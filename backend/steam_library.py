@@ -105,6 +105,7 @@ class SteamSourceListModel(QAbstractListModel):
     NameRole = Qt.ItemDataRole.UserRole + 1
     GameCountRole = Qt.ItemDataRole.UserRole + 2
     SourceRole = Qt.ItemDataRole.UserRole + 3
+    LoadingRole = Qt.ItemDataRole.UserRole + 4
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -131,6 +132,8 @@ class SteamSourceListModel(QAbstractListModel):
             return source.get("gameCount", 0)
         if role == self.SourceRole:
             return source.get("source", "")
+        if role == self.LoadingRole:
+            return source.get("loading", False)
         if role == Qt.ItemDataRole.DisplayRole:
             return source.get("name", "")
         return None
@@ -140,6 +143,7 @@ class SteamSourceListModel(QAbstractListModel):
             self.NameRole: b"name",
             self.GameCountRole: b"gameCount",
             self.SourceRole: b"source",
+            self.LoadingRole: b"loading",
         }
 
 
@@ -267,6 +271,25 @@ class SteamLibrary(QObject):
         if self._game_running:
             self._game_running = False
             self.gameStopped.emit()
+
+    @Slot("QVariant")
+    def setMoonlightSources(self, sources: list) -> None:
+        """Inject Moonlight host entries into the source list.
+
+        Accepts a list of ``{"name": ..., "gameCount": ..., "source": "moonlight:<uuid>"}``
+        dicts.  Rebuilds the full sources model (Steam entries + Moonlight entries)
+        and emits ``sourcesModelChanged``.
+
+        Called by ``main.py`` whenever ``MoonlightLibrary.hostsChanged`` fires.
+        When *sources* is empty, only the Steam entry is shown.
+        """
+        steam_entry = {
+            "name": "Steam",
+            "gameCount": len(self._all_games),
+            "source": "steam",
+        }
+        self._sources_model.set_sources([steam_entry] + list(sources))
+        self.sourcesModelChanged.emit()
 
     @Slot(str)
     def selectSource(self, source: str) -> None:

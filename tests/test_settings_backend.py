@@ -808,3 +808,327 @@ class TestSettingsManagerSignInWithPlex:
 
         assert manager._oauth_timer is not None
         manager._oauth_timer.stop()  # clean up
+
+
+# ---------------------------------------------------------------------------
+# Config — moonlight section
+# ---------------------------------------------------------------------------
+
+
+class TestConfigMoonlightSection:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_moonlight_command_default(self, tmp_path: Path) -> None:
+        """Config.moonlight_command returns the built-in default."""
+        config = self._make_config(tmp_path)
+        assert config.moonlight_command == "flatpak run com.moonlight_stream.Moonlight"
+
+    def test_set_moonlight_command_persists(self, tmp_path: Path) -> None:
+        """set_moonlight_command updates the property and saves to disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_moonlight_command("moonlight-qt")
+
+        assert config.moonlight_command == "moonlight-qt"
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["moonlight"]["command"] == "moonlight-qt"
+
+    def test_load_reads_moonlight_section(self, tmp_path: Path) -> None:
+        """Config._load() reads the moonlight section from disk."""
+        config = self._make_config(
+            tmp_path,
+            {"moonlight": {"command": "moonlight-qt"}},
+        )
+        assert config.moonlight_command == "moonlight-qt"
+
+    def test_moonlight_section_missing_uses_default(self, tmp_path: Path) -> None:
+        """Config without a moonlight section uses the default command."""
+        config = self._make_config(tmp_path, {"retroarch": {}})
+        assert config.moonlight_command == "flatpak run com.moonlight_stream.Moonlight"
+
+    def test_save_includes_moonlight_section(self, tmp_path: Path) -> None:
+        """Config.save() writes the moonlight section to disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert "moonlight" in saved
+        assert saved["moonlight"]["command"] == "flatpak run com.moonlight_stream.Moonlight"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — moonlight settings
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerMoonlightSettings:
+    def _make_manager_with_moonlight(self, tmp_path: Path, moonlight_library=None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        library = MagicMock()
+        plex_library = MagicMock()
+        manager = SettingsManager(
+            config, library, plex_library, moonlight_library=moonlight_library
+        )
+        return manager, config
+
+    def test_moonlight_command_property_returns_default(self, tmp_path: Path) -> None:
+        """moonlightCommand property returns the default command."""
+        manager, _ = self._make_manager_with_moonlight(tmp_path)
+        assert manager.moonlightCommand == "flatpak run com.moonlight_stream.Moonlight"
+
+    def test_set_moonlight_command_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        """setMoonlightCommand updates config and emits moonlightCommandChanged."""
+        manager, config = self._make_manager_with_moonlight(tmp_path)
+        emitted = []
+        manager.moonlightCommandChanged.connect(lambda: emitted.append(True))
+
+        manager.setMoonlightCommand("moonlight-qt")
+
+        assert config.moonlight_command == "moonlight-qt"
+        assert len(emitted) == 1
+
+    def test_open_moonlight_calls_launch_gui(self, tmp_path: Path) -> None:
+        """openMoonlight calls moonlight_library.launchGui()."""
+        moonlight_library = MagicMock()
+        manager, _ = self._make_manager_with_moonlight(tmp_path, moonlight_library=moonlight_library)
+
+        manager.openMoonlight()
+
+        moonlight_library.launchGui.assert_called_once()
+
+    def test_open_moonlight_without_library_does_not_crash(self, tmp_path: Path) -> None:
+        """openMoonlight is a no-op when moonlight_library is None."""
+        manager, _ = self._make_manager_with_moonlight(tmp_path, moonlight_library=None)
+
+        manager.openMoonlight()  # should not raise
+
+    def test_moonlight_library_defaults_to_none(self, tmp_path: Path) -> None:
+        """SettingsManager can be constructed without moonlight_library (backward compat)."""
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        # Existing call signature without moonlight_library — must not break
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        assert manager._moonlight_library is None
+
+
+# ---------------------------------------------------------------------------
+# Config — moonlight_host_uuid
+# ---------------------------------------------------------------------------
+
+
+class TestConfigMoonlightHostUuid:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_moonlight_host_uuid_default_is_empty(self, tmp_path: Path) -> None:
+        """Config.moonlight_host_uuid defaults to empty string."""
+        config = self._make_config(tmp_path)
+        assert config.moonlight_host_uuid == ""
+
+    def test_set_moonlight_host_uuid_persists(self, tmp_path: Path) -> None:
+        """set_moonlight_host_uuid updates the property and saves to disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_moonlight_host_uuid("uuid-abc123")
+
+        assert config.moonlight_host_uuid == "uuid-abc123"
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["moonlight"]["host_uuid"] == "uuid-abc123"
+
+    def test_load_reads_host_uuid_from_moonlight_section(self, tmp_path: Path) -> None:
+        """Config._load() reads host_uuid from the moonlight section."""
+        config = self._make_config(
+            tmp_path,
+            {"moonlight": {"command": "moonlight-qt", "host_uuid": "uuid-xyz"}},
+        )
+        assert config.moonlight_host_uuid == "uuid-xyz"
+
+    def test_host_uuid_missing_from_moonlight_section_uses_empty(self, tmp_path: Path) -> None:
+        """Config without host_uuid in moonlight section defaults to empty string."""
+        config = self._make_config(
+            tmp_path,
+            {"moonlight": {"command": "moonlight-qt"}},
+        )
+        assert config.moonlight_host_uuid == ""
+
+    def test_save_includes_host_uuid_in_moonlight_section(self, tmp_path: Path) -> None:
+        """Config.save() writes host_uuid to the moonlight section."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config._moonlight_host_uuid = "uuid-save-test"
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["moonlight"]["host_uuid"] == "uuid-save-test"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — moonlightHostUuid property and setMoonlightHostUuid slot
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerMoonlightHostUuid:
+    def _make_manager(self, tmp_path: Path, moonlight_library=None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        library = MagicMock()
+        plex_library = MagicMock()
+        manager = SettingsManager(
+            config, library, plex_library, moonlight_library=moonlight_library
+        )
+        return manager, config
+
+    def test_moonlight_host_uuid_property_default_empty(self, tmp_path: Path) -> None:
+        """moonlightHostUuid property returns empty string by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.moonlightHostUuid == ""
+
+    def test_moonlight_host_uuid_property_reflects_config(self, tmp_path: Path) -> None:
+        """moonlightHostUuid property reflects the config value."""
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"moonlight": {"host_uuid": "uuid-from-config"}}),
+            encoding="utf-8",
+        )
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        assert manager.moonlightHostUuid == "uuid-from-config"
+
+    def test_set_moonlight_host_uuid_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        """setMoonlightHostUuid updates config and emits moonlightHostUuidChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.moonlightHostUuidChanged.connect(lambda: emitted.append(True))
+
+        manager.setMoonlightHostUuid("uuid-new")
+
+        assert config.moonlight_host_uuid == "uuid-new"
+        assert len(emitted) == 1
+
+    def test_set_moonlight_host_uuid_calls_set_selected_host(self, tmp_path: Path) -> None:
+        """setMoonlightHostUuid calls moonlight_library.setSelectedHost."""
+        moonlight_library = MagicMock()
+        manager, _ = self._make_manager(tmp_path, moonlight_library=moonlight_library)
+
+        manager.setMoonlightHostUuid("uuid-new")
+
+        moonlight_library.setSelectedHost.assert_called_once_with("uuid-new")
+
+    def test_set_moonlight_host_uuid_without_library_does_not_crash(self, tmp_path: Path) -> None:
+        """setMoonlightHostUuid is safe when moonlight_library is None."""
+        manager, config = self._make_manager(tmp_path, moonlight_library=None)
+
+        manager.setMoonlightHostUuid("uuid-new")  # should not raise
+
+        assert config.moonlight_host_uuid == "uuid-new"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — getHostsList
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerGetHostsList:
+    def _make_manager(self, tmp_path: Path, moonlight_library=None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        library = MagicMock()
+        plex_library = MagicMock()
+        manager = SettingsManager(
+            config, library, plex_library, moonlight_library=moonlight_library
+        )
+        return manager
+
+    def test_get_hosts_list_returns_empty_when_no_library(self, tmp_path: Path) -> None:
+        """getHostsList returns [] when moonlight_library is None."""
+        manager = self._make_manager(tmp_path, moonlight_library=None)
+        assert manager.getHostsList() == []
+
+    def test_get_hosts_list_delegates_to_library(self, tmp_path: Path) -> None:
+        """getHostsList delegates to moonlight_library.getPairedHosts()."""
+        moonlight_library = MagicMock()
+        moonlight_library.getPairedHosts.return_value = [
+            {"id": "uuid-1", "label": "DESKTOP-PC (192.168.0.10)"},
+        ]
+        manager = self._make_manager(tmp_path, moonlight_library=moonlight_library)
+
+        result = manager.getHostsList()
+
+        moonlight_library.getPairedHosts.assert_called_once()
+        assert len(result) == 1
+        assert result[0]["id"] == "uuid-1"
+        assert result[0]["label"] == "DESKTOP-PC (192.168.0.10)"
+
+    def test_get_hosts_list_returns_correct_format(self, tmp_path: Path) -> None:
+        """getHostsList returns list with id and label keys."""
+        moonlight_library = MagicMock()
+        moonlight_library.getPairedHosts.return_value = [
+            {"id": "uuid-1", "label": "PC1 (10.0.0.1)"},
+            {"id": "uuid-2", "label": "PC2 (10.0.0.2)"},
+        ]
+        manager = self._make_manager(tmp_path, moonlight_library=moonlight_library)
+
+        result = manager.getHostsList()
+
+        assert len(result) == 2
+        for item in result:
+            assert "id" in item
+            assert "label" in item

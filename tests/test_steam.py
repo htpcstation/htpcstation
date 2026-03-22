@@ -600,6 +600,37 @@ class TestSteamSourceListModel:
         idx = model.index(0, 0)
         assert model.data(idx, Qt.ItemDataRole.DisplayRole) == "Steam"
 
+    def test_loading_role_returns_false_by_default(self) -> None:
+        """LoadingRole returns False when 'loading' key is absent."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        model.set_sources([{"name": "Steam", "gameCount": 5, "source": "steam"}])
+        idx = model.index(0, 0)
+        assert model.data(idx, SteamSourceListModel.LoadingRole) is False
+
+    def test_loading_role_returns_true_when_set(self) -> None:
+        """LoadingRole returns True when 'loading' key is True."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        model.set_sources([{
+            "name": "Moonlight Games",
+            "gameCount": 0,
+            "source": "moonlight",
+            "loading": True,
+        }])
+        idx = model.index(0, 0)
+        assert model.data(idx, SteamSourceListModel.LoadingRole) is True
+
+    def test_loading_role_in_role_names(self) -> None:
+        """roleNames includes 'loading' key."""
+        from backend.steam_library import SteamSourceListModel
+
+        model = SteamSourceListModel()
+        names = model.roleNames()
+        assert b"loading" in names.values()
+
 
 # ---------------------------------------------------------------------------
 # SteamLibrary — model population and refresh

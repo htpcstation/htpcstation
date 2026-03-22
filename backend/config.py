@@ -19,6 +19,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 _DEFAULT_RETROARCH_COMMAND = "flatpak run org.libretro.RetroArch"
 _DEFAULT_CORES_DIRECTORY = "***REMOVED***.var/app/org.libretro.RetroArch/config/retroarch/cores"
 _DEFAULT_BROWSER_COMMAND = "flatpak run com.brave.Browser"
+_DEFAULT_MOONLIGHT_COMMAND = "flatpak run com.moonlight_stream.Moonlight"
 
 SYSTEM_DEFAULTS: dict[str, dict] = {
     "gb": {"display_name": "Game Boy", "core": "gambatte_libretro.so", "extensions": [".gb"]},
@@ -77,6 +78,9 @@ class Config:
         self._plex_user_id: Optional[int] = None
         # Browser configuration
         self._browser_command: str = _DEFAULT_BROWSER_COMMAND
+        # Moonlight configuration
+        self._moonlight_command: str = _DEFAULT_MOONLIGHT_COMMAND
+        self._moonlight_host_uuid: str = ""
         # UI settings
         self.video_snap_autoplay: bool = True
         self.video_snap_delay_ms: int = 1500
@@ -133,6 +137,16 @@ class Config:
         """Browser launch command, e.g. 'flatpak run com.brave.Browser'."""
         return self._browser_command
 
+    @property
+    def moonlight_command(self) -> str:
+        """Moonlight launch command, e.g. 'flatpak run com.moonlight_stream.Moonlight'."""
+        return self._moonlight_command
+
+    @property
+    def moonlight_host_uuid(self) -> str:
+        """UUID of the selected Moonlight host. Empty string if not configured."""
+        return self._moonlight_host_uuid
+
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
@@ -156,6 +170,16 @@ class Config:
     def set_browser_command(self, command: str) -> None:
         """Set the browser launch command and persist the config."""
         self._browser_command = command
+        self.save()
+
+    def set_moonlight_command(self, command: str) -> None:
+        """Set the Moonlight launch command and persist the config."""
+        self._moonlight_command = command
+        self.save()
+
+    def set_moonlight_host_uuid(self, uuid: str) -> None:
+        """Set the selected Moonlight host UUID and persist the config."""
+        self._moonlight_host_uuid = uuid
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -212,6 +236,10 @@ class Config:
             },
             "browser": {
                 "command": self._browser_command,
+            },
+            "moonlight": {
+                "command": self._moonlight_command,
+                "host_uuid": self._moonlight_host_uuid,
             },
             "ui": {
                 "video_snap_autoplay": self.video_snap_autoplay,
@@ -289,6 +317,14 @@ class Config:
             command = browser.get("command", "")
             if command:
                 self._browser_command = command
+
+        # moonlight section
+        moonlight = raw.get("moonlight", {})
+        if isinstance(moonlight, dict):
+            command = moonlight.get("command", "")
+            if command:
+                self._moonlight_command = command
+            self._moonlight_host_uuid = moonlight.get("host_uuid", "")
 
         # ui section
         ui = raw.get("ui", {})

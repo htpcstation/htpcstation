@@ -57,6 +57,8 @@ class SettingsManager(QObject):
     plexServerIdChanged = Signal()
     plexUserIdChanged = Signal()
     browserCommandChanged = Signal()
+    moonlightCommandChanged = Signal()
+    moonlightHostUuidChanged = Signal()
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
 
@@ -66,6 +68,7 @@ class SettingsManager(QObject):
         library: GameLibrary,
         plex_library: object,
         browser_launcher: object = None,
+        moonlight_library: object = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -73,6 +76,7 @@ class SettingsManager(QObject):
         self._library = library
         self._plex_library = plex_library
         self._browser_launcher = browser_launcher
+        self._moonlight_library = moonlight_library
         self._oauth_timer: Optional[QTimer] = None
         self._oauth_pin_id: Optional[int] = None
         self._oauth_poll_count: int = 0
@@ -105,6 +109,12 @@ class SettingsManager(QObject):
 
     def _get_browser_command(self) -> str:
         return self._config.browser_command
+
+    def _get_moonlight_command(self) -> str:
+        return self._config.moonlight_command
+
+    def _get_moonlight_host_uuid(self) -> str:
+        return self._config.moonlight_host_uuid
 
     def _get_video_snap_autoplay(self) -> bool:
         return self._config.video_snap_autoplay
@@ -155,6 +165,16 @@ class SettingsManager(QObject):
         str,
         fget=_get_browser_command,
         notify=browserCommandChanged,
+    )
+    moonlightCommand = Property(
+        str,
+        fget=_get_moonlight_command,
+        notify=moonlightCommandChanged,
+    )
+    moonlightHostUuid = Property(
+        str,
+        fget=_get_moonlight_host_uuid,
+        notify=moonlightHostUuidChanged,
     )
     videoSnapAutoplay = Property(
         bool,
@@ -223,6 +243,20 @@ class SettingsManager(QObject):
         self._config.set_browser_command(cmd)
         self.browserCommandChanged.emit()
 
+    @Slot(str)
+    def setMoonlightCommand(self, cmd: str) -> None:
+        """Set the Moonlight launch command."""
+        self._config.set_moonlight_command(cmd)
+        self.moonlightCommandChanged.emit()
+
+    @Slot(str)
+    def setMoonlightHostUuid(self, uuid: str) -> None:
+        """Set the selected Moonlight host UUID and tell the library to re-select."""
+        self._config.set_moonlight_host_uuid(uuid)
+        self.moonlightHostUuidChanged.emit()
+        if self._moonlight_library is not None:
+            self._moonlight_library.setSelectedHost(uuid)
+
     @Slot(bool)
     def setVideoSnapAutoplay(self, enabled: bool) -> None:
         """Enable or disable video snap autoplay."""
@@ -244,6 +278,25 @@ class SettingsManager(QObject):
     # ------------------------------------------------------------------
     # Slots — actions
     # ------------------------------------------------------------------
+
+    @Slot()
+    def openMoonlight(self) -> None:
+        """Launch the Moonlight GUI so the user can pair hosts and configure settings."""
+        if self._moonlight_library is None:
+            logger.warning("openMoonlight: no moonlight_library — cannot launch Moonlight GUI")
+            return
+        self._moonlight_library.launchGui()
+
+    @Slot(result="QVariant")
+    def getHostsList(self) -> list:
+        """Return a list of paired Moonlight hosts for the Settings host selector.
+
+        Returns ``[{"id": uuid, "label": "hostname (ip)"}]``.
+        Delegates to MoonlightLibrary.getPairedHosts().
+        """
+        if self._moonlight_library is None:
+            return []
+        return self._moonlight_library.getPairedHosts()
 
     @Slot(result="QVariant")
     def getSystemsList(self) -> list:

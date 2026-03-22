@@ -38,6 +38,10 @@ FocusScope {
         { type: "select",  label: "User",              settingKey: "plexUser" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
+        { type: "header",  label: "Moonlight" },
+        { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
+        { type: "select",  label: "Host",              settingKey: "moonlightHost" },
+        { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
         { type: "header",  label: "User Interface" },
         { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
         { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
@@ -82,6 +86,15 @@ FocusScope {
             return "Not selected"
         }
         if (key === "browserCommand")     return settings.browserCommand
+        if (key === "moonlightCommand")   return settings.moonlightCommand
+        if (key === "moonlightHost") {
+            if (!moonlight) return "Not selected"
+            var hosts = settings.getHostsList()
+            for (var k = 0; k < hosts.length; k++) {
+                if (hosts[k].id === settings.moonlightHostUuid) return hosts[k].label
+            }
+            return "Not selected"
+        }
         if (key === "videoSnapAutoplay")  return settings.videoSnapAutoplay
         if (key === "videoSnapDelayMs")   return settings.videoSnapDelayMs
         return ""
@@ -102,6 +115,8 @@ FocusScope {
             settings.setPlexUserId(parseInt(value))
         }
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
+        else if (key === "moonlightCommand")   settings.setMoonlightCommand(value)
+        else if (key === "moonlightHost")      settings.setMoonlightHostUuid(value)
         else if (key === "videoSnapAutoplay")  settings.setVideoSnapAutoplay(value)
         else if (key === "videoSnapDelayMs")   settings.setVideoSnapDelayMs(value)
     }
@@ -335,6 +350,9 @@ FocusScope {
                         } else if (action === "plexSignIn") {
                             actionButton.statusText = "Opening browser..."
                             settings.signInWithPlex()
+                        } else if (action === "openMoonlight") {
+                            settings.openMoonlight()
+                            actionButton.statusText = "Opening..."
                         } else if (action === "systemCores") {
                             settingsScreen._showToast("Coming soon")
                         }
@@ -372,6 +390,10 @@ FocusScope {
                     label: rowData.label
                     currentValue: settingsScreen._getValue(rowData.settingKey)
                     optionsProvider: function() {
+                        if (rowData.settingKey === "moonlightHost") {
+                            if (!settings) return []
+                            return settings.getHostsList()
+                        }
                         if (!plex) return []
                         if (rowData.settingKey === "plexServer") {
                             return plex.getServerList().map(function(item) {
