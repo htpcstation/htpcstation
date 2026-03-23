@@ -266,9 +266,10 @@ htpcstation/
 - **Analog stick deadzone:** ±0.3, converted to digital directional events
 - **Site-aware mapping system:** hostname/path-based dispatch, extensible to future sites
 - **Plex Web mapping:**
-  - Player mode: accept=play/pause, cancel=close player, D-pad=seek/volume, context2=fullscreen, Start=exit
+  - Player mode: D-pad navigates player control bar buttons via virtual focus cursor (with `showPlayerControls()` mouse-move simulation to reveal hidden controls), accept=click focused control or play/pause, cancel=clear focus or close player, X=play/pause, L2/R2=seek back/forward, Y=fullscreen
   - Navigation mode: virtual focus cursor with spatial navigation, accept=click, cancel=escape, Start=exit
   - **Modal support:** When a modal dialog is open (e.g., "Resume Playback"), input routes to navigation mode regardless of player state. D-pad navigates modal options, accept selects, cancel closes.
+  - **WIP — Player popup menus:** Playback Settings, Subtitles, and other popup panels that appear over the player are not yet navigable with the gamepad. The virtual focus cursor's `getInteractiveElements()` may not find elements in these popups due to Plex's DOM structure. **Next step:** User will provide the actual HTML elements for the Plex Web player controls and popup menus so selectors can be written against the real DOM.
 - **Auto-user-select:** Reads `htpc_user` from URL, polls for `.user-select-modal`, clicks matching user tile, re-navigates to original deep link after 1.5s
 - **Auto-play:** Polls for `[data-testid="preplay-play"]` button, clicks it. Triggers on both page load and `hashchange` events (SPA navigation).
 - **Extension deployment:** Copied to `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-extension/` before each launch (flatpak sandbox access)
@@ -525,6 +526,13 @@ These are intentional shortcuts that should be revisited:
 - Autostart documentation (systemd user service vs `.xinitrc`)
 - Path matching robustness in `write_game_stats`
 - Unit test infrastructure improvements, CI
+
+### In Progress — Plex Player Gamepad Controls
+- **Status:** L2/R2 seek works. D-pad navigates the player control bar buttons (play, skip, etc.) but cannot navigate popup menus (Playback Settings, Subtitles). The virtual focus cursor's element discovery doesn't find elements inside Plex's player popup panels.
+- **Root cause:** Unknown — need the actual HTML/DOM structure of the Plex Web player controls and popup panels to write correct selectors. The user will provide this in the next session.
+- **Current player mode mapping:** D-pad → `handleNavAction` (virtual focus cursor with `showPlayerControls()` to reveal hidden controls), A → click focused or play/pause, B → clear focus or close player, X → play/pause, L2/R2 → seek, Y → fullscreen, Start+Select → kill browser
+- **What works:** Control bar button navigation (play, skip back, skip forward, stop), Resume Playback modal, L2/R2 seek, Start+Select close
+- **What doesn't work:** Navigating popup menus opened from control bar buttons (Playback Settings, Subtitles, Audio, etc.)
 
 ### Deferred Items (no milestone assigned)
 - **Game metadata scraping for Steam and Moonlight detail views:** Automatically fetch description, publisher, developer, players, release year, genre, etc. from Steam Store API (or IGDB/RAWG as fallback). Retro games already have this from gamelist.xml; Steam and Moonlight detail views currently show minimal metadata (name, install dir, host). The Steam Store API (`store.steampowered.com/api/appdetails/?appids=<id>`) returns rich metadata for Steam games. For Moonlight apps, cross-reference the app name against Steam search (same pattern as artwork lookup) to get the Steam AppID, then fetch details. Cache metadata locally (similar to artwork cache). Non-game apps (Desktop, Playnite, etc.) would show no metadata — graceful fallback.

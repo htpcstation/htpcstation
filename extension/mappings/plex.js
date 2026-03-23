@@ -380,35 +380,50 @@ window.__htpcGamepadMappings.plex = (function () {
   // Action handlers
   // ---------------------------------------------------------------------------
 
+  /**
+   * Show the Plex player controls bar by simulating mouse movement.
+   * Plex hides the controls after a few seconds of inactivity.
+   */
+  function showPlayerControls() {
+    var player = document.querySelector(
+      '[data-testid="playerContainer"], [class*="PlayerControls"], video'
+    );
+    if (player) {
+      player.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
+    }
+  }
+
   function handlePlayerAction(action) {
     switch (action) {
       case 'accept':
-        // Play / Pause
-        sendKey(' ', 'Space');
-        break;
       case 'cancel':
-        // Close player
-        sendKey('x', 'KeyX');
-        break;
       case 'up':
-        // Volume up
-        sendKey('ArrowUp', 'ArrowUp');
-        break;
       case 'down':
-        // Volume down
-        sendKey('ArrowDown', 'ArrowDown');
-        break;
       case 'left':
+      case 'right':
+        // All navigation and accept/cancel actions use the virtual focus
+        // cursor.  This handles player control buttons, popup menus
+        // (Playback Settings, Subtitles), and any other interactive
+        // elements visible on screen.  Show the controls bar first so
+        // the buttons are discoverable.
+        showPlayerControls();
+        handleNavAction(action);
+        break;
+      case 'leftTrigger':
         // Seek back 10 s
         sendKey('ArrowLeft', 'ArrowLeft');
         break;
-      case 'right':
+      case 'rightTrigger':
         // Seek forward 30 s
         sendKey('ArrowRight', 'ArrowRight');
         break;
       case 'contextAction2':
         // Toggle fullscreen (Y button)
         sendKey('f', 'KeyF');
+        break;
+      case 'contextAction1':
+        // Play / Pause (X button — convenient since A is used for focus click)
+        sendKey(' ', 'Space');
         break;
       case 'start':
         window.close();
