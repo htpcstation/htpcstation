@@ -20,6 +20,7 @@ from PySide6.QtCore import (
 )
 
 from backend.config import Config
+from backend.controller_mapping import ACTIONS, get_default_mapping, save_mapping
 from backend.library import GameLibrary
 from backend.plex_account import PlexAccount
 
@@ -70,6 +71,8 @@ class SettingsManager(QObject):
         plex_library: object,
         browser_launcher: object = None,
         moonlight_library: object = None,
+        gamepad_manager: object = None,
+        keys: object = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -78,6 +81,8 @@ class SettingsManager(QObject):
         self._plex_library = plex_library
         self._browser_launcher = browser_launcher
         self._moonlight_library = moonlight_library
+        self._gamepad_manager = gamepad_manager
+        self._keys = keys
         self._oauth_timer: Optional[QTimer] = None
         self._oauth_pin_id: Optional[int] = None
         self._oauth_poll_count: int = 0
@@ -284,6 +289,25 @@ class SettingsManager(QObject):
         self._config.set_show_network_indicator(enabled)
         self.showNetworkIndicatorChanged.emit()
 
+    # -- Button layout ----------------------------------------------------
+
+    buttonLayoutChanged = Signal()
+
+    def _get_button_layout(self) -> str:
+        return self._config.button_layout
+
+    buttonLayout = Property(str, _get_button_layout,
+                            notify=buttonLayoutChanged)
+
+    @Slot(str)
+    def setButtonLayout(self, layout: str) -> None:
+        """Set the button layout ('standard' or 'alternate')."""
+        self._config.set_button_layout(layout)
+        # Also update the Keys object so labels change immediately
+        if self._keys is not None:
+            self._keys.setButtonLayout(layout)
+        self.buttonLayoutChanged.emit()
+
     @Slot(str, str)
     def setSystemCore(self, folder_name: str, core: str) -> None:
         """Set the emulator core for a specific system."""
@@ -434,3 +458,75 @@ class SettingsManager(QObject):
             self._oauth_timer = None
         self._oauth_pin_id = None
         self._oauth_poll_count = 0
+
+    # ------------------------------------------------------------------
+    # Slots — controller mapping
+    # ------------------------------------------------------------------
+
+    @Slot(result="QVariant")
+    def getControllerActions(self) -> list:
+        """Return the ACTIONS list for QML as a list of dicts.
+
+        Each dict has keys: name, displayName, skippable.
+        """
+        return [
+            {"name": name, "displayName": display_name, "skippable": skippable}
+            for name, display_name, _qt_key, skippable in ACTIONS
+        ]
+
+    @Slot("QVariant")
+    def saveControllerMapping(self, mapping: object) -> None:
+        """Save a controller mapping recorded by the QML dialog.
+
+        ``mapping`` is a JS array of objects from QML:
+        ``[{name, type, code, value}, ...]``
+
+        Converts to the dict format expected by save_mapping() and reloads.
+        Also records the current device capabilities as ``_device`` so the
+        browser extension can auto-generate its button/axis mapping.
+        """
+        # QML passes JS arrays as QJSValue — convert to Python list
+        from PySide6.QtQml import QJSValue
+        if isinstance(mapping, QJSValue):
+            mapping = mapping.toVariant()
+        if not isinstance(mapping, list):
+            logger.warning("saveControllerMapping: expected list, got %s", type(mapping))
+            return
+
+        mapping_dict: dict[str, dict] = {}
+        for entry in mapping:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            ev_type = entry.get("type")
+            code = entry.get("code")
+            value = entry.get("value")
+            if (
+                isinstance(name, str)
+                and ev_type in ("button", "axis")
+                and isinstance(code, int)
+                and isinstance(value, int)
+            ):
+                mapping_dict[name] = {"type": ev_type, "code": code, "value": value}
+
+        # Record device capabilities so the browser extension can auto-generate
+        # its Web Gamepad API mapping at deploy time.
+        if self._gamepad_manager is not None:
+            caps = self._gamepad_manager.getDeviceCapabilities()  # type: ignore[union-attr]
+            if isinstance(caps, dict) and caps:
+                mapping_dict["_device"] = caps
+
+        save_mapping(mapping_dict)
+        logger.info("saveControllerMapping: saved %d entries", len(mapping_dict))
+
+        if self._gamepad_manager is not None:
+            self._gamepad_manager.reloadMapping()  # type: ignore[union-attr]
+
+    @Slot()
+    def resetControllerMapping(self) -> None:
+        """Reset the controller mapping to factory defaults and reload."""
+        save_mapping(get_default_mapping())
+        logger.info("resetControllerMapping: reset to defaults")
+
+        if self._gamepad_manager is not None:
+            self._gamepad_manager.reloadMapping()  # type: ignore[union-attr]

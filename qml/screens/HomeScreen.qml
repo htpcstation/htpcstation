@@ -21,6 +21,9 @@ FocusScope {
     // Emitted when the user requests to quit (Start button or Escape on tab bar).
     signal requestQuit()
 
+    // Emitted when SettingsScreen requests the controller mapping dialog.
+    signal showControllerMapping()
+
     // Index of the currently selected (displayed) tab.
     property int currentTab: 0
 
@@ -222,6 +225,11 @@ FocusScope {
             onLoaded: {
                 if (item) {
                     item.back.connect(returnFocusToTabBar)
+                    // Forward showControllerMapping if the loaded screen has it
+                    // (SettingsScreen emits this to open the mapping dialog).
+                    if (item.showControllerMapping !== undefined) {
+                        item.showControllerMapping.connect(homeScreen.showControllerMapping)
+                    }
                     if (homeScreen._focusContentOnLoad) {
                         homeScreen._focusContentOnLoad = false
                         item.forceActiveFocus()

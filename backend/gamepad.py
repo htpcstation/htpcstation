@@ -3,6 +3,9 @@
 Detects evdev gamepads, translates D-pad/stick/button events into synthetic
 QKeyEvents, and injects them into the active Qt window.  All QML navigation
 code only sees keyboard events — it never touches gamepad input directly.
+
+The button/axis → Qt.Key mapping is loaded from controller_mapping.py and
+can be reconfigured at runtime via reloadMapping().
 """
 
 from __future__ import annotations
@@ -17,8 +20,12 @@ from PySide6.QtCore import (
     QSocketNotifier,
     QTimer,
     Qt,
+    Signal,
+    Slot,
 )
 from PySide6.QtGui import QKeyEvent
+
+from backend.controller_mapping import build_evdev_lookup, load_mapping
 
 # ---------------------------------------------------------------------------
 # Optional evdev import — Linux only, graceful fallback when absent
@@ -33,43 +40,6 @@ except ImportError:  # pragma: no cover
     _EVDEV_AVAILABLE = False
 
 log = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Button → Qt key mapping (populated only when evdev is available)
-# ---------------------------------------------------------------------------
-
-_BUTTON_MAP: dict[int, Qt.Key] = {}
-_TRIGGER_MAP: dict[int, Qt.Key] = {}
-_DPAD_X_MAP: dict[int, Qt.Key] = {}
-_DPAD_Y_MAP: dict[int, Qt.Key] = {}
-
-if _EVDEV_AVAILABLE:
-    _BUTTON_MAP = {
-        ecodes.BTN_SOUTH: Qt.Key.Key_Escape,    # B — Cancel / back
-        ecodes.BTN_EAST: Qt.Key.Key_Return,    # A — Accept
-        ecodes.BTN_NORTH: Qt.Key.Key_F1,       # X — Context action 1
-        ecodes.BTN_WEST: Qt.Key.Key_F2,        # Y — Context action 2
-        ecodes.BTN_START: Qt.Key.Key_F10,      # Start — Menu
-        ecodes.BTN_SELECT: Qt.Key.Key_F9,      # Select — Secondary menu
-        ecodes.BTN_TL: Qt.Key.Key_PageUp,      # LB — Previous tab
-        ecodes.BTN_TR: Qt.Key.Key_PageDown,    # RB — Next tab
-    }
-
-    # Trigger axes: value > threshold → key press
-    _TRIGGER_MAP = {
-        ecodes.ABS_Z: Qt.Key.Key_Home,   # LT — Page scroll up
-        ecodes.ABS_RZ: Qt.Key.Key_End,   # RT — Page scroll down
-    }
-
-    # D-pad hat axes: value → key (negative / positive)
-    _DPAD_X_MAP = {
-        -1: Qt.Key.Key_Left,
-        1: Qt.Key.Key_Right,
-    }
-    _DPAD_Y_MAP = {
-        -1: Qt.Key.Key_Up,
-        1: Qt.Key.Key_Down,
-    }
 
 # Analog stick dead zone: 30 % of the half-range
 _STICK_DEAD_ZONE_RATIO = 0.30
@@ -90,10 +60,16 @@ _REPEAT_INTERVAL_MS = 80
 class _DeviceHandler(QObject):
     """Reads events from a single evdev InputDevice and injects QKeyEvents."""
 
-    def __init__(self, device: "InputDevice", manager: "GamepadManager") -> None:
+    def __init__(
+        self,
+        device: "InputDevice",
+        manager: "GamepadManager",
+        evdev_lookup: dict,
+    ) -> None:
         super().__init__()
         self._device = device
         self._manager = manager
+        self._evdev_lookup = evdev_lookup
 
         # Track which Qt keys are currently "pressed" by this device (refcount)
         self._pressed: dict[Qt.Key, int] = {}
@@ -104,8 +80,10 @@ class _DeviceHandler(QObject):
         # Analog stick state: current direction key (or None) per axis
         self._stick_x_key: Optional[Qt.Key] = None
         self._stick_y_key: Optional[Qt.Key] = None
-        self._dpad_x_key: Optional[Qt.Key] = None
-        self._dpad_y_key: Optional[Qt.Key] = None
+
+        # D-pad axis state: axis code → currently pressed Qt.Key (or None)
+        # Needed to release the previous direction when value returns to 0.
+        self._dpad_axis_key: dict[int, Optional[Qt.Key]] = {}
 
         # Trigger state: axis code → currently pressed
         self._trigger_pressed: dict[int, bool] = {}
@@ -157,6 +135,7 @@ class _DeviceHandler(QObject):
         ev_type = getattr(event, "type", None)
         ev_code = getattr(event, "code", None)
         ev_value = getattr(event, "value", None)
+
         if ev_type == ecodes.EV_KEY:  # type: ignore[union-attr]
             self._handle_button(ev_code, ev_value)
         elif ev_type == ecodes.EV_ABS:  # type: ignore[union-attr]
@@ -168,7 +147,12 @@ class _DeviceHandler(QObject):
 
     def _handle_button(self, code: int, value: int) -> None:
         """value: 1 = press, 0 = release, 2 = kernel auto-repeat (ignored)."""
-        qt_key = _BUTTON_MAP.get(code)
+        if self._manager._raw_mode:
+            if value == 1:
+                self._manager.rawInput.emit("button", code, value)
+            return
+
+        qt_key = self._evdev_lookup.get((ecodes.EV_KEY, code, 1))  # type: ignore[union-attr]
         if qt_key is None:
             return
         if value == 1:
@@ -183,33 +167,88 @@ class _DeviceHandler(QObject):
     def _handle_abs(self, code: int, value: int) -> None:
         if not _EVDEV_AVAILABLE:
             return
-        if code == ecodes.ABS_HAT0X:  # type: ignore[union-attr]
-            self._handle_dpad_axis(value, _DPAD_X_MAP, "_dpad_x_key")
-        elif code == ecodes.ABS_HAT0Y:  # type: ignore[union-attr]
-            self._handle_dpad_axis(value, _DPAD_Y_MAP, "_dpad_y_key")
-        elif code == ecodes.ABS_X:  # type: ignore[union-attr]
-            self._handle_stick_axis(value, code, is_x=True)
-        elif code == ecodes.ABS_Y:  # type: ignore[union-attr]
-            self._handle_stick_axis(value, code, is_y=True)
-        elif code in _TRIGGER_MAP:
+
+        # In raw mode, emit ALL axis events so the mapping dialog can
+        # discover which codes the controller uses.  Normalize the value
+        # to -1/0/1 using the axis range so the mapping config stores
+        # direction signs, not raw hardware values.
+        if self._manager._raw_mode:
+            axis_min, axis_max = self._axis_info.get(code, (0, 0))
+            if axis_min == axis_max:
+                # Unknown range — emit raw value (hat axes report -1/0/1 natively)
+                if value != 0:
+                    self._manager.rawInput.emit("axis", code, value)
+            else:
+                center = (axis_min + axis_max) / 2.0
+                half_range = (axis_max - axis_min) / 2.0
+                threshold = half_range * 0.5  # 50% dead zone for direction detection
+                offset = value - center
+                if offset < -threshold:
+                    self._manager.rawInput.emit("axis", code, -1)
+                elif offset > threshold:
+                    self._manager.rawInput.emit("axis", code, 1)
+                # else: near center — don't emit (neutral position)
+            return
+
+        # Determine if this axis is a trigger (0-to-max) or a D-pad hat (-1/0/1)
+        # by checking what's in the lookup.
+        # Triggers: only (EV_ABS, code, 1) is in the lookup
+        # D-pad hats: both (EV_ABS, code, -1) and (EV_ABS, code, 1) may be in lookup
+        has_neg = (ecodes.EV_ABS, code, -1) in self._evdev_lookup  # type: ignore[union-attr]
+        has_pos = (ecodes.EV_ABS, code, 1) in self._evdev_lookup  # type: ignore[union-attr]
+
+        if not has_neg and not has_pos:
+            # Axis not in mapping — fall through to analog stick handler
+            # for ABS_X/ABS_Y (if not mapped as D-pad, they may be sticks)
+            if code == ecodes.ABS_X:  # type: ignore[union-attr]
+                self._handle_stick_axis(value, code, is_x=True)
+            elif code == ecodes.ABS_Y:  # type: ignore[union-attr]
+                self._handle_stick_axis(value, code, is_y=True)
+            return
+
+        if has_neg:
+            # D-pad style axis.  Normalize the raw value to -1/0/1 using
+            # the axis range (handles both hat axes that natively report
+            # -1/0/1 and analog axes like ABS_X/Y that report 0-255).
+            axis_min, axis_max = self._axis_info.get(code, (-1, 1))
+            if axis_min == -1 and axis_max == 1:
+                # Already -1/0/1 (hat axis) — use raw value
+                normalized = value
+            else:
+                center = (axis_min + axis_max) / 2.0
+                half_range = (axis_max - axis_min) / 2.0
+                threshold = half_range * 0.5
+                offset = value - center
+                if offset < -threshold:
+                    normalized = -1
+                elif offset > threshold:
+                    normalized = 1
+                else:
+                    normalized = 0
+            self._handle_dpad_axis(code, normalized)
+        else:
+            # Trigger style axis: 0 to max, threshold-based
             self._handle_trigger(code, value)
 
-    def _handle_dpad_axis(
-        self,
-        value: int,
-        key_map: dict[int, Qt.Key],
-        state_attr: str,
-    ) -> None:
-        """D-pad hat axes: -1, 0, or +1."""
-        current_key: Optional[Qt.Key] = getattr(self, state_attr, None)
-        new_key: Optional[Qt.Key] = key_map.get(value)
+    def _handle_dpad_axis(self, code: int, value: int) -> None:
+        """D-pad hat axes: -1, 0, or +1.  Not called in raw mode."""
+        if not _EVDEV_AVAILABLE:
+            return
+
+        current_key: Optional[Qt.Key] = self._dpad_axis_key.get(code)
+
+        if value == 0:
+            new_key: Optional[Qt.Key] = None
+        else:
+            sign = 1 if value > 0 else -1
+            new_key = self._evdev_lookup.get((ecodes.EV_ABS, code, sign))  # type: ignore[union-attr]
 
         if current_key and current_key != new_key:
             self._release_key(current_key)
         if new_key and new_key != current_key:
             self._press_key(new_key)
 
-        setattr(self, state_attr, new_key)
+        self._dpad_axis_key[code] = new_key
 
     def _handle_stick_axis(
         self,
@@ -252,8 +291,13 @@ class _DeviceHandler(QObject):
         setattr(self, current_attr, new_key)
 
     def _handle_trigger(self, code: int, value: int) -> None:
-        """Analog triggers (ABS_Z / ABS_RZ) → key press when past threshold."""
-        qt_key = _TRIGGER_MAP[code]
+        """Analog triggers → key press when past threshold.  Not called in raw mode."""
+        if not _EVDEV_AVAILABLE:
+            return
+        qt_key = self._evdev_lookup.get((ecodes.EV_ABS, code, 1))  # type: ignore[union-attr]
+        if qt_key is None:
+            return
+
         axis_min, axis_max = self._axis_info.get(code, (0, 255))
         threshold = axis_min + (axis_max - axis_min) * _TRIGGER_THRESHOLD_RATIO
 
@@ -339,18 +383,29 @@ class _DeviceHandler(QObject):
     # Cleanup
     # ------------------------------------------------------------------
 
-    def _cleanup(self) -> None:
-        """Release all held keys and stop all timers."""
+    def _release_all_keys(self) -> None:
+        """Release all held keys and stop all auto-repeat timers."""
         for qt_key in list(self._pressed.keys()):
             if self._pressed.get(qt_key, 0) > 0:
-                # Force refcount to 1 so _release_key emits KeyRelease
                 self._pressed[qt_key] = 1
                 self._release_key(qt_key)
+        # Also clear D-pad axis state so no direction is "stuck"
+        self._dpad_axis_key.clear()
+        # Clear trigger state
+        self._trigger_pressed.clear()
+
+    def _cleanup(self) -> None:
+        """Release all held keys, stop all timers, and close the device."""
+        self._release_all_keys()
         self._notifier.setEnabled(False)
         try:
             self._device.close()
         except Exception:
             pass
+
+    def _update_lookup(self, evdev_lookup: dict) -> None:
+        """Update the evdev lookup table (called by GamepadManager.reloadMapping)."""
+        self._evdev_lookup = evdev_lookup
 
 
 # ---------------------------------------------------------------------------
@@ -368,12 +423,20 @@ class GamepadManager(QObject):
         manager.start()
     """
 
+    # Emitted in raw mode: (event_type_str, code, value)
+    # event_type_str is "button" or "axis"
+    rawInput = Signal(str, int, int)
+
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self.window: Optional[QObject] = None
         self.keys: Optional[QObject] = None  # Keys instance for input source tracking
         self._handlers: dict[str, _DeviceHandler] = {}  # path → handler
         self._warned_no_gamepad = False  # emit the "no gamepads" warning only once
+        self._raw_mode: bool = False
+
+        # Load mapping and build the unified lookup table
+        self._evdev_lookup: dict = build_evdev_lookup(load_mapping())
 
         self._poll_timer = QTimer(self)
         self._poll_timer.setInterval(2000)
@@ -401,6 +464,80 @@ class GamepadManager(QObject):
             handler._cleanup()
         self._handlers.clear()
 
+    @Slot()
+    def startRawMode(self) -> None:
+        """Enter raw mode: events emit rawInput signal instead of injecting keys.
+
+        Releases all currently pressed keys and stops all auto-repeat timers
+        so no stale key events leak into the mapping dialog.
+        """
+        # Release all pressed keys and stop repeat timers in every handler
+        for handler in self._handlers.values():
+            handler._release_all_keys()
+        self._raw_mode = True
+
+    @Slot()
+    def stopRawMode(self) -> None:
+        """Exit raw mode, resume normal key injection.
+
+        Clears all pressed-key state so no stale presses carry over from
+        buttons that were held during raw mode.
+        """
+        self._raw_mode = False
+        # Clear pressed state so buttons held during raw mode don't
+        # appear as "already pressed" and suppress their next real press.
+        for handler in self._handlers.values():
+            handler._release_all_keys()
+
+    @Slot()
+    def reloadMapping(self) -> None:
+        """Reload the controller mapping from disk and rebuild the lookup table.
+
+        Call this after the mapping dialog saves a new config.
+        """
+        self._evdev_lookup = build_evdev_lookup(load_mapping())
+        for handler in self._handlers.values():
+            handler._update_lookup(self._evdev_lookup)
+
+    @Slot(result="QVariant")
+    def getDeviceCapabilities(self) -> dict:
+        """Return the first connected gamepad's button and axis capabilities.
+
+        Returns a dict with keys:
+            ``buttons`` — sorted list of EV_KEY button codes
+            ``axes``    — sorted list of EV_ABS axis codes
+            ``name``    — device name string
+
+        Returns an empty dict if no device is connected or evdev is unavailable.
+        """
+        if not _EVDEV_AVAILABLE or not self._handlers:
+            return {}
+
+        # Use the first connected device
+        handler = next(iter(self._handlers.values()))
+        device = handler._device
+
+        try:
+            caps = device.capabilities()
+        except Exception as exc:
+            log.warning("getDeviceCapabilities: failed to read capabilities: %s", exc)
+            return {}
+
+        buttons: list[int] = sorted(
+            int(code)
+            for code in caps.get(ecodes.EV_KEY, [])  # type: ignore[union-attr]
+        )
+        axes: list[int] = sorted(
+            int(code)
+            for code, _abs_info in caps.get(ecodes.EV_ABS, [])  # type: ignore[union-attr]
+        )
+
+        return {
+            "buttons": buttons,
+            "axes": axes,
+            "name": getattr(device, "name", ""),
+        }
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -424,7 +561,7 @@ class GamepadManager(QObject):
                 caps = device.capabilities()
                 # A gamepad must have both absolute axes and buttons
                 if ecodes.EV_ABS in caps and ecodes.EV_KEY in caps:  # type: ignore[union-attr]
-                    self._handlers[path] = _DeviceHandler(device, self)
+                    self._handlers[path] = _DeviceHandler(device, self, self._evdev_lookup)
                 else:
                     device.close()
             except (PermissionError, OSError) as exc:

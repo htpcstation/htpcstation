@@ -12,7 +12,7 @@
   // NOTE: Buttons 0 and 1 are SWAPPED to match the physical controller wiring:
   //   Physical A (BTN_EAST) → Web API button 1 → "accept"
   //   Physical B (BTN_SOUTH) → Web API button 0 → "cancel"
-  var BUTTON_MAP = {
+  var _DEFAULT_BUTTON_MAP = {
     0:  'cancel',
     1:  'accept',
     2:  'contextAction1',
@@ -29,14 +29,21 @@
     15: 'right'
   };
 
-  // Buttons that receive auto-repeat (D-pad only; stick directions handled separately).
-  var DPAD_BUTTONS = { 12: true, 13: true, 14: true, 15: true };
+  // Default D-pad buttons (receive auto-repeat).
+  var _DEFAULT_DPAD_BUTTONS = { 12: true, 13: true, 14: true, 15: true };
 
-  // Axis index → [negative action, positive action]
-  var AXIS_MAP = {
+  // Default axis index → [negative action, positive action]
+  var _DEFAULT_AXIS_MAP = {
     0: ['left', 'right'],  // Left stick horizontal
     1: ['up',   'down']    // Left stick vertical
   };
+
+  // Use the auto-generated mapping if available (set by generated_mapping.js),
+  // otherwise fall back to the hardcoded defaults above.
+  var _gen = window.__htpcGeneratedMapping || null;
+  var BUTTON_MAP = _gen ? _gen.buttons : _DEFAULT_BUTTON_MAP;
+  var DPAD_BUTTONS = _gen ? _gen.dpadButtons : _DEFAULT_DPAD_BUTTONS;
+  var AXIS_MAP = _gen ? _gen.axes : _DEFAULT_AXIS_MAP;
 
   // ---------------------------------------------------------------------------
   // State
@@ -89,8 +96,37 @@
   // Button processing
   // ---------------------------------------------------------------------------
 
+  // Track whether the Start+Select combo has been fired so we don't also
+  // fire the individual start/select actions on the same press.
+  var _comboFired = false;
+
   function processButtons(gamepad, now) {
     var buttons = gamepad.buttons;
+
+    // Combo detection: Start (9) + Select (8) pressed simultaneously → close window.
+    var startPressed = buttons[9] && buttons[9].pressed;
+    var selectPressed = buttons[8] && buttons[8].pressed;
+    if (startPressed && selectPressed) {
+      if (!_comboFired) {
+        _comboFired = true;
+        console.log('[HTPC Gamepad] Start+Select combo → closeWindow');
+        dispatchAction('closeWindow');
+      }
+      // Mark both buttons as pressed in state so their individual rising
+      // edges are consumed and won't fire when the combo is released.
+      for (var ci = 8; ci <= 9; ci++) {
+        if (!buttonState[ci]) {
+          buttonState[ci] = { pressed: false, heldSince: null, lastRepeat: null };
+        }
+        buttonState[ci].pressed = true;
+        buttonState[ci].heldSince = now;
+      }
+      return; // Skip individual button processing this frame
+    }
+    if (_comboFired && !startPressed && !selectPressed) {
+      _comboFired = false; // Reset once both are released
+    }
+
     for (var i = 0; i < buttons.length; i++) {
       if (!(i in BUTTON_MAP)) continue;
 
@@ -101,6 +137,12 @@
       if (!state) {
         state = { pressed: false, heldSince: null, lastRepeat: null };
         buttonState[i] = state;
+      }
+
+      // Suppress individual start/select while combo was active
+      if (_comboFired && (i === 8 || i === 9)) {
+        state.pressed = pressed;
+        continue;
       }
 
       if (pressed && !state.pressed) {

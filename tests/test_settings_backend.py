@@ -1276,3 +1276,213 @@ class TestSettingsManagerShowNetworkIndicator:
             config2 = Config()
 
         assert config2.show_network_indicator is False
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — controller mapping slots
+# ---------------------------------------------------------------------------
+
+
+def _make_settings_manager_with_gamepad(tmp_path: Path, gamepad_manager=None):
+    """Create a SettingsManager with a real Config and optional mock gamepad_manager."""
+    from backend.settings_manager import SettingsManager
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps({}), encoding="utf-8")
+
+    with patch("backend.config.CONFIG_FILE", config_file), \
+         patch("backend.config.CONFIG_DIR", tmp_path):
+        config = Config()
+
+    config.save = MagicMock()
+    library = MagicMock()
+    plex_library = MagicMock()
+    manager = SettingsManager(
+        config, library, plex_library, gamepad_manager=gamepad_manager
+    )
+    return manager
+
+
+class TestSettingsManagerGetControllerActions:
+    def test_returns_list_of_dicts(self, tmp_path: Path) -> None:
+        """getControllerActions returns a list of dicts."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        assert isinstance(result, list)
+        assert len(result) > 0
+
+    def test_returns_14_actions(self, tmp_path: Path) -> None:
+        """getControllerActions returns exactly 14 actions (matching ACTIONS list)."""
+        from backend.controller_mapping import ACTIONS
+
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        assert len(result) == len(ACTIONS)
+
+    def test_each_entry_has_required_keys(self, tmp_path: Path) -> None:
+        """Each action dict has name, displayName, and skippable keys."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        for entry in result:
+            assert "name" in entry
+            assert "displayName" in entry
+            assert "skippable" in entry
+
+    def test_first_action_is_dpad_up(self, tmp_path: Path) -> None:
+        """First action is dpad_up with displayName 'D-pad Up'."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        assert result[0]["name"] == "dpad_up"
+        assert result[0]["displayName"] == "D-pad Up"
+        assert result[0]["skippable"] is False
+
+    def test_skippable_actions_are_marked(self, tmp_path: Path) -> None:
+        """Skippable actions (shoulders, triggers) have skippable=True."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        skippable_names = {e["name"] for e in result if e["skippable"]}
+        assert "left_shoulder" in skippable_names
+        assert "right_shoulder" in skippable_names
+        assert "left_trigger" in skippable_names
+        assert "right_trigger" in skippable_names
+
+    def test_non_skippable_actions_are_marked(self, tmp_path: Path) -> None:
+        """Core navigation actions have skippable=False."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+        result = manager.getControllerActions()
+        non_skippable = {e["name"] for e in result if not e["skippable"]}
+        assert "dpad_up" in non_skippable
+        assert "accept" in non_skippable
+        assert "cancel" in non_skippable
+
+
+class TestSettingsManagerSaveControllerMapping:
+    def test_saves_valid_mapping_to_disk(self, tmp_path: Path) -> None:
+        """saveControllerMapping writes the mapping to disk."""
+        from backend.controller_mapping import load_mapping
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        mapping = [
+            {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
+            {"name": "accept", "type": "button", "code": 305, "value": 1},
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.saveControllerMapping(mapping)
+            result = load_mapping()
+
+        assert result["dpad_up"]["code"] == 17
+        assert result["accept"]["code"] == 305
+
+    def test_calls_reload_mapping_on_gamepad_manager(self, tmp_path: Path) -> None:
+        """saveControllerMapping calls gamepad_manager.reloadMapping() after saving."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        mock_gamepad = MagicMock()
+        manager = _make_settings_manager_with_gamepad(tmp_path, gamepad_manager=mock_gamepad)
+
+        mapping = [
+            {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.saveControllerMapping(mapping)
+
+        mock_gamepad.reloadMapping.assert_called_once()
+
+    def test_does_not_crash_without_gamepad_manager(self, tmp_path: Path) -> None:
+        """saveControllerMapping is safe when gamepad_manager is None."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path, gamepad_manager=None)
+
+        mapping = [
+            {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.saveControllerMapping(mapping)  # should not raise
+
+    def test_ignores_invalid_entries(self, tmp_path: Path) -> None:
+        """saveControllerMapping skips entries with invalid structure."""
+        from backend.controller_mapping import load_mapping
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        mapping = [
+            {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
+            {"name": "bad_entry", "type": "unknown", "code": 99, "value": 1},  # bad type
+            {"name": "also_bad"},  # missing fields
+            "not a dict",  # not a dict at all
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.saveControllerMapping(mapping)
+            result = load_mapping()
+
+        # Only the valid entry should be saved
+        assert result["dpad_up"]["code"] == 17
+
+    def test_rejects_non_list_input(self, tmp_path: Path) -> None:
+        """saveControllerMapping logs a warning and returns early for non-list input."""
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        # Should not raise
+        manager.saveControllerMapping("not a list")  # type: ignore[arg-type]
+        manager.saveControllerMapping(None)  # type: ignore[arg-type]
+        manager.saveControllerMapping(42)  # type: ignore[arg-type]
+
+
+class TestSettingsManagerResetControllerMapping:
+    def test_resets_to_defaults_on_disk(self, tmp_path: Path) -> None:
+        """resetControllerMapping writes the default mapping to disk."""
+        from backend.controller_mapping import DEFAULT_MAPPING, load_mapping
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        # Write a custom mapping first
+        import json as _json
+        custom = {k: dict(v) for k, v in DEFAULT_MAPPING.items()}
+        custom["accept"]["code"] = 9999
+        mapping_file.write_text(_json.dumps(custom), encoding="utf-8")
+
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.resetControllerMapping()
+            result = load_mapping()
+
+        assert result["accept"]["code"] == DEFAULT_MAPPING["accept"]["code"]
+
+    def test_calls_reload_mapping_on_gamepad_manager(self, tmp_path: Path) -> None:
+        """resetControllerMapping calls gamepad_manager.reloadMapping() after saving."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        mock_gamepad = MagicMock()
+        manager = _make_settings_manager_with_gamepad(tmp_path, gamepad_manager=mock_gamepad)
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.resetControllerMapping()
+
+        mock_gamepad.reloadMapping.assert_called_once()
+
+    def test_does_not_crash_without_gamepad_manager(self, tmp_path: Path) -> None:
+        """resetControllerMapping is safe when gamepad_manager is None."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path, gamepad_manager=None)
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+            manager.resetControllerMapping()  # should not raise
+
+    def test_gamepad_manager_kwarg_defaults_to_none(self, tmp_path: Path) -> None:
+        """SettingsManager can be constructed without gamepad_manager (backward compat)."""
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        # Existing call signature without gamepad_manager — must not break
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        assert manager._gamepad_manager is None

@@ -15,6 +15,8 @@ from typing import Optional
 
 from PySide6.QtCore import QObject, QProcess, Signal
 
+from backend.controller_mapping import generate_mapping_js, load_mapping
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,7 +214,6 @@ class BrowserLauncher(QObject):
         try:
             shutil.copytree(src, dst, dirs_exist_ok=True)
             logger.debug("BrowserLauncher: extension deployed to %s", dst)
-            return dst
         except OSError as exc:
             logger.warning(
                 "BrowserLauncher: failed to deploy extension from %s to %s: %s — "
@@ -222,6 +223,24 @@ class BrowserLauncher(QObject):
                 exc,
             )
             return None
+
+        # Generate the controller mapping JS file from the stored config.
+        # This file is loaded by the extension before content.js so the
+        # generated mapping is available as window.__htpcGeneratedMapping.
+        try:
+            mapping = load_mapping()
+            js_content = generate_mapping_js(mapping)
+            mapping_js_path = dst / "generated_mapping.js"
+            mapping_js_path.write_text(js_content, encoding="utf-8")
+            logger.debug("BrowserLauncher: generated mapping JS written to %s", mapping_js_path)
+        except Exception as exc:
+            logger.warning(
+                "BrowserLauncher: failed to generate mapping JS: %s — "
+                "extension will use hardcoded defaults",
+                exc,
+            )
+
+        return dst
 
     def _on_started(self) -> None:
         """Handle QProcess.started — browser process is confirmed running."""

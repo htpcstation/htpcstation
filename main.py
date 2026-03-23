@@ -76,8 +76,17 @@ def main() -> None:
     # Moonlight launches from the "Recently Played" source.
     steam.setMoonlightLibrary(moonlight)
 
+    # Gamepad manager — created early so it can be passed to SettingsManager
+    gamepad_manager = GamepadManager(app)
+
     # Settings manager — exposed to QML as `settings`
-    settings_manager = SettingsManager(config, library, plex_library, browser_launcher, moonlight_library=moonlight)
+    settings_manager = SettingsManager(
+        config, library, plex_library, browser_launcher,
+        moonlight_library=moonlight, gamepad_manager=gamepad_manager,
+        keys=keys,
+    )
+    # Initialize button layout from config
+    keys.setButtonLayout(config.button_layout)
     engine.rootContext().setContextProperty("settings", settings_manager)
 
     # Network monitor — exposed to QML as `networkMonitor`
@@ -187,11 +196,13 @@ def main() -> None:
     kb_detector = _KeyboardDetector(app)
     app.installEventFilter(kb_detector)
 
-    # Gamepad manager — inject events into the root QML window
-    gamepad_manager = GamepadManager(app)
+    # Gamepad manager — inject events into the root QML window and expose to QML
     gamepad_manager.window = window
     gamepad_manager.keys = keys
+    engine.rootContext().setContextProperty("gamepadManager", gamepad_manager)
     gamepad_manager.start()
+
+
 
     sys.exit(app.exec())
 

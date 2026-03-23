@@ -322,7 +322,7 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [A] Launch    [X] Favorite    [B] Back"
+                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Launch    [" + keys.context1Label + "] Favorite    [" + keys.cancelLabel + "] Back"
                   : "[←→] Prev/Next    [Enter] Launch    [F1] Favorite    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

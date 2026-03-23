@@ -664,7 +664,7 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Season    [▼] Episodes    [A] Play    [B] Back"
+                  ? "[◀▶] Season    [▼] Episodes    [" + keys.acceptLabel + "] Play    [" + keys.cancelLabel + "] Back"
                   : "[←→] Season    [↓] Episodes    [Enter] Play    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

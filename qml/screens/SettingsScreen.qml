@@ -2,8 +2,8 @@ import QtQuick
 import ".."
 import "../components"
 
-// Settings screen — navigable list of settings organized into 4 sections:
-// Games, Plex, Browser, User Interface.
+// Settings screen — navigable list of settings organized into sections:
+// Games, Plex, Browser, Moonlight, Controller, User Interface.
 //
 // Navigation:
 //   Up/Down — move between setting rows (headers are skipped automatically)
@@ -17,6 +17,9 @@ FocusScope {
 
     // Emit when B (Escape) is pressed so HomeScreen can return focus to the tab bar.
     signal back()
+
+    // Emit to request the controller mapping dialog be shown.
+    signal showControllerMapping()
 
     // Only process input when this screen is active.
     enabled: focus
@@ -42,6 +45,10 @@ FocusScope {
         { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
         { type: "select",  label: "Host",              settingKey: "moonlightHost" },
         { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
+        { type: "header",  label: "Controller" },
+        { type: "select",  label: "Button Layout",    settingKey: "buttonLayout" },
+        { type: "button",  label: "Map Controller",   action: "mapController" },
+        { type: "button",  label: "Reset to Default", action: "resetController" },
         { type: "header",  label: "User Interface" },
         { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
         { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
@@ -99,6 +106,9 @@ FocusScope {
         if (key === "videoSnapAutoplay")      return settings.videoSnapAutoplay
         if (key === "videoSnapDelayMs")       return settings.videoSnapDelayMs
         if (key === "showNetworkIndicator")   return settings.showNetworkIndicator
+        if (key === "buttonLayout") {
+            return settings.buttonLayout === "alternate" ? "Alternate (A=South)" : "Standard (A=East)"
+        }
         return ""
     }
 
@@ -122,6 +132,7 @@ FocusScope {
         else if (key === "videoSnapAutoplay")      settings.setVideoSnapAutoplay(value)
         else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
         else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
+        else if (key === "buttonLayout")           settings.setButtonLayout(value)
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────
@@ -358,6 +369,11 @@ FocusScope {
                             actionButton.statusText = "Opening..."
                         } else if (action === "systemCores") {
                             settingsScreen._showToast("Coming soon")
+                        } else if (action === "mapController") {
+                            settingsScreen.showControllerMapping()
+                        } else if (action === "resetController") {
+                            if (settings) settings.resetControllerMapping()
+                            settingsScreen._showToast("Controller mapping reset")
                         }
                     }
                 }
@@ -393,6 +409,12 @@ FocusScope {
                     label: rowData.label
                     currentValue: settingsScreen._getValue(rowData.settingKey)
                     optionsProvider: function() {
+                        if (rowData.settingKey === "buttonLayout") {
+                            return [
+                                { id: "standard",  label: "Standard (A=East)" },
+                                { id: "alternate", label: "Alternate (A=South)" },
+                            ]
+                        }
                         if (rowData.settingKey === "moonlightHost") {
                             if (!settings) return []
                             return settings.getHostsList()
@@ -440,14 +462,14 @@ FocusScope {
             spacing: root.vpx(24)
 
             Text {
-                text: keys.useGamepadLabels ? "Ⓑ Back" : "Esc  Back"
+                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? "Ⓐ Select" : "Enter  Select"
+                text: keys.useGamepadLabels ? keys.acceptLabel + "  Select" : "Enter  Select"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

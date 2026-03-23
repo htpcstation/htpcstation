@@ -57,7 +57,7 @@ FocusScope {
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: keys.useGamepadLabels ? "B  Back" : "Esc  Back"
+            text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)

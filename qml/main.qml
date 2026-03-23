@@ -25,6 +25,19 @@ ApplicationWindow {
         return Math.round(value * Math.min(width / 1280.0, height / 720.0))
     }
 
+    // Guard to prevent the mapping dialog from reopening immediately
+    // after closing (the A-press that saves can propagate to the settings
+    // screen and re-trigger the "Map Controller" button).
+    property bool _mappingDialogCooldown: false
+
+    // Show the controller mapping dialog (called by SettingsScreen).
+    function showControllerMapping() {
+        if (_mappingDialogCooldown) return
+        controllerMappingDialog.visible = true
+        controllerMappingDialog.forceActiveFocus()
+        controllerMappingDialog.start()
+    }
+
     HomeScreen {
         id: homeScreen
         anchors.fill: parent
@@ -35,6 +48,8 @@ ApplicationWindow {
             quitDialog.visible = true
             quitDialog.forceActiveFocus()
         }
+
+        onShowControllerMapping: root.showControllerMapping()
     }
 
     QuitDialog {
@@ -48,6 +63,27 @@ ApplicationWindow {
             quitDialog.visible = false
             if (_savedFocusItem) _savedFocusItem.forceActiveFocus()
             else homeScreen.forceActiveFocus()
+        }
+    }
+
+    ControllerMappingDialog {
+        id: controllerMappingDialog
+        anchors.fill: parent
+        visible: false
+
+        onClosed: {
+            root._mappingDialogCooldown = true
+            mappingCloseTimer.restart()
+        }
+    }
+
+    Timer {
+        id: mappingCloseTimer
+        interval: 500
+        repeat: false
+        onTriggered: {
+            root._mappingDialogCooldown = false
+            homeScreen.forceActiveFocus()
         }
     }
 }

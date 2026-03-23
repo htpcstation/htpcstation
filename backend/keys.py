@@ -35,19 +35,69 @@ class Keys(QObject):
     Also tracks whether the last input came from a gamepad or keyboard,
     exposed as the ``useGamepadLabels`` property. QML hint bars bind to
     this to show "A/B/X/Y" vs "Enter/Esc" labels.
+
+    The ``buttonLayout`` property controls whether face button labels
+    follow the standard convention (A=south, B=east) or alternate
+    convention (A=east, B=south).  This only affects the display labels,
+    not the semantic mapping (accept is always east, cancel is always south).
     """
 
     useGamepadLabelsChanged = Signal()
+    buttonLayoutChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._use_gamepad_labels: bool = True  # default to gamepad
+        self._button_layout: str = "standard"  # "standard" or "alternate"
 
     def _get_use_gamepad_labels(self) -> bool:
         return self._use_gamepad_labels
 
     useGamepadLabels = Property(bool, _get_use_gamepad_labels,
                                 notify=useGamepadLabelsChanged)
+
+    # -- Button layout (standard / alternate) -----------------------------
+
+    def _get_button_layout(self) -> str:
+        return self._button_layout
+
+    buttonLayout = Property(str, _get_button_layout,
+                            notify=buttonLayoutChanged)
+
+    @Slot(str)
+    def setButtonLayout(self, layout: str) -> None:
+        """Set the button layout to 'standard' or 'alternate'."""
+        if layout not in ("standard", "alternate"):
+            return
+        if layout != self._button_layout:
+            self._button_layout = layout
+            self.buttonLayoutChanged.emit()
+
+    # -- Face button labels -----------------------------------------------
+    # Standard:  A=east, B=south, X=north, Y=west  (accept=A, cancel=B)
+    # Alternate: A=south, B=east, X=west, Y=north  (accept=B, cancel=A)
+    # Our semantic mapping: accept=east, cancel=south, context1=north, context2=west
+
+    def _get_accept_label(self) -> str:
+        # accept = east physical button
+        return "A" if self._button_layout == "standard" else "B"
+
+    def _get_cancel_label(self) -> str:
+        # cancel = south physical button
+        return "B" if self._button_layout == "standard" else "A"
+
+    def _get_context1_label(self) -> str:
+        # context1 = north physical button
+        return "X" if self._button_layout == "standard" else "Y"
+
+    def _get_context2_label(self) -> str:
+        # context2 = west physical button
+        return "Y" if self._button_layout == "standard" else "X"
+
+    acceptLabel = Property(str, _get_accept_label, notify=buttonLayoutChanged)
+    cancelLabel = Property(str, _get_cancel_label, notify=buttonLayoutChanged)
+    context1Label = Property(str, _get_context1_label, notify=buttonLayoutChanged)
+    context2Label = Property(str, _get_context2_label, notify=buttonLayoutChanged)
 
     @Slot()
     def setGamepadInput(self) -> None:
@@ -69,13 +119,19 @@ class Keys(QObject):
 
     @Slot(QJSValue, result=bool)
     def isAccept(self, event: QJSValue) -> bool:
-        """A button / Enter — confirm / launch."""
-        return _key_code(event) == Qt.Key.Key_Return
+        """Accept action — east button (standard) or south button (alternate)."""
+        code = _key_code(event)
+        if self._button_layout == "alternate":
+            return code == Qt.Key.Key_Escape  # south button
+        return code == Qt.Key.Key_Return  # east button
 
     @Slot(QJSValue, result=bool)
     def isCancel(self, event: QJSValue) -> bool:
-        """B button / Escape — cancel / go back."""
-        return _key_code(event) == Qt.Key.Key_Escape
+        """Cancel action — south button (standard) or east button (alternate)."""
+        code = _key_code(event)
+        if self._button_layout == "alternate":
+            return code == Qt.Key.Key_Return  # east button
+        return code == Qt.Key.Key_Escape  # south button
 
     # ------------------------------------------------------------------
     # Context actions
@@ -83,13 +139,19 @@ class Keys(QObject):
 
     @Slot(QJSValue, result=bool)
     def isContext1(self, event: QJSValue) -> bool:
-        """X button / F1 — context action 1."""
-        return _key_code(event) == Qt.Key.Key_F1
+        """Context action 1 — north button (standard) or west button (alternate)."""
+        code = _key_code(event)
+        if self._button_layout == "alternate":
+            return code == Qt.Key.Key_F2  # west button
+        return code == Qt.Key.Key_F1  # north button
 
     @Slot(QJSValue, result=bool)
     def isContext2(self, event: QJSValue) -> bool:
-        """Y button / F2 — context action 2."""
-        return _key_code(event) == Qt.Key.Key_F2
+        """Context action 2 — west button (standard) or north button (alternate)."""
+        code = _key_code(event)
+        if self._button_layout == "alternate":
+            return code == Qt.Key.Key_F1  # north button
+        return code == Qt.Key.Key_F2  # west button
 
     # ------------------------------------------------------------------
     # Menu

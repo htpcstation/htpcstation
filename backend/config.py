@@ -85,6 +85,7 @@ class Config:
         self.video_snap_autoplay: bool = True
         self.video_snap_delay_ms: int = 1500
         self.show_network_indicator: bool = True
+        self.button_layout: str = "standard"  # "standard" or "alternate"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -218,6 +219,12 @@ class Config:
         self.show_network_indicator = enabled
         self.save()
 
+    def set_button_layout(self, layout: str) -> None:
+        """Set the button layout ('standard' or 'alternate') and persist the config."""
+        if layout in ("standard", "alternate"):
+            self.button_layout = layout
+            self.save()
+
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
         ensure_config_dir()
@@ -251,6 +258,7 @@ class Config:
                 "video_snap_autoplay": self.video_snap_autoplay,
                 "video_snap_delay_ms": self.video_snap_delay_ms,
                 "show_network_indicator": self.show_network_indicator,
+                "button_layout": self.button_layout,
             },
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -342,6 +350,8 @@ class Config:
                 self.video_snap_delay_ms = int(ui["video_snap_delay_ms"])
             if "show_network_indicator" in ui:
                 self.show_network_indicator = bool(ui["show_network_indicator"])
+            if "button_layout" in ui and ui["button_layout"] in ("standard", "alternate"):
+                self.button_layout = ui["button_layout"]
 
 
 def ensure_config_dir() -> None:

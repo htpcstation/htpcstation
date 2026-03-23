@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 7)
+# HTPC Station — Project Resume Document (Checkpoint 8)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight). This checkpoint covers M5 (Home Screen features), Plex TV Show infinite scroll, Plex Live TV, and Steam artwork caching.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen). This checkpoint covers controller mapping, Flatpak gamepad access, Plex modal navigation, and button layout settings.
 
 ---
 
@@ -20,7 +20,7 @@
 - **Location:** `***REMOVED***opencode/htpcstation/`
 - **Remote:** `git@github.com:htpcstation/htpcstation.git`
 - **Branch:** `main`
-- **Tests:** 758 passing (`python3 -m pytest tests/ -q`)
+- **Tests:** 842 passing (`python3 -m pytest tests/ -q`)
 - **Run:** `cd ***REMOVED***opencode/htpcstation && python3 main.py`
 - **Dependencies:** `pip install PySide6 evdev requests`
 - **Dev machine:** ThinkPad T460, dual-core CPU, Fedora Linux (lower spec than target J5005)
@@ -31,6 +31,7 @@
 - Moonlight: `***REMOVED***.var/app/com.moonlight_stream.Moonlight/config/Moonlight Game Streaming Project/Moonlight.conf` (Flatpak, 1 paired host, 7 apps)
 - Moonlight data: `***REMOVED***.config/htpcstation/moonlight/` (artwork_scraped/, artwork_custom/, artwork_index.json, play_history.json)
 - Steam artwork cache: `***REMOVED***.config/htpcstation/steam/` (artwork_scraped/, artwork_custom/)
+- Controller mapping: `***REMOVED***.config/htpcstation/controller_mapping.json` (evdev codes + device capabilities)
 - Plex API spec: `***REMOVED***opencode/openapi.json` (Plex Media Server OpenAPI 3.1)
 - ES-DE reference: `***REMOVED***opencode/es-de/`
 - Pegasus reference: `***REMOVED***opencode/pegasus-frontend/`
@@ -72,9 +73,10 @@ htpcstation/
     __init__.py
     browser_launcher.py                # Brave kiosk launcher, dedicated user-data-dir, extension deploy
     config.py                          # JSON config, 20 system defaults, all setters auto-save
-    gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug
+    controller_mapping.py              # Controller mapping config: load/save, default mapping, evdev lookup
+    gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode
     gamelist.py                        # gamelist.xml parser, write_game_stats()
-    keys.py                            # Semantic key abstraction + input source tracking (gamepad/keyboard)
+    keys.py                            # Semantic key abstraction, input source tracking, button layout
     launcher.py                        # QProcess emulator launcher, async signal-based start
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
     models.py                          # Game and System dataclasses
@@ -99,7 +101,8 @@ htpcstation/
     steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution + caching
   extension/                           # Chromium browser extension (Manifest V3)
     manifest.json                      # Extension manifest, content scripts on all URLs
-    content.js                         # Gamepad API polling loop, edge detection, auto-repeat, A/B swap
+    content.js                         # Gamepad API polling loop, edge detection, auto-repeat, Start+Select combo
+    generated_mapping.js               # Auto-generated button mapping (written at deploy time)
     mappings/
       default.js                       # No-op fallback mapping for non-Plex sites
       index.js                         # Site matcher: selects mapping based on URL path
@@ -137,7 +140,8 @@ htpcstation/
       PlexShowGrid.qml                 # TV show poster grid, infinite scroll, sort/filter overlay
       PlexOnDeckGrid.qml               # Continue Watching grid with progress bars
       PlexShowDetail.qml               # Show metadata, horizontal season tabs, episode list
-      SettingsScreen.qml               # 5-section settings menu (Games, Plex, Browser, Moonlight, UI)
+      ControllerMappingDialog.qml       # Full-screen controller mapping dialog (14 inputs)
+      SettingsScreen.qml               # 6-section settings menu (Games, Plex, Browser, Moonlight, Controller, UI)
   tests/
     conftest.py                        # Session-scoped QCoreApplication fixture
     test_gamelist_parser_fixes.py      # 7 tests
@@ -147,9 +151,11 @@ htpcstation/
     test_plex_backend.py               # 191 tests
     test_plex_account.py               # 45 tests
     test_browser_launch.py             # 31 tests
-    test_settings_backend.py           # 84 tests
+    test_settings_backend.py           # 99 tests
     test_video_snap.py                 # 5 tests
     test_steam.py                      # 95 tests
+    test_controller_mapping.py         # 38 tests
+    test_auto_mapping.py               # 31 tests
     test_moonlight_parser.py           # 30 tests
     test_moonlight_client.py           # 24 tests
     test_moonlight_library.py          # 119 tests
@@ -255,24 +261,28 @@ htpcstation/
 ### Browser Gamepad Extension ✅
 - **Manifest V3 Chromium extension** at `htpcstation/extension/`
 - **Gamepad API polling:** `requestAnimationFrame` loop, edge detection for button presses, auto-repeat (400ms initial, 100ms repeat) for D-pad only
-- **A/B swap:** Button 0 → cancel, button 1 → accept (matches physical controller layout)
+- **Auto-generated button mapping:** `generated_mapping.js` is written at extension deploy time from the stored controller mapping config. Translates evdev codes to Web Gamepad API button indices using device capabilities (sorted button/axis order). Falls back to standard gamepad defaults if no mapping exists.
+- **Start+Select combo:** Pressing Start and Select simultaneously closes the browser window (equivalent to Alt+F4). Combo detection suppresses individual button actions.
 - **Analog stick deadzone:** ±0.3, converted to digital directional events
 - **Site-aware mapping system:** hostname/path-based dispatch, extensible to future sites
 - **Plex Web mapping:**
-  - Player mode: A=play/pause, B=close player, D-pad=seek/volume, Y=fullscreen, Start=exit
-  - Navigation mode: virtual focus cursor with spatial navigation, A=click, B=escape, Start=exit
+  - Player mode: accept=play/pause, cancel=close player, D-pad=seek/volume, context2=fullscreen, Start=exit
+  - Navigation mode: virtual focus cursor with spatial navigation, accept=click, cancel=escape, Start=exit
+  - **Modal support:** When a modal dialog is open (e.g., "Resume Playback"), input routes to navigation mode regardless of player state. D-pad navigates modal options, accept selects, cancel closes.
 - **Auto-user-select:** Reads `htpc_user` from URL, polls for `.user-select-modal`, clicks matching user tile, re-navigates to original deep link after 1.5s
 - **Auto-play:** Polls for `[data-testid="preplay-play"]` button, clicks it. Triggers on both page load and `hashchange` events (SPA navigation).
 - **Extension deployment:** Copied to `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-extension/` before each launch (flatpak sandbox access)
+- **Flatpak gamepad access:** Browser launcher automatically applies `flatpak override --user <app_id> --filesystem=/run/udev:ro` to grant the Flatpak browser access to gamepad devices via the Web Gamepad API. Without this, Chromium-based Flatpak browsers cannot enumerate gamepads.
 
 ### Settings UI ✅
 - SettingsManager QObject wrapping Config with Q_PROPERTYs and Slots
-- 5 sections: Games, Plex, Browser, Moonlight, User Interface
+- 6 sections: Games, Plex, Browser, Moonlight, Controller, User Interface
 - Reusable components: SettingTextInput (with edit mode), SettingToggle, SettingButton, SettingSlider, SettingSelect (cycle-through picker)
 - Games: ROMs Directory, RetroArch Command, Cores Directory, Rescan Library button
 - Plex: Sign in with Plex (OAuth), Test Connection button, Server selector (cycle through discovered servers), User selector (cycle through home users)
 - Browser: Browser Command
 - Moonlight: Moonlight Command, Host selector (cycle through paired hosts), Open Moonlight button
+- Controller: Button Layout selector (Standard/Alternate), Map Controller button, Reset to Default button
 - User Interface: Video Snap Autoplay toggle, Video Snap Delay slider (0-5000ms, 100ms steps), Network Indicator toggle
 - All changes auto-save to config.json
 - Per-system core editor: placeholder ("Coming soon")
@@ -280,11 +290,12 @@ htpcstation/
 - `selectServer`/`selectUser` save config and invalidate client without blocking (lazy reconnect on next `refresh()`)
 
 ### Input Source Detection ✅
-- `Keys` object tracks `useGamepadLabels` property (bool)
+- `Keys` object tracks `useGamepadLabels` property (bool) and `buttonLayout` property ("standard"/"alternate")
 - GamepadManager calls `keys.setGamepadInput()` on every injected key press
 - Event filter detects `spontaneous()` keyboard events → `keys.setKeyboardInput()`
-- All action hint bars switch between gamepad labels (A/B/X/Y) and keyboard labels (Enter/Esc/F1/F2)
-- 7 hint bar locations updated across all detail views, grid headers, and sort overlays
+- All action hint bars use dynamic label properties (`keys.acceptLabel`, `keys.cancelLabel`, `keys.context1Label`, `keys.context2Label`) that update based on button layout setting
+- 20 hint bar locations updated across all detail views, grid headers, sort overlays, and dialogs
+- Button layout setting swaps both display labels AND functional mapping (which physical button triggers accept vs cancel)
 
 ### M6 — Hardening (partial) ✅
 - **Async QProcess start:** Replaced blocking `waitForStarted(3000)` with signal-based flow (`QProcess.started` + `QProcess.errorOccurred`) in both `Launcher` and `BrowserLauncher`
@@ -296,23 +307,39 @@ htpcstation/
 
 ## 6. Gamepad Controls
 
-| Button | evdev Code | Qt Key | Action |
+Gamepad button mapping is fully configurable via Settings → Controller → "Map Controller". The mapping is stored in `***REMOVED***.config/htpcstation/controller_mapping.json` and auto-generates the browser extension mapping at deploy time.
+
+**Default mapping (matches standard layout, A=East):**
+
+| Physical Button | Default evdev Code | Qt Key | Semantic Action |
 |---|---|---|---|
-| A (physical) | BTN_EAST | Key_Return | Accept / confirm / launch |
-| B (physical) | BTN_SOUTH | Key_Escape | Cancel / back |
-| X | BTN_NORTH | Key_F1 | Context action 1 (favorite) |
-| Y | BTN_WEST | Key_F2 | Context action 2 (sort) |
-| Start | BTN_START | Key_F10 | Quit dialog |
-| Select | BTN_SELECT | Key_F9 | Secondary menu |
-| LB | BTN_TL | Key_PageUp | Previous tab |
-| RB | BTN_TR | Key_PageDown | Next tab |
-| LT | ABS_Z | Key_Home | Page scroll up |
-| RT | ABS_RZ | Key_End | Page scroll down |
-| D-pad | — | Key_Up/Down/Left/Right | Navigation |
+| Face East (Accept) | BTN_EAST (305) | Key_Return | Accept / confirm / launch |
+| Face South (Cancel) | BTN_SOUTH (304) | Key_Escape | Cancel / back |
+| Face North | BTN_NORTH (307) | Key_F1 | Context action 1 (favorite) |
+| Face West | BTN_WEST (308) | Key_F2 | Context action 2 (sort) |
+| Start | BTN_START (315) | Key_F10 | Quit dialog |
+| Select | BTN_SELECT (314) | Key_F9 | Secondary menu |
+| Left Shoulder | BTN_TL (310) | Key_PageUp | Previous tab |
+| Right Shoulder | BTN_TR (311) | Key_PageDown | Next tab |
+| Left Trigger | ABS_Z (2) | Key_Home | Page scroll up |
+| Right Trigger | ABS_RZ (5) | Key_End | Page scroll down |
+| D-pad | ABS_HAT0X/Y (16/17) | Key_Up/Down/Left/Right | Navigation |
+| Start + Select | — | — | Close browser (Alt+F4 equivalent) |
 
-**Note:** A/B mapping is swapped from evdev convention (`BTN_SOUTH`=A) to match the user's physical controller. The same swap is applied in the browser extension (Web Gamepad API button 0 → cancel, button 1 → accept). This is hardcoded — button remapping UI is deferred to v2+.
+**Button Layout setting** (Settings → Controller → Button Layout):
+- **Standard (A=East):** Accept=A, Cancel=B, Context1=X, Context2=Y — matches controllers where A is on the east face position
+- **Alternate (A=South):** Accept=B, Cancel=A, Context1=Y, Context2=X — matches controllers where A is on the south face position
+- This swaps both the display labels AND the functional mapping (which physical button triggers accept vs cancel)
 
-**Note:** The user's controller does not have analog sticks. Stick support exists in the extension (deadzone ±0.3, digital conversion) but is untested.
+**Controller mapping dialog:**
+- Walks through 14 inputs sequentially using cardinal directions (Face Button East, Face Button South, etc.) to avoid layout confusion
+- Records raw evdev button/axis codes via raw mode (gamepad stops injecting keys during mapping)
+- Duplicate detection prevents mapping the same button twice
+- Skippable inputs (shoulders, triggers) auto-skip after 5 seconds if no input
+- Auto-saves on completion — no confirmation button needed (avoids A/B swap confusion)
+- Device capabilities recorded alongside mapping for browser extension auto-generation
+
+**Note:** The user's 8BitDo Micro in D-input mode reports D-pad as ABS_X/ABS_Y (0-255 range) instead of ABS_HAT0X/Y (-1/0/1). The mapping system normalizes axis values to -1/0/1 using the axis range, handling both hat and analog D-pad styles transparently.
 
 ---
 
@@ -346,7 +373,8 @@ Location: `***REMOVED***.config/htpcstation/config.json`
   "ui": {
     "video_snap_autoplay": true,
     "video_snap_delay_ms": 1500,
-    "show_network_indicator": true
+    "show_network_indicator": true,
+    "button_layout": "standard"
   }
 }
 ```
@@ -442,6 +470,18 @@ The Steam Store search API (`storesearch`) returns fuzzy matches. Most game titl
 ### Two-Phase Refresh for Perceived Performance
 Network-dependent data (host probing, app enumeration) causes multi-second delays. Showing "Loading..." immediately while background work completes dramatically improves perceived responsiveness. The pattern: Phase 1 (synchronous, local data) emits a signal to update the UI instantly; Phase 2 (threaded, network I/O) emits the same signal again when complete. The UI handler reads the current state each time.
 
+### Flatpak Browsers Cannot See Gamepads Without /run/udev
+Chromium-based browsers in Flatpak sandboxes cannot enumerate game controllers via the Web Gamepad API because `/run/udev` is not accessible by default. The `devices=all` Flatpak permission is insufficient — the browser needs udev to discover input devices. **Fix:** `browser_launcher.py` applies `flatpak override --user <app_id> --filesystem=/run/udev:ro` before each launch. This is idempotent and only runs for Flatpak browser commands.
+
+### Gamepad Auto-Repeat Timers Leak Into Raw Mode
+When entering raw mode for the controller mapping dialog, any currently held button has an active auto-repeat timer. The timer fires `_press_key` directly, bypassing the raw mode check in `_handle_button`. This causes ghost key injections during the mapping flow. **Fix:** `startRawMode()` calls `_release_all_keys()` on every handler to release all pressed keys, stop all repeat timers, and clear D-pad/trigger state. `stopRawMode()` does the same to prevent stale state from carrying over.
+
+### Controller Mapping Dialog Cannot Use Accept/Cancel Buttons
+After mapping all inputs, the dialog needs the user to confirm saving. But the A/B button mapping may be swapped until the new mapping is applied — the user would press what they think is "accept" but it triggers "cancel" (discarding the mapping). **Fix:** Auto-save when all inputs are recorded. No confirmation button needed. Shows "Saved!" briefly then auto-closes.
+
+### D-Input Mode Reports D-pad as Analog Axes
+Some controllers in D-input mode report D-pad as ABS_X/ABS_Y (range 0-255, centered at 127) instead of ABS_HAT0X/ABS_HAT0Y (range -1 to 1). The raw values (0, 127, 255) must be normalized to -1/0/1 using the axis range for both the mapping dialog (recording) and runtime (key injection). Without normalization, the evdev lookup stores wrong values and D-pad directions collide.
+
 ### Artwork Override Ambiguity
 When auto-downloaded and user-provided artwork share the same directory and filename, the system cannot distinguish "user replaced the file" from "app downloaded the file." **Fix:** Use separate directories: `artwork_scraped/` for auto-downloaded and `artwork_custom/` for user overrides. Files in `artwork_custom/` always take priority. Both directories are created automatically so users can discover them. This pattern is used for both Moonlight (`***REMOVED***.config/htpcstation/moonlight/`) and Steam (`***REMOVED***.config/htpcstation/steam/`).
 
@@ -453,7 +493,6 @@ These are intentional shortcuts that should be revisited:
 
 | Decision | Location | Why | Future Fix |
 |---|---|---|---|
-| A/B button swap | `backend/gamepad.py` lines 48-49, `extension/content.js` | `BTN_EAST`=Accept, `BTN_SOUTH`=Cancel — matches user's controller | Add button remapping in settings |
 | Plex token in config.json | `config.json` | Plaintext token stored after OAuth | Encrypt or use OS keyring |
 | Synchronous `getMovie()`/`getShow()` | `plex_library.py` | Blocks main thread briefly for API call + poster download | Move to threaded worker |
 | Synchronous `testPlexConnection()` | `settings_manager.py` | Blocks main thread during connection test | Defer to thread (partially mitigated with `Qt.callLater`) |
@@ -489,7 +528,6 @@ These are intentional shortcuts that should be revisited:
 - Per-system core editor sub-screen in settings
 - Plex search
 - Mark watched/unwatched in Plex
-- Gamepad button remapping in settings
 - On-screen keyboard for 10-foot text input
 - Gamepad extension: YouTube, Netflix, and other site mappings
 - Plex token encryption or OS keyring storage
@@ -523,7 +561,9 @@ These are intentional shortcuts that should be revisited:
 - Version control via git from this point forward
 - Tab naming: "Retro Games" (ROMs), "PC Games" (Steam/GOG/Epic), "Watch" (Plex), "Settings"
 - Prefers Chromium/Brave for Plex playback over native players (hardware decoding quality)
-- Controller does not have analog sticks
+- Controller: 8BitDo Micro in D-input mode, does not have analog sticks
+- Prefers standard button layout (A=East) — controller mapping configured via Settings
+- No proprietary trademarks in code (use "standard"/"alternate" not brand names for button layouts)
 - Has multiple Plex servers (owns one, accesses friends' servers)
 - Uses Plex Home with multiple users (admin + managed "Kids" profile)
 - Wants PC Games tab to follow same layout pattern as Retro Games (system list → grid → detail)
@@ -538,12 +578,13 @@ These are intentional shortcuts that should be revisited:
 ## 12. Architecture Notes for New Agent
 
 ### QML Context Properties
-Seven Python objects are exposed to QML:
-- `keys` — `Keys` instance (semantic key checks + input source tracking)
+Eight Python objects are exposed to QML:
+- `keys` — `Keys` instance (semantic key checks, input source tracking, button layout labels)
 - `library` — `GameLibrary` instance (ROM data, models, launch, favorites)
 - `steam` — `SteamLibrary` instance (Steam game data, models, sort, launch)
 - `moonlight` — `MoonlightLibrary` instance (Moonlight host/app data, models, launch, artwork)
 - `plex` — `PlexLibrary` instance (Plex data, models, sort/filter, browser launch, server/user management)
+- `gamepadManager` — `GamepadManager` instance (raw mode for mapping dialog, device capabilities)
 - `networkMonitor` — `NetworkMonitor` instance (periodic connectivity check, online property)
 - `settings` — `SettingsManager` instance (config read/write for settings UI, OAuth)
 
@@ -570,11 +611,13 @@ Two separate API layers:
 
 ### Browser Extension Architecture
 - Content scripts injected on all URLs (Manifest V3, `run_at: document_idle`)
-- No ES modules — files concatenated in execution order via manifest `js` array
-- Global namespace pattern: `window.__htpcGamepadMappings` for mapping registration
+- No ES modules — files concatenated in execution order via manifest `js` array: `generated_mapping.js` → `mappings/*.js` → `content.js`
+- Global namespace pattern: `window.__htpcGamepadMappings` for mapping registration, `window.__htpcGeneratedMapping` for auto-generated button map
 - Site detection: `index.js` checks `window.location.pathname` for `/web/` or `/desktop/`
 - Gamepad polling: `requestAnimationFrame` loop in `content.js`, edge detection, auto-repeat for D-pad only
+- Auto-generated mapping: `browser_launcher.py` writes `generated_mapping.js` from `controller_mapping.json` at deploy time, translating evdev codes to Web Gamepad API indices
 - Extension deployed to `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-extension/` via `shutil.copytree` before each launch
+- Flatpak override `--filesystem=/run/udev:ro` applied automatically for gamepad access
 
 ### Browser Isolation
 - Dedicated `--user-data-dir` at `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-browser/` inside the flatpak sandbox
@@ -621,6 +664,8 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/plex-show-pagination/` (task 001)
 - `***REMOVED***opencode/misc/coding-team/plex-live-tv/` (task 001)
 - `***REMOVED***opencode/misc/coding-team/m5-home-screen/` (tasks 001–006)
+- `***REMOVED***opencode/misc/coding-team/plex-resume-modal/` (task 001)
+- `***REMOVED***opencode/misc/coding-team/controller-mapping/` (tasks 001–003)
 
 ---
 

@@ -483,6 +483,12 @@ window.__htpcGamepadMappings.plex = (function () {
 
   return {
     onButton: function (action) {
+      // Start+Select combo closes the browser window from any context.
+      if (action === 'closeWindow') {
+        window.close();
+        return;
+      }
+
       // Modals take priority over the player — navigate the modal with the
       // virtual focus cursor even if the player is loaded behind it.
       if (getActiveModal()) {

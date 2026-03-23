@@ -90,7 +90,7 @@ FocusScope {
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: keys.useGamepadLabels ? "Y  Sort / Filter" : "F2  Sort / Filter"
+            text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -450,7 +450,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? "B / Y  Close" : "Esc / F2  Close"
+                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / F2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
