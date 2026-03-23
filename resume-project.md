@@ -261,8 +261,8 @@ htpcstation/
 ### Browser Gamepad Extension ✅
 - **Manifest V3 Chromium extension** at `htpcstation/extension/`
 - **Gamepad API polling:** `requestAnimationFrame` loop, edge detection for button presses, auto-repeat (400ms initial, 100ms repeat) for D-pad only
-- **Auto-generated button mapping:** `generated_mapping.js` is written at extension deploy time from the stored controller mapping config. Translates evdev codes to Web Gamepad API button indices using device capabilities (sorted button/axis order). Falls back to standard gamepad defaults if no mapping exists.
-- **Start+Select combo:** Pressing Start and Select simultaneously closes the browser window (equivalent to Alt+F4). Combo detection suppresses individual button actions.
+- **Auto-generated button mapping:** `generated_mapping.js` is written at extension deploy time from the stored controller mapping config. Translates evdev codes to Web Gamepad API button indices using device capabilities (sorted button/axis order). Action names are translated to match content.js expectations (e.g., `dpad_up` → `up`, `left_shoulder` → `leftBumper`). Button layout (standard/alternate) is applied at generation time to swap accept/cancel. Falls back to standard gamepad defaults if no mapping exists.
+- **Start+Select combo:** Pressing Start and Select simultaneously closes the browser. Detected at the evdev level in `gamepad.py` (not in the extension — `window.close()` is restricted in kiosk mode). `GamepadManager.startSelectCombo` signal triggers `browser_launcher.kill()` which uses `flatpak kill <app_id>` for Flatpak browsers to reliably terminate the sandboxed process and all children. Combo detection suppresses individual button actions until both are released.
 - **Analog stick deadzone:** ±0.3, converted to digital directional events
 - **Site-aware mapping system:** hostname/path-based dispatch, extensible to future sites
 - **Plex Web mapping:**
@@ -479,6 +479,12 @@ When entering raw mode for the controller mapping dialog, any currently held but
 ### Controller Mapping Dialog Cannot Use Accept/Cancel Buttons
 After mapping all inputs, the dialog needs the user to confirm saving. But the A/B button mapping may be swapped until the new mapping is applied — the user would press what they think is "accept" but it triggers "cancel" (discarding the mapping). **Fix:** Auto-save when all inputs are recorded. No confirmation button needed. Shows "Saved!" briefly then auto-closes.
 
+### Browser window.close() Restricted in Kiosk Mode
+`window.close()` in the browser extension is silently ignored for kiosk windows (browsers only allow closing windows opened via `window.open()`). Killing the `QProcess` (the `flatpak run` wrapper) also doesn't work — Flatpak spawns the browser as a child process that survives the wrapper's death. **Fix:** Use `flatpak kill <app_id>` which reliably terminates the entire sandboxed process and all its children. For non-Flatpak browsers, fall back to `QProcess.kill()`.
+
+### Browser Extension Action Name Mismatch
+The generated mapping used internal action names (`dpad_up`, `left_shoulder`) but `content.js` expected different names (`up`, `leftBumper`). The `isDirectional()` function checked for `"up"/"down"/"left"/"right"`, not `"dpad_up"` etc. **Fix:** Added `_WEB_ACTION_NAMES` translation table in `controller_mapping.py` that maps internal names to content.js names during mapping generation.
+
 ### D-Input Mode Reports D-pad as Analog Axes
 Some controllers in D-input mode report D-pad as ABS_X/ABS_Y (range 0-255, centered at 127) instead of ABS_HAT0X/ABS_HAT0Y (range -1 to 1). The raw values (0, 127, 255) must be normalized to -1/0/1 using the axis range for both the mapping dialog (recording) and runtime (key injection). Without normalization, the evdev lookup stores wrong values and D-pad directions collide.
 
@@ -645,6 +651,7 @@ Two separate API layers:
 - **Emulators/Browser/Moonlight:** `processStarted` signal → `window.hide()`, `processFinished` signal → `window.showFullScreen()` + `raise_()` + `requestActivate()`
 - **Steam:** No window management — game takes focus, window manager handles return on game exit
 - **Moonlight GUI ("Open Moonlight"):** Same hide/show pattern as streaming — window hides while Moonlight GUI is open for pairing, restores when closed
+- **Browser kill (Start+Select):** `GamepadManager.startSelectCombo` signal → `browser_launcher.kill()` → `flatpak kill <app_id>` for Flatpak browsers. Detected at evdev level, not in the extension.
 - Browser session files cleared before each launch to prevent tab accumulation
 - `launchGame()` (ROMs) sets `_active_game` optimistically; clears on `FailedToStart`
 
