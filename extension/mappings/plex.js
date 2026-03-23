@@ -186,17 +186,40 @@ window.__htpcGamepadMappings.plex = (function () {
   // ---------------------------------------------------------------------------
 
   /**
+   * Returns the currently open modal/dialog element, or null if none is open.
+   * Excludes overlay/backdrop elements to avoid scoping to the wrong container.
+   */
+  function getActiveModal() {
+    return document.querySelector(
+      '[role="dialog"], [role="alertdialog"], [data-testid="modal"], ' +
+      '[class*="Modal"]:not([class*="ModalOverlay"]):not([class*="Overlay"]), ' +
+      '[class*="modal"]:not([class*="modalOverlay"]):not([class*="overlay"])'
+    );
+  }
+
+  /**
    * Returns all interactive elements that are currently visible and have
-   * non-zero dimensions.
+   * non-zero dimensions.  When a modal is open, scopes the search to within
+   * the modal only so background elements are not reachable.
    */
   function getInteractiveElements() {
-    return Array.from(document.querySelectorAll(
-      'a[href], button, [role="button"], [role="link"], [tabindex]'
-    )).filter(function (el) {
+    var modal = getActiveModal();
+    var scope = modal || document;
+
+    var selector = 'a[href], button, [role="button"], [role="link"], [tabindex], ' +
+                   '[role="menuitem"], [role="option"], [class*="ListItem"], [class*="listItem"]';
+
+    return Array.from(scope.querySelectorAll(selector)).filter(function (el) {
       var rect = el.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0 &&
-             el.offsetParent !== null &&
-             !el.disabled;
+      if (rect.width <= 0 || rect.height <= 0 || el.disabled) {
+        return false;
+      }
+      // When scoped to a modal, relax the offsetParent check because modals
+      // are often position:fixed and offsetParent is null for fixed elements.
+      if (modal) {
+        return true;
+      }
+      return el.offsetParent !== null;
     });
   }
 
@@ -330,6 +353,16 @@ window.__htpcGamepadMappings.plex = (function () {
       currentFocusEl = null;
     }
 
+    // If a modal is open and the current focus is outside it, reset focus
+    // so the next step will pick the first element inside the modal.
+    if (currentFocusEl) {
+      var modal = getActiveModal();
+      if (modal && !modal.contains(currentFocusEl)) {
+        clearHighlight();
+        currentFocusEl = null;
+      }
+    }
+
     // Nothing focused yet — pick the first element.
     if (!currentFocusEl) {
       setFocus(elements[0]);
@@ -404,10 +437,25 @@ window.__htpcGamepadMappings.plex = (function () {
         }
         break;
       }
-      case 'cancel':
-        // Back / close modal
+      case 'cancel': {
+        // If a modal is open, try to click its close button first.
+        var cancelModal = getActiveModal();
+        if (cancelModal) {
+          var closeBtn = cancelModal.querySelector(
+            '[aria-label="Close"], [data-testid="modal-close"], ' +
+            'button[class*="close"], button[class*="Close"]'
+          );
+          if (closeBtn) {
+            closeBtn.click();
+            clearHighlight();
+            currentFocusEl = null;
+            break;
+          }
+        }
+        // Fall back to Escape key (closes modal or navigates back).
         sendKey('Escape', 'Escape');
         break;
+      }
       case 'up':
         navigateFocus('up');
         break;
@@ -435,7 +483,11 @@ window.__htpcGamepadMappings.plex = (function () {
 
   return {
     onButton: function (action) {
-      if (isPlayerActive()) {
+      // Modals take priority over the player — navigate the modal with the
+      // virtual focus cursor even if the player is loaded behind it.
+      if (getActiveModal()) {
+        handleNavAction(action);
+      } else if (isPlayerActive()) {
         handlePlayerAction(action);
       } else {
         handleNavAction(action);

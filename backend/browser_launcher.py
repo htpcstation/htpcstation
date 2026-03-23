@@ -111,6 +111,11 @@ class BrowserLauncher(QObject):
         # Clear session restore files to prevent tab accumulation,
         # but keep the profile (cookies, Plex login, etc.)
         self._clear_session_state()
+        # Ensure the Flatpak browser can access udev for gamepad enumeration.
+        # The Web Gamepad API in Chromium-based browsers needs /run/udev to
+        # discover game controllers.  Without this override, gamepads are
+        # invisible to the browser inside the Flatpak sandbox.
+        self._ensure_flatpak_gamepad_access()
         # Deploy the extension into the flatpak-accessible data directory.
         deployed = self._deploy_extension()
         # Ensure the user data directory exists.
@@ -156,6 +161,32 @@ class BrowserLauncher(QObject):
                 logger.debug("BrowserLauncher: removed Session Storage dir")
             except OSError as e:
                 logger.warning("BrowserLauncher: failed to remove Session Storage: %s", e)
+
+    def _ensure_flatpak_gamepad_access(self) -> None:
+        """Grant the Flatpak browser access to /run/udev for gamepad support.
+
+        Chromium-based browsers use udev to enumerate game controllers via the
+        Web Gamepad API.  Inside a Flatpak sandbox, /run/udev is not accessible
+        by default, making gamepads invisible to the browser.  This method
+        applies a user-level Flatpak override to grant read-only access.
+
+        The override is idempotent — it's safe to call on every launch.
+        Only applies when the browser command starts with ``flatpak run``.
+        """
+        tokens = self._browser_command.split()
+        if len(tokens) < 3 or tokens[0] != "flatpak" or tokens[1] != "run":
+            return  # Not a Flatpak app — no override needed
+        app_id = tokens[2]
+        try:
+            import subprocess
+            subprocess.run(
+                ["flatpak", "override", "--user", app_id, "--filesystem=/run/udev:ro"],
+                capture_output=True,
+                timeout=5,
+            )
+            logger.debug("BrowserLauncher: ensured Flatpak gamepad access for %s", app_id)
+        except Exception as exc:
+            logger.warning("BrowserLauncher: failed to set Flatpak override for gamepad: %s", exc)
 
     def _deploy_extension(self) -> Optional[Path]:
         """Copy the extension into the Brave flatpak data directory.
