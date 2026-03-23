@@ -229,7 +229,10 @@ class BrowserLauncher(QObject):
         # generated mapping is available as window.__htpcGeneratedMapping.
         try:
             mapping = load_mapping()
-            js_content = generate_mapping_js(mapping)
+            # Read button layout from config to apply accept/cancel swap
+            from backend.config import Config
+            _cfg = Config()
+            js_content = generate_mapping_js(mapping, button_layout=_cfg.button_layout)
             mapping_js_path = dst / "generated_mapping.js"
             mapping_js_path.write_text(js_content, encoding="utf-8")
             logger.debug("BrowserLauncher: generated mapping JS written to %s", mapping_js_path)

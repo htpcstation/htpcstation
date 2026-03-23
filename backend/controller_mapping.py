@@ -245,7 +245,7 @@ _WEB_ACTION_NAMES: dict[str, str] = {
 }
 
 
-def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
+def build_web_gamepad_mapping(mapping: dict, button_layout: str = "standard") -> Optional[dict]:
     """Generate a Web Gamepad API button/axis mapping from the stored config.
 
     Uses the ``_device`` capabilities recorded at mapping time to translate
@@ -285,6 +285,17 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
     axes_out: dict[int, list] = {}
     dpad_buttons_out: dict[int, bool] = {}
 
+    # When alternate layout, swap accept↔cancel and context1↔context2
+    # so the browser extension matches the functional swap in keys.py.
+    _layout_swap: dict[str, str] = {}
+    if button_layout == "alternate":
+        _layout_swap = {
+            "accept": "cancel",
+            "cancel": "accept",
+            "context1": "context2",
+            "context2": "context1",
+        }
+
     for action_name, entry in mapping.items():
         if action_name.startswith("_"):
             continue  # skip metadata keys
@@ -296,7 +307,9 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
         if not isinstance(code, int) or not isinstance(value, int):
             continue
 
-        web_name = _WEB_ACTION_NAMES.get(action_name, action_name)
+        # Apply layout swap before translating to web action name
+        swapped_name = _layout_swap.get(action_name, action_name)
+        web_name = _WEB_ACTION_NAMES.get(swapped_name, swapped_name)
 
         if ev_type == "button":
             # EV_KEY button → position in sorted button list
@@ -333,13 +346,13 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
     }
 
 
-def generate_mapping_js(mapping: dict) -> str:
+def generate_mapping_js(mapping: dict, button_layout: str = "standard") -> str:
     """Generate a JavaScript snippet that sets ``window.__htpcGeneratedMapping``.
 
     Returns a string of valid JavaScript.  If the mapping has no ``_device``
     info, returns a comment-only stub so the extension falls back to defaults.
     """
-    web_mapping = build_web_gamepad_mapping(mapping)
+    web_mapping = build_web_gamepad_mapping(mapping, button_layout=button_layout)
     if web_mapping is None:
         return "// No device capabilities recorded — extension will use defaults.\n"
 
