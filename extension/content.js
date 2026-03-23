@@ -100,31 +100,45 @@
   // fire the individual start/select actions on the same press.
   var _comboFired = false;
 
+  // Find the button indices for Start and Select from the mapping.
+  function _findButtonIndex(actionName) {
+    for (var idx in BUTTON_MAP) {
+      if (BUTTON_MAP[idx] === actionName) return parseInt(idx);
+    }
+    return -1;
+  }
+  var _startIdx = _findButtonIndex('start');
+  var _selectIdx = _findButtonIndex('select');
+
   function processButtons(gamepad, now) {
     var buttons = gamepad.buttons;
 
-    // Combo detection: Start (9) + Select (8) pressed simultaneously → close window.
-    var startPressed = buttons[9] && buttons[9].pressed;
-    var selectPressed = buttons[8] && buttons[8].pressed;
-    if (startPressed && selectPressed) {
-      if (!_comboFired) {
-        _comboFired = true;
-        console.log('[HTPC Gamepad] Start+Select combo → closeWindow');
-        dispatchAction('closeWindow');
-      }
-      // Mark both buttons as pressed in state so their individual rising
-      // edges are consumed and won't fire when the combo is released.
-      for (var ci = 8; ci <= 9; ci++) {
-        if (!buttonState[ci]) {
-          buttonState[ci] = { pressed: false, heldSince: null, lastRepeat: null };
+    // Combo detection: Start + Select pressed simultaneously → close window.
+    if (_startIdx >= 0 && _selectIdx >= 0) {
+      var startPressed = buttons[_startIdx] && buttons[_startIdx].pressed;
+      var selectPressed = buttons[_selectIdx] && buttons[_selectIdx].pressed;
+      if (startPressed && selectPressed) {
+        if (!_comboFired) {
+          _comboFired = true;
+          console.log('[HTPC Gamepad] Start+Select combo → closeWindow');
+          dispatchAction('closeWindow');
         }
-        buttonState[ci].pressed = true;
-        buttonState[ci].heldSince = now;
+        // Mark both buttons as pressed in state so their individual rising
+        // edges are consumed and won't fire when the combo is released.
+        var comboIndices = [_startIdx, _selectIdx];
+        for (var ci = 0; ci < comboIndices.length; ci++) {
+          var idx = comboIndices[ci];
+          if (!buttonState[idx]) {
+            buttonState[idx] = { pressed: false, heldSince: null, lastRepeat: null };
+          }
+          buttonState[idx].pressed = true;
+          buttonState[idx].heldSince = now;
+        }
+        return; // Skip individual button processing this frame
       }
-      return; // Skip individual button processing this frame
-    }
-    if (_comboFired && !startPressed && !selectPressed) {
-      _comboFired = false; // Reset once both are released
+      if (_comboFired && !startPressed && !selectPressed) {
+        _comboFired = false; // Reset once both are released
+      }
     }
 
     for (var i = 0; i < buttons.length; i++) {

@@ -226,6 +226,25 @@ _HAT_BUTTON_OFFSETS: dict[tuple[int, int], int] = {
 }
 
 
+# Translation from our semantic action names to the names content.js expects.
+_WEB_ACTION_NAMES: dict[str, str] = {
+    "dpad_up":        "up",
+    "dpad_down":      "down",
+    "dpad_left":      "left",
+    "dpad_right":     "right",
+    "accept":         "accept",
+    "cancel":         "cancel",
+    "context1":       "contextAction1",
+    "context2":       "contextAction2",
+    "left_shoulder":  "leftBumper",
+    "right_shoulder": "rightBumper",
+    "left_trigger":   "leftTrigger",
+    "right_trigger":  "rightTrigger",
+    "start":          "start",
+    "select":         "select",
+}
+
+
 def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
     """Generate a Web Gamepad API button/axis mapping from the stored config.
 
@@ -277,11 +296,13 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
         if not isinstance(code, int) or not isinstance(value, int):
             continue
 
+        web_name = _WEB_ACTION_NAMES.get(action_name, action_name)
+
         if ev_type == "button":
             # EV_KEY button → position in sorted button list
             if code in sorted_buttons:
                 web_idx = sorted_buttons.index(code)
-                buttons_out[web_idx] = action_name
+                buttons_out[web_idx] = web_name
 
         elif ev_type == "axis":
             if code in _ABS_HAT_CODES and code in hat_axes_present:
@@ -290,7 +311,7 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
                 offset = _HAT_BUTTON_OFFSETS.get((code, sign))
                 if offset is not None:
                     web_idx = n_regular_buttons + offset
-                    buttons_out[web_idx] = action_name
+                    buttons_out[web_idx] = web_name
                     dpad_buttons_out[web_idx] = True
             elif code in regular_axes:
                 # Trigger / stick axis → position in regular axes list
@@ -301,9 +322,9 @@ def build_web_gamepad_mapping(mapping: dict) -> Optional[dict]:
                     # Placeholder: [neg_action, pos_action]
                     axes_out[web_idx] = [None, None]
                 if sign == -1:
-                    axes_out[web_idx][0] = action_name
+                    axes_out[web_idx][0] = web_name
                 else:
-                    axes_out[web_idx][1] = action_name
+                    axes_out[web_idx][1] = web_name
 
     return {
         "buttons": buttons_out,

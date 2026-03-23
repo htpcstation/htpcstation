@@ -113,8 +113,8 @@ class TestBuildWebGamepadMapping:
         buttons = result["buttons"]
         assert buttons[0] == "cancel"    # BTN_SOUTH=304 → index 0
         assert buttons[1] == "accept"    # BTN_EAST=305 → index 1
-        assert buttons[4] == "left_shoulder"   # BTN_TL=310 → index 4
-        assert buttons[5] == "right_shoulder"  # BTN_TR=311 → index 5
+        assert buttons[4] == "leftBumper"      # BTN_TL=310 → index 4
+        assert buttons[5] == "rightBumper"     # BTN_TR=311 → index 5
         assert buttons[6] == "select"    # BTN_SELECT=314 → index 6
         assert buttons[7] == "start"     # BTN_START=315 → index 7
 
@@ -131,13 +131,13 @@ class TestBuildWebGamepadMapping:
         assert result is not None
         buttons = result["buttons"]
         # ABS_HAT0Y=-1 → up → offset 0 → index 8
-        assert buttons[8] == "dpad_up"
+        assert buttons[8] == "up"
         # ABS_HAT0Y=+1 → down → offset 1 → index 9
-        assert buttons[9] == "dpad_down"
+        assert buttons[9] == "down"
         # ABS_HAT0X=-1 → left → offset 2 → index 10
-        assert buttons[10] == "dpad_left"
+        assert buttons[10] == "left"
         # ABS_HAT0X=+1 → right → offset 3 → index 11
-        assert buttons[11] == "dpad_right"
+        assert buttons[11] == "right"
 
     def test_dpad_buttons_contains_hat_derived_indices(self) -> None:
         """dpadButtons dict contains all hat-derived button indices."""
@@ -175,9 +175,9 @@ class TestBuildWebGamepadMapping:
         # left_trigger → ABS_Z=2, value=1 (positive) → axis index 2, pos slot
         # right_trigger → ABS_RZ=5, value=1 (positive) → axis index 3, pos slot
         assert 2 in axes
-        assert axes[2][1] == "left_trigger"   # positive direction
+        assert axes[2][1] == "leftTrigger"    # positive direction
         assert 3 in axes
-        assert axes[3][1] == "right_trigger"  # positive direction
+        assert axes[3][1] == "rightTrigger"  # positive direction
 
     def test_result_has_required_keys(self) -> None:
         """Result dict always has buttons, axes, and dpadButtons keys."""
