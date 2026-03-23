@@ -126,6 +126,14 @@ def main() -> None:
     moonlight.processStarted.connect(_hide_window)
     moonlight.processFinished.connect(_show_window)
 
+    # Start+Select combo: kill the browser process (equivalent to Alt+F4).
+    # The browser extension can't close kiosk windows via window.close(),
+    # so we handle it at the evdev level by terminating the QProcess.
+    def _on_start_select_combo():
+        browser_launcher.kill()
+
+    gamepad_manager.startSelectCombo.connect(_on_start_select_combo)
+
     # When Moonlight host discovery completes, update the Steam source list
     # and inject recently played Moonlight data.
     def _on_moonlight_hosts_changed() -> None:

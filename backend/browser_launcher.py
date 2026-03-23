@@ -245,6 +245,35 @@ class BrowserLauncher(QObject):
 
         return dst
 
+    def kill(self) -> None:
+        """Terminate the browser process if it is running.
+
+        Flatpak wraps the browser in a subprocess, so killing the QProcess
+        (the ``flatpak run`` wrapper) may not stop the actual browser.
+        We use ``flatpak kill`` for Flatpak apps, falling back to process
+        group kill and then QProcess.kill().
+        """
+        if self._process is None or self._process.state() == QProcess.ProcessState.NotRunning:
+            return
+
+        logger.info("BrowserLauncher: killing browser")
+
+        # For Flatpak apps, use `flatpak kill <app_id>` which reliably
+        # terminates the sandboxed process and all its children.
+        tokens = self._browser_command.split()
+        if len(tokens) >= 3 and tokens[0] == "flatpak" and tokens[1] == "run":
+            app_id = tokens[2]
+            import subprocess
+            try:
+                subprocess.run(["flatpak", "kill", app_id], timeout=5)
+                logger.info("BrowserLauncher: flatpak kill %s succeeded", app_id)
+                return
+            except Exception as exc:
+                logger.warning("BrowserLauncher: flatpak kill failed: %s", exc)
+
+        # Fallback for non-Flatpak browsers: kill the process
+        self._process.kill()
+
     def _on_started(self) -> None:
         """Handle QProcess.started — browser process is confirmed running."""
         if self._process is not None:

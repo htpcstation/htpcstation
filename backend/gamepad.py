@@ -88,6 +88,10 @@ class _DeviceHandler(QObject):
         # Trigger state: axis code → currently pressed
         self._trigger_pressed: dict[int, bool] = {}
 
+        # Combo detection: track which Qt keys are currently held
+        self._buttons_held: set[Qt.Key] = set()
+        self._combo_fired: bool = False
+
         # Axis info cache: axis code → (min, max)
         self._axis_info: dict[int, tuple[int, int]] = {}
         self._cache_axis_info()
@@ -155,6 +159,28 @@ class _DeviceHandler(QObject):
         qt_key = self._evdev_lookup.get((ecodes.EV_KEY, code, 1))  # type: ignore[union-attr]
         if qt_key is None:
             return
+
+        # Track pressed state for combo detection
+        if value == 1:
+            self._buttons_held.add(qt_key)
+        elif value == 0:
+            self._buttons_held.discard(qt_key)
+
+        # Start+Select combo detection
+        if (Qt.Key.Key_F10 in self._buttons_held
+                and Qt.Key.Key_F9 in self._buttons_held):
+            if not self._combo_fired:
+                self._combo_fired = True
+                self._manager.startSelectCombo.emit()
+            return  # suppress individual button actions while combo is active
+
+        if self._combo_fired:
+            # Reset combo once both are released
+            if (Qt.Key.Key_F10 not in self._buttons_held
+                    and Qt.Key.Key_F9 not in self._buttons_held):
+                self._combo_fired = False
+            return  # suppress until both released
+
         if value == 1:
             self._press_key(qt_key)
         elif value == 0:
@@ -393,6 +419,9 @@ class _DeviceHandler(QObject):
         self._dpad_axis_key.clear()
         # Clear trigger state
         self._trigger_pressed.clear()
+        # Clear combo state
+        self._buttons_held.clear()
+        self._combo_fired = False
 
     def _cleanup(self) -> None:
         """Release all held keys, stop all timers, and close the device."""
@@ -426,6 +455,10 @@ class GamepadManager(QObject):
     # Emitted in raw mode: (event_type_str, code, value)
     # event_type_str is "button" or "axis"
     rawInput = Signal(str, int, int)
+
+    # Emitted when Start+Select are pressed simultaneously.
+    # Connected in main.py to kill the browser process.
+    startSelectCombo = Signal()
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
