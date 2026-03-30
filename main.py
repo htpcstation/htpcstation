@@ -5,51 +5,46 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Suppress harmless multimedia console noise from FFmpeg, VAAPI, and PulseAudio.
-# These messages are written directly to file descriptor 2 (stderr) by C
-# libraries, bypassing Python's sys.stderr.  Environment variables don't
-# reliably suppress them.  We redirect fd 2 to a pipe and filter it in a
-# background thread, forwarding only lines that don't match known noise.
+# Stderr filter is disabled for debugging.  To re-enable, uncomment the
+# _start_stderr_filter() call below.
 os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
 
-import re
-import threading
-
-_STDERR_NOISE = re.compile(
-    r"No sample format supported|"
-    r"Input #\d|"
-    r"^\s*Metadata:|"
-    r"^\s*major_brand|^\s*minor_version|^\s*compatible_brands|^\s*encoder\s|"
-    r"^\s*Duration:|"
-    r"^\s*Stream #|"
-    r"^\s*handler_name|^\s*vendor_id|"
-    r"\[h264 @|"
-    r"qt\.multimedia|"
-    r"No gamepads found|"
-    r"Failed setup for format vaapi"
-)
-
-def _start_stderr_filter():
-    """Redirect fd 2 to a pipe; filter out noisy C library messages."""
-    real_stderr_fd = os.dup(2)           # save the real stderr fd
-    read_fd, write_fd = os.pipe()
-    os.dup2(write_fd, 2)                 # redirect fd 2 to our pipe
-    os.close(write_fd)                   # close the extra write end
-
-    # Python's sys.stderr should still write to the real terminal
-    sys.stderr = os.fdopen(real_stderr_fd, "w", closefd=False)
-
-    def _filter_thread():
-        with os.fdopen(read_fd, "r", errors="replace") as pipe:
-            for line in pipe:
-                if not _STDERR_NOISE.search(line):
-                    sys.__stderr__.write(line)
-                    sys.__stderr__.flush()
-
-    t = threading.Thread(target=_filter_thread, daemon=True)
-    t.start()
-
-_start_stderr_filter()
+# import re
+# import threading
+#
+# _STDERR_NOISE = re.compile(
+#     r"No sample format supported|"
+#     r"Input #\d|"
+#     r"^\s*Metadata:|"
+#     r"^\s*major_brand|^\s*minor_version|^\s*compatible_brands|^\s*encoder\s|"
+#     r"^\s*Duration:|"
+#     r"^\s*Stream #|"
+#     r"^\s*handler_name|^\s*vendor_id|"
+#     r"\[h264 @|"
+#     r"qt\.multimedia|"
+#     r"No gamepads found|"
+#     r"Failed setup for format vaapi"
+# )
+#
+# def _start_stderr_filter():
+#     """Redirect fd 2 to a pipe; filter out noisy C library messages."""
+#     real_stderr_fd = os.dup(2)
+#     read_fd, write_fd = os.pipe()
+#     os.dup2(write_fd, 2)
+#     os.close(write_fd)
+#     sys.stderr = os.fdopen(real_stderr_fd, "w", closefd=False)
+#
+#     def _filter_thread():
+#         with os.fdopen(read_fd, "r", errors="replace") as pipe:
+#             for line in pipe:
+#                 if not _STDERR_NOISE.search(line):
+#                     sys.__stderr__.write(line)
+#                     sys.__stderr__.flush()
+#
+#     t = threading.Thread(target=_filter_thread, daemon=True)
+#     t.start()
+#
+# _start_stderr_filter()
 
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QKeyEvent

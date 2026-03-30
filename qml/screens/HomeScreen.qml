@@ -47,10 +47,25 @@ FocusScope {
     property var tabNames:   _buildTabNames()
     property var tabSources: _buildTabSources()
 
-    on_ShowRetroChanged:  { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
-    on_ShowPcChanged:     { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
-    on_ShowWatchChanged:  { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
-    on_ShowListenChanged: { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
+    // Defer tab rebuild to avoid cascading property changes during toggle.
+    // Qt.callLater ensures all property updates settle before we rebuild.
+    on_ShowRetroChanged:  Qt.callLater(_rebuildTabs)
+    on_ShowPcChanged:     Qt.callLater(_rebuildTabs)
+    on_ShowWatchChanged:  Qt.callLater(_rebuildTabs)
+    on_ShowListenChanged: Qt.callLater(_rebuildTabs)
+
+    function _rebuildTabs() {
+        var oldSource = tabSources[currentTab] || ""
+        tabNames = _buildTabNames()
+        tabSources = _buildTabSources()
+        // Try to stay on the same screen after rebuild
+        var newIndex = tabSources.indexOf(oldSource)
+        if (newIndex >= 0) {
+            currentTab = newIndex
+        } else {
+            _clampTab()
+        }
+    }
 
     function _clampTab() {
         if (currentTab >= tabNames.length) currentTab = tabNames.length - 1
@@ -369,7 +384,9 @@ FocusScope {
             width: parent.width
             height: parent.height
             asynchronous: false
-            source: homeScreen.tabSources[homeScreen.currentTab]
+            source: homeScreen.currentTab < homeScreen.tabSources.length
+                ? homeScreen.tabSources[homeScreen.currentTab]
+                : ""
 
             // When the loaded item changes, wire up its back() signal and
             // give focus to the new content if LB/RB was pressed from content.
@@ -403,7 +420,8 @@ FocusScope {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function returnFocusToTabBar() {
-        tabRepeater.itemAt(homeScreen.currentTab).forceActiveFocus()
+        var item = tabRepeater.itemAt(homeScreen.currentTab)
+        if (item) item.forceActiveFocus()
     }
 
     // On startup, give focus to the first tab.
