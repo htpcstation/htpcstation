@@ -24,10 +24,10 @@ import pytest
 from backend.moonlight_models import MoonlightApp, MoonlightHost
 from tests.local_overrides import get_override
 
-HOST_NAME = get_override("moonlight_hostname", "***REMOVED***")
-LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+HOST_NAME = get_override("moonlight_hostname", "DESKTOP-HTPC")
+LOCAL_IP = get_override("moonlight_local_ip", "192.168.50.5")
 MANUAL_IP = get_override("moonlight_manual_ip", "10.0.0.1")
-PUBLIC_REMOTE_IP = get_override("moonlight_public_remote_ip", "***REMOVED***")
+PUBLIC_REMOTE_IP = get_override("moonlight_public_remote_ip", "203.0.113.10")
 REALISTIC_UUID = get_override("moonlight_realistic_uuid", "12345678-9ABC-DEF0-1234-56789ABCDEF0")
 
 

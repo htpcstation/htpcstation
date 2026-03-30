@@ -186,7 +186,7 @@ def _resolve_artwork(steamapps_path: Path, app_id: str) -> str:
         return str(scraped_path)
 
     # 3. Check Steam's own local cache and copy to scraped cache
-    steam_root = steamapps_path.parent  # e.g. ***REMOVED***.local/share/Steam/
+    steam_root = steamapps_path.parent  # e.g. ~/.local/share/Steam/
     steam_cache_dir = steam_root / "appcache" / "librarycache" / app_id
     for filename in ("library_600x900.jpg", "header.jpg"):
         candidate = steam_cache_dir / filename

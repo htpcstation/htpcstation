@@ -6,14 +6,14 @@ ignored by git while the default repository values remain sanitized.
 Usage:
     from tests.local_overrides import get_override
 
-    HOST = get_override("moonlight_hostname", "***REMOVED***")
+    HOST = get_override("moonlight_hostname", "DESKTOP-HTPC")
 
 Create ``tests/local_overrides.json`` or ``tests/.local/test_overrides.json``
 with a JSON object mapping keys to values, e.g.::
 
     {
         "moonlight_hostname": "DESKTOP-MYPC",
-        "moonlight_local_ip": "***REMOVED***"
+        "moonlight_local_ip": "192.168.50.5"
     }
 
 Alternatively set ``HTPC_TEST_OVERRIDES=/path/to/file.json`` to point to a

@@ -94,8 +94,18 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 ```bash
 git clone https://github.com/htpcstation/htpcstation.git
 cd htpcstation
-pip install PySide6 evdev requests
+pip install -r requirements.txt
 ```
+
+### Checking Dependencies
+
+Before your first launch, you can verify that everything is in place:
+
+```bash
+bash scripts/check-deps.sh
+```
+
+This checks for Python 3.10+, required Python packages, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices.
 
 ### Running
 
@@ -104,6 +114,30 @@ python3 main.py
 ```
 
 The app launches fullscreen. All configuration is done from the Settings tab inside the app.
+
+### Running Tests
+
+```bash
+python3 -m pytest tests/ -q
+```
+
+The suite currently covers 1,069 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+
+1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
+2. Replace the sample data with your real values.
+3. Optional: set `HTPC_TEST_OVERRIDES=/full/path/to/file.json` to store it elsewhere.
+
+```json
+{
+  "moonlight_hostname": "DESKTOP-MYPC",
+  "moonlight_local_ip": "192.168.0.5",
+  "moonlight_manual_ip": "10.0.0.5",
+  "moonlight_public_remote_ip": "203.0.113.10",
+  "plex_server_url": "http://192.168.0.5:32400"
+}
+```
+
+The tests automatically load these overrides via `tests/local_overrides.py`, so your personal network details stay local while the public repository keeps sanitized defaults.
 
 ---
 
@@ -126,8 +160,8 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 **Controller mapping:** Go to Settings, then Controller, then Map Controller to remap your gamepad. The dialog walks you through each button one at a time.
 
 **Custom artwork:** You can add your own poster images for Moonlight apps or Steam games:
-- Moonlight: drop images into `***REMOVED***.config/htpcstation/moonlight/artwork_custom/` named after the app (e.g., `desktop.jpg`, `steam-big-picture.png`).
-- Steam: drop images into `***REMOVED***.config/htpcstation/steam/artwork_custom/` named after the Steam app ID (e.g., `440.jpg` for Team Fortress 2).
+- Moonlight: drop images into `~/.config/htpcstation/moonlight/artwork_custom/` named after the app (e.g., `desktop.jpg`, `steam-big-picture.png`).
+- Steam: drop images into `~/.config/htpcstation/steam/artwork_custom/` named after the Steam app ID (e.g., `440.jpg` for Team Fortress 2).
 
 Custom images always override auto-downloaded artwork.
 
@@ -191,10 +225,22 @@ For those interested in what's under the hood:
 | Music playback | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Gamepad input | evdev with synthetic Qt key events |
 | Browser gamepad | Chromium extension (Manifest V3) with Gamepad API |
-| Configuration | JSON (`***REMOVED***.config/htpcstation/config.json`) |
+| Configuration | JSON (`~/.config/htpcstation/config.json`) |
 
 ---
 
 ## Credits and Acknowledgments
 
 HTPC Station was developed with the assistance of AI coding agents, coordinated through OpenCode. It builds on the work of many excellent open-source projects: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, Brave, Pegasus, and ES-DE. Thank you to all the developers and communities behind these tools.
+
+---
+
+## Bug Reports
+
+Report bugs via [GitHub Issues](https://github.com/htpcstation/htpcstation/issues).
+
+---
+
+## License
+
+HTPC Station is released under the [MIT License](LICENSE).

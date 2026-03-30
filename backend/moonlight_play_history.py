@@ -2,7 +2,7 @@
 
 Records and reads timestamps for when Moonlight apps are launched.
 
-History file: ***REMOVED***.config/htpcstation/moonlight/play_history.json
+History file: ~/.config/htpcstation/moonlight/play_history.json
 
 Format::
 

@@ -25,7 +25,7 @@ import pytest
 from backend.config import Config
 from tests.local_overrides import get_override
 
-LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+LOCAL_IP = get_override("moonlight_local_ip", "192.168.50.5")
 PLEX_SERVER_URL = get_override("plex_server_url", f"http://{LOCAL_IP}:32400")
 
 # ---------------------------------------------------------------------------

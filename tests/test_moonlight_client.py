@@ -27,7 +27,7 @@ from PySide6.QtCore import QProcess
 from backend.moonlight_client import MoonlightLauncher, list_apps
 from tests.local_overrides import get_override
 
-LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+LOCAL_IP = get_override("moonlight_local_ip", "192.168.50.5")
 ALT_IP = get_override("moonlight_alt_ip", "10.0.0.1")
 
 

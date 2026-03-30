@@ -15,7 +15,7 @@ def get_steam_dir() -> Path:
 
     Directory layout::
 
-        ***REMOVED***.config/htpcstation/steam/
+        ~/.config/htpcstation/steam/
         ├── artwork_scraped/   # auto-downloaded artwork files
         └── artwork_custom/    # user-provided artwork overrides
 

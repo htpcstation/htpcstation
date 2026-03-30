@@ -21,7 +21,7 @@ _DOWNLOAD_TIMEOUT = 15  # seconds
 class PosterCache:
     """Downloads and caches Plex poster images locally.
 
-    Cache directory: ***REMOVED***.config/htpcstation/poster_cache/
+    Cache directory: ~/.config/htpcstation/poster_cache/
     Filenames: SHA256 hash of the thumb_path + '.jpg'
 
     Thread-safe: a per-path lock prevents duplicate downloads when multiple

@@ -1,8 +1,8 @@
 """Gamelist XML reader/writer for Steam and Moonlight metadata.
 
 Reads and writes EmulationStation-format gamelist.xml files stored at:
-  - ***REMOVED***.config/htpcstation/steam/gamelist.xml
-  - ***REMOVED***.config/htpcstation/moonlight/gamelist.xml
+  - ~/.config/htpcstation/steam/gamelist.xml
+  - ~/.config/htpcstation/moonlight/gamelist.xml
 
 These files are the single source of truth for rich metadata (description,
 developer, publisher, genre, players, release date, rating).  User edits are

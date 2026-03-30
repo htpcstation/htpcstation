@@ -5,7 +5,7 @@ Resolves artwork for Moonlight games by:
 2. Falling back to Steam CDN posters by searching the Steam Store API
 3. Downloading and caching the poster image locally for offline reuse
 
-Cache directory: ***REMOVED***.config/htpcstation/moonlight/
+Cache directory: ~/.config/htpcstation/moonlight/
   artwork_scraped/  — auto-downloaded files
   artwork_custom/   — user-provided overrides
 Metadata index:  artwork_index.json

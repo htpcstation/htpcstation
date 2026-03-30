@@ -15,7 +15,7 @@ def get_moonlight_dir() -> Path:
 
     Directory layout::
 
-        ***REMOVED***.config/htpcstation/moonlight/
+        ~/.config/htpcstation/moonlight/
         ├── artwork_scraped/   # auto-downloaded artwork files
         ├── artwork_custom/    # user-provided artwork overrides
         ├── artwork_index.json # artwork metadata index

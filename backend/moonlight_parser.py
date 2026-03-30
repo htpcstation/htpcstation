@@ -89,7 +89,7 @@ def discover_moonlight_hosts(
 
     Args:
         config_path: Path to ``Moonlight.conf``.  Defaults to the standard
-            Flatpak location under ``***REMOVED***.var/app/``.
+            Flatpak location under ``~/.var/app/``.
 
     Returns:
         A list of :class:`MoonlightHost` objects, one per paired host.

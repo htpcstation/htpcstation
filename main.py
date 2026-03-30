@@ -67,7 +67,7 @@ ASSETS_DIR = Path(__file__).parent / "assets"
 
 
 def main() -> None:
-    config = Config()  # loads/creates ***REMOVED***.config/htpcstation/config.json
+    config = Config()  # loads/creates ~/.config/htpcstation/config.json
 
     app = QGuiApplication(sys.argv)
     app.setApplicationName("htpcstation")

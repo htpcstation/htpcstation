@@ -1,6 +1,6 @@
 """Configuration management for HTPC Station.
 
-Loads and saves a JSON config file at ***REMOVED***.config/htpcstation/config.json.
+Loads and saves a JSON config file at ~/.config/htpcstation/config.json.
 Ships built-in defaults for ~20 common retro systems.
 """
 
@@ -17,7 +17,7 @@ CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / 
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 _DEFAULT_RETROARCH_COMMAND = "flatpak run org.libretro.RetroArch"
-_DEFAULT_CORES_DIRECTORY = "***REMOVED***.var/app/org.libretro.RetroArch/config/retroarch/cores"
+_DEFAULT_CORES_DIRECTORY = "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
 _DEFAULT_BROWSER_COMMAND = "flatpak run com.brave.Browser"
 _DEFAULT_MOONLIGHT_COMMAND = "flatpak run com.moonlight_stream.Moonlight"
 
@@ -57,7 +57,7 @@ class SystemConfig:
 class Config:
     """Application configuration.
 
-    Loads ``***REMOVED***.config/htpcstation/config.json`` on construction.
+    Loads ``~/.config/htpcstation/config.json`` on construction.
     If the file does not exist it is created with defaults.
     If the file is malformed a warning is logged and defaults are used.
     """

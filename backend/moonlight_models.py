@@ -12,7 +12,7 @@ from dataclasses import dataclass
 class MoonlightHost:
     """Represents a single paired Moonlight host (PC running GameStream/Sunshine)."""
 
-    name: str           # Hostname reported by the host, e.g. "***REMOVED***"
+    name: str           # Hostname reported by the host, e.g. "DESKTOP-HTPC"
     uuid: str           # Unique host identifier
     address: str        # Primary connection address (IP or hostname)
     local_address: str  # LAN address

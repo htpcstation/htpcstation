@@ -196,7 +196,7 @@ class BrowserLauncher(QObject):
 
         The Brave flatpak sandbox cannot read arbitrary paths under the home
         directory, so the extension must be deployed to a path the sandbox can
-        access (``***REMOVED***.var/app/com.brave.Browser/``).
+        access (``~/.var/app/com.brave.Browser/``).
 
         Returns the deployed path on success, or ``None`` if the copy failed
         (e.g. the source directory does not exist).  When ``None`` is returned

@@ -1,0 +1,9 @@
+{
+  "moonlight_hostname": "DESKTOP-MYPC",
+  "moonlight_local_ip": "192.168.0.5",
+  "moonlight_manual_ip": "10.0.0.5",
+  "moonlight_public_remote_ip": "203.0.113.10",
+  "moonlight_alt_ip": "10.0.0.1",
+  "moonlight_realistic_uuid": "12345678-9ABC-DEF0-1234-56789ABCDEF0",
+  "plex_server_url": "http://192.168.0.5:32400"
+}

@@ -30,6 +30,9 @@ node_modules/
 *.log
 *.DS_Store
 
+# Internal development documents
+resume-project.md
+
 # Test overrides (developer-specific)
 tests/local_overrides.json
 tests/.local/
