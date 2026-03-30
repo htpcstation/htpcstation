@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import ".."
 import "../components"
 
@@ -58,6 +59,53 @@ FocusScope {
     // Album detail data and track list (populated when entering album view).
     property var _albumData: ({})
     property var _tracks: []
+
+    // ── Playback state ────────────────────────────────────────────────────────
+    // Index into _tracks of the currently playing track (-1 = not playing).
+    property int _playingIndex: -1
+    // ratingKey of the album currently being played.
+    property string _playingAlbumKey: ""
+
+    // ── Audio player ──────────────────────────────────────────────────────────
+    MediaPlayer {
+        id: musicPlayer
+        audioOutput: AudioOutput { id: audioOut; volume: 1.0 }
+
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.EndOfMedia) {
+                listenScreen._playNext()
+            }
+        }
+    }
+
+    // ── Playback functions ────────────────────────────────────────────────────
+    function _playAlbum(startIndex) {
+        if (_tracks.length === 0) return
+        _playingAlbumKey = _selectedAlbumKey
+        _playTrackAtIndex(startIndex)
+    }
+
+    function _playTrackAtIndex(idx) {
+        if (idx < 0 || idx >= _tracks.length) {
+            // End of album
+            _playingIndex = -1
+            musicPlayer.stop()
+            return
+        }
+        _playingIndex = idx
+        var track = _tracks[idx]
+        var url = plex.getTrackStreamUrl(track.mediaKey)
+        musicPlayer.source = url
+        musicPlayer.play()
+    }
+
+    function _playNext() {
+        if (_playingIndex >= 0 && _playingIndex < _tracks.length - 1) {
+            _playTrackAtIndex(_playingIndex + 1)
+        } else {
+            _playingIndex = -1
+        }
+    }
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
@@ -136,7 +184,7 @@ FocusScope {
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
         } else if (currentView === "album") {
-            trackList.forceActiveFocus()
+            playAllArea.forceActiveFocus()
         }
     }
 
@@ -156,6 +204,13 @@ FocusScope {
     }
 
     onCurrentViewChanged: {
+        // Stop playback when leaving the album view (no background playback for v1)
+        if (currentView !== "album") {
+            musicPlayer.stop()
+            _playingIndex = -1
+            _playingAlbumKey = ""
+        }
+
         if (currentView === "detail" && _selectedArtistKey) {
             _artistData = plex.getArtist(_selectedArtistKey)
             _albums = plex.getArtistAlbums(_selectedArtistKey)
@@ -461,12 +516,84 @@ FocusScope {
             }
         }
 
+        // ── Play All button area (focusable) ─────────────────────────────────
+        FocusScope {
+            id: playAllArea
+
+            anchors {
+                top: albumDetailHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(52)
+
+            // Subtle focus highlight behind the button row
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorPrimary
+                opacity: playAllArea.activeFocus ? 0.08 : 0.0
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+
+            Row {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                spacing: root.vpx(8)
+                height: root.vpx(36)
+
+                // ── Play All button ──────────────────────────────────────────
+                Rectangle {
+                    width: playAllText.implicitWidth + root.vpx(24)
+                    height: parent.height
+                    color: Theme.colorPrimary
+                    radius: root.vpx(Theme.focusRingRadius)
+                    opacity: playAllArea.activeFocus ? 1.0 : 0.85
+
+                    Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+
+                    Text {
+                        id: playAllText
+                        anchors.centerIn: parent
+                        text: "▶  Play All"
+                        color: Theme.colorBackground
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        font.bold: true
+                    }
+                }
+
+                // Space for future "Shuffle All" button
+            }
+
+            // Focus ring around the Play All area
+            FocusRing {
+                visible: playAllArea.activeFocus
+            }
+
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    listenScreen._playAlbum(0)
+                } else if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    trackList.forceActiveFocus()
+                    trackList.currentIndex = 0
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    listenScreen.currentView = "detail"
+                }
+            }
+        }
+
         // ── Track list with album info header ────────────────────────────────
         ListView {
             id: trackList
 
             anchors {
-                top: albumDetailHeaderBar.bottom
+                top: playAllArea.bottom
                 left: parent.left
                 right: parent.right
                 bottom: parent.bottom
@@ -488,12 +615,13 @@ FocusScope {
                     event.accepted = true
                     if (trackList.currentIndex > 0) {
                         trackList.currentIndex--
+                    } else {
+                        // At first track — return focus to Play All button
+                        playAllArea.forceActiveFocus()
                     }
                 } else if (keys.isAccept(event)) {
                     event.accepted = true
-                    // Store selected track ratingKey (playback is next task)
-                    var track = listenScreen._tracks[trackList.currentIndex]
-                    // No-op for now — playback in next task
+                    listenScreen._playAlbum(trackList.currentIndex)
                 } else if (keys.isCancel(event)) {
                     event.accepted = true
                     listenScreen.currentView = "detail"
@@ -708,6 +836,10 @@ FocusScope {
             delegate: Item {
                 id: trackDelegate
 
+                // True when this track is the one currently playing
+                readonly property bool isPlaying: listenScreen._playingAlbumKey === listenScreen._selectedAlbumKey
+                                                  && listenScreen._playingIndex === index
+
                 width: trackList.width
                 height: root.vpx(48)
 
@@ -733,10 +865,10 @@ FocusScope {
                     }
                     spacing: root.vpx(8)
 
-                    // Track number (right-aligned, dim)
+                    // Track number or now-playing indicator
                     Text {
-                        text: modelData.index > 0 ? "" + modelData.index : "" + (index + 1)
-                        color: Theme.colorTextDim
+                        text: trackDelegate.isPlaying ? "▶" : (modelData.index > 0 ? "" + modelData.index : "" + (index + 1))
+                        color: trackDelegate.isPlaying ? Theme.colorPrimary : Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeBody)
                         width: root.vpx(32)
@@ -746,9 +878,9 @@ FocusScope {
                     // Track title
                     Text {
                         text: modelData.title || ""
-                        color: trackDelegate.ListView.isCurrentItem
-                            ? Theme.colorText
-                            : Theme.colorTextDim
+                        color: trackDelegate.isPlaying
+                            ? Theme.colorPrimary
+                            : (trackDelegate.ListView.isCurrentItem ? Theme.colorText : Theme.colorTextDim)
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeBody)
                         elide: Text.ElideRight
@@ -776,6 +908,11 @@ FocusScope {
                     onClicked: {
                         trackList.currentIndex = index
                         trackList.forceActiveFocus()
+                    }
+                    onDoubleClicked: {
+                        trackList.currentIndex = index
+                        trackList.forceActiveFocus()
+                        listenScreen._playAlbum(index)
                     }
                 }
             }
