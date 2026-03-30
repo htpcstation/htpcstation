@@ -267,35 +267,37 @@ FocusScope {
                 Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
             }
 
-            Text {
+            Row {
                 anchors {
                     left: parent.left
                     leftMargin: root.vpx(16)
+                    right: parent.right
+                    rightMargin: root.vpx(16)
                     verticalCenter: parent.verticalCenter
                 }
-                text: modelData.label
-                color: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
-                    ? Theme.colorText : Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                font.bold: menuDelegate.ListView.isCurrentItem
-            }
+                spacing: root.vpx(12)
 
-            // Now Playing subtitle — show current track
-            Text {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    top: parent.verticalCenter
-                    topMargin: root.vpx(2)
+                Text {
+                    id: menuLabel
+                    text: modelData.label
+                    color: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
+                        ? Theme.colorText : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    font.bold: menuDelegate.ListView.isCurrentItem
                 }
-                visible: modelData.action === "nowplaying" && homeScreen.nowPlayingTrack !== ""
-                text: "♫ " + homeScreen.nowPlayingTrack
-                color: Theme.colorPrimary
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                elide: Text.ElideRight
-                width: parent.width - root.vpx(32)
+
+                // Now Playing — show current track to the right
+                Text {
+                    visible: modelData.action === "nowplaying" && homeScreen.nowPlayingTrack !== ""
+                    text: "♫ " + homeScreen.nowPlayingTrack
+                    color: Theme.colorPrimary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    elide: Text.ElideRight
+                    width: Math.min(implicitWidth, parent.width - menuLabel.width - parent.spacing)
+                    anchors.verticalCenter: parent.verticalCenter
+                }
             }
 
             // Focus ring
