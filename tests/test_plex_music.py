@@ -1253,3 +1253,245 @@ class TestGetArtistAlbums:
         assert len(result) == 1
         assert result[0]["type"] == "header"
         assert result[0]["title"] == "Albums"
+
+
+# ---------------------------------------------------------------------------
+# Artist list cache — Task 007
+# ---------------------------------------------------------------------------
+
+
+def _make_artists(n: int = 2) -> list:
+    """Return a list of n PlexArtist objects for testing."""
+    return [
+        PlexArtist(
+            rating_key=str(i),
+            title=f"Artist {i}",
+            summary=f"Summary {i}",
+            thumb_path=f"/thumb/{i}",
+            genre="Rock",
+            poster_local=f"file:///cache/{i}.jpg",
+        )
+        for i in range(n)
+    ]
+
+
+class TestSaveArtistsCache:
+    def test_writes_valid_json_with_correct_fields(self, tmp_path) -> None:
+        """_save_artists_cache writes a JSON file with all expected fields."""
+        import json as _json
+
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            artists = _make_artists(2)
+            lib._save_artists_cache(artists)
+
+            cache_path = tmp_path / ".config" / "htpcstation" / "poster_cache" / "artists_cache_3.json"
+            assert cache_path.exists()
+
+            data = _json.loads(cache_path.read_text(encoding="utf-8"))
+            assert len(data) == 2
+            assert data[0]["rating_key"] == "0"
+            assert data[0]["title"] == "Artist 0"
+            assert data[0]["summary"] == "Summary 0"
+            assert data[0]["thumb_path"] == "/thumb/0"
+            assert data[0]["genre"] == "Rock"
+            assert data[0]["poster_local"] == "file:///cache/0.jpg"
+
+    def test_writes_empty_list_for_no_artists(self, tmp_path) -> None:
+        """_save_artists_cache writes an empty JSON array when given no artists."""
+        import json as _json
+
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            lib._save_artists_cache([])
+
+            cache_path = tmp_path / ".config" / "htpcstation" / "poster_cache" / "artists_cache_3.json"
+            data = _json.loads(cache_path.read_text(encoding="utf-8"))
+            assert data == []
+
+    def test_does_not_raise_on_write_error(self, tmp_path) -> None:
+        """_save_artists_cache silently swallows write errors."""
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        # Point to a path that cannot be written (parent is a file, not a dir)
+        blocker = tmp_path / ".config"
+        blocker.write_text("not a dir")
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            # Should not raise
+            lib._save_artists_cache(_make_artists(1))
+
+
+class TestLoadArtistsCache:
+    def test_returns_plex_artist_list_from_valid_cache(self, tmp_path) -> None:
+        """_load_artists_cache deserializes a valid JSON file into PlexArtist objects."""
+        import json as _json
+
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        cache_dir = tmp_path / ".config" / "htpcstation" / "poster_cache"
+        cache_dir.mkdir(parents=True)
+        cache_path = cache_dir / "artists_cache_3.json"
+        cache_path.write_text(
+            _json.dumps([
+                {
+                    "rating_key": "42",
+                    "title": "The Beatles",
+                    "summary": "Legendary.",
+                    "thumb_path": "/thumb/42",
+                    "genre": "Rock",
+                    "poster_local": "file:///cache/42.jpg",
+                }
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            result = lib._load_artists_cache()
+
+        assert result is not None
+        assert len(result) == 1
+        artist = result[0]
+        assert isinstance(artist, PlexArtist)
+        assert artist.rating_key == "42"
+        assert artist.title == "The Beatles"
+        assert artist.summary == "Legendary."
+        assert artist.thumb_path == "/thumb/42"
+        assert artist.genre == "Rock"
+        assert artist.poster_local == "file:///cache/42.jpg"
+
+    def test_returns_none_for_missing_file(self, tmp_path) -> None:
+        """_load_artists_cache returns None when the cache file does not exist."""
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            result = lib._load_artists_cache()
+
+        assert result is None
+
+    def test_returns_none_for_corrupt_json(self, tmp_path) -> None:
+        """_load_artists_cache returns None when the cache file contains invalid JSON."""
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        cache_dir = tmp_path / ".config" / "htpcstation" / "poster_cache"
+        cache_dir.mkdir(parents=True)
+        cache_path = cache_dir / "artists_cache_3.json"
+        cache_path.write_text("not valid json {{{{", encoding="utf-8")
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            result = lib._load_artists_cache()
+
+        assert result is None
+
+    def test_missing_fields_use_defaults(self, tmp_path) -> None:
+        """_load_artists_cache uses empty-string defaults for missing JSON fields."""
+        import json as _json
+
+        lib = _make_lib()
+        lib._current_section_key = "3"
+
+        cache_dir = tmp_path / ".config" / "htpcstation" / "poster_cache"
+        cache_dir.mkdir(parents=True)
+        cache_path = cache_dir / "artists_cache_3.json"
+        # Only rating_key and title present
+        cache_path.write_text(
+            _json.dumps([{"rating_key": "1", "title": "Minimal"}]),
+            encoding="utf-8",
+        )
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            result = lib._load_artists_cache()
+
+        assert result is not None
+        assert len(result) == 1
+        artist = result[0]
+        assert artist.rating_key == "1"
+        assert artist.title == "Minimal"
+        assert artist.summary == ""
+        assert artist.thumb_path == ""
+        assert artist.genre == ""
+        assert artist.poster_local == ""
+
+
+class TestWorkerLoadSectionArtistCache:
+    """Tests for the cache-aware _worker_load_section behaviour for artist sections."""
+
+    def _make_lib_with_section(self, section_key: str = "3"):
+        lib = _make_lib()
+        lib._current_section_key = section_key
+        # Inject a real music library entry so selectLibrary can find it
+        lib._libraries_model._items = [
+            {"key": section_key, "title": "Music", "type": "artist"},
+        ]
+        return lib
+
+    def _fake_api_artists(self):
+        return [
+            {
+                "ratingKey": "10",
+                "title": "Fresh Artist",
+                "summary": "",
+                "thumb": "",
+                "Genre": [],
+            }
+        ]
+
+    def test_emits_artistsReady_twice_when_cache_exists(self, tmp_path) -> None:
+        """When a cache file exists, _artistsReady is emitted once from cache and once from API."""
+        import json as _json
+
+        lib = self._make_lib_with_section("3")
+
+        # Write a cache file
+        cache_dir = tmp_path / ".config" / "htpcstation" / "poster_cache"
+        cache_dir.mkdir(parents=True)
+        cache_path = cache_dir / "artists_cache_3.json"
+        cache_path.write_text(
+            _json.dumps([
+                {"rating_key": "99", "title": "Cached Artist", "summary": "",
+                 "thumb_path": "", "genre": "", "poster_local": ""},
+            ]),
+            encoding="utf-8",
+        )
+
+        # Mock the API to return one fresh artist
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = (self._fake_api_artists(), 1)
+        lib._client = mock_client
+
+        emitted: list[list] = []
+        lib._artistsReady.connect(lambda artists, total: emitted.append(list(artists)))
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            lib._worker_load_section(mock_client, "3", "artist")
+
+        assert len(emitted) == 2, f"Expected 2 emissions, got {len(emitted)}"
+        # First emission is from cache
+        assert emitted[0][0].title == "Cached Artist"
+        # Second emission is from API
+        assert emitted[1][0].title == "Fresh Artist"
+
+    def test_emits_artistsReady_once_when_no_cache(self, tmp_path) -> None:
+        """When no cache file exists, _artistsReady is emitted only once (from API)."""
+        lib = self._make_lib_with_section("3")
+
+        mock_client = MagicMock()
+        mock_client.get_library_items.return_value = (self._fake_api_artists(), 1)
+        lib._client = mock_client
+
+        emitted: list[list] = []
+        lib._artistsReady.connect(lambda artists, total: emitted.append(list(artists)))
+
+        with patch("backend.plex_library.Path.home", return_value=tmp_path):
+            lib._worker_load_section(mock_client, "3", "artist")
+
+        assert len(emitted) == 1, f"Expected 1 emission, got {len(emitted)}"
+        assert emitted[0][0].title == "Fresh Artist"

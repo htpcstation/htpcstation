@@ -7,6 +7,7 @@ Models are updated on the main thread only.
 
 from __future__ import annotations
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -1169,6 +1170,11 @@ class PlexLibrary(QObject):
     ) -> None:
         """Worker: load all items for a library section."""
         if section_type == "artist":
+            # Try loading from cache first for instant display
+            cached = self._load_artists_cache()
+            if cached:
+                self._artistsReady.emit(cached, len(cached))
+
             # Load all artists at once — most music libraries have <500 artists
             page_size = 9999
         else:
@@ -1313,6 +1319,9 @@ class PlexLibrary(QObject):
         self._artists_model.set_artists(artists)
         self.artistsModelChanged.emit()
 
+        # Save to cache for instant load on next launch
+        self._save_artists_cache(artists)
+
         # Kick off poster downloads for new items
         client = self._client
         if client is not None:
@@ -1370,6 +1379,56 @@ class PlexLibrary(QObject):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _artists_cache_path(self) -> Path:
+        """Return the path to the artist list cache file, scoped by section key."""
+        cache_dir = Path.home() / ".config" / "htpcstation" / "poster_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        section_key = self._current_section_key or "default"
+        return cache_dir / f"artists_cache_{section_key}.json"
+
+    def _save_artists_cache(self, artists: list) -> None:
+        """Serialize the artist list to a JSON cache file (called from worker thread)."""
+        try:
+            data = []
+            for a in artists:
+                data.append({
+                    "rating_key": a.rating_key,
+                    "title": a.title,
+                    "summary": a.summary,
+                    "thumb_path": a.thumb_path,
+                    "genre": a.genre,
+                    "poster_local": a.poster_local,
+                })
+            path = self._artists_cache_path()
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save artists cache", exc_info=True)
+
+    def _load_artists_cache(self) -> list | None:
+        """Load the artist list from the JSON cache file (called from worker thread).
+
+        Returns a list of PlexArtist objects, or None if the cache is missing or corrupt.
+        """
+        path = self._artists_cache_path()
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            artists = []
+            for item in data:
+                artists.append(PlexArtist(
+                    rating_key=item.get("rating_key", ""),
+                    title=item.get("title", ""),
+                    summary=item.get("summary", ""),
+                    thumb_path=item.get("thumb_path", ""),
+                    genre=item.get("genre", ""),
+                    poster_local=item.get("poster_local", ""),
+                ))
+            return artists
+        except Exception:
+            logger.warning("Failed to load artists cache", exc_info=True)
+            return None
 
     def _resolve_server_url(self) -> Optional[str]:
         """Resolve the server URL from plex.tv resources API.
