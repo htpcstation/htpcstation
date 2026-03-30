@@ -1,4 +1,5 @@
 import QtQuick
+import QtMultimedia
 import ".."
 import "../components"
 
@@ -40,12 +41,104 @@ FocusScope {
     // so onLoaded can give focus to the newly loaded content item.
     property bool _focusContentOnLoad: false
 
+    // ── Global music playback state ───────────────────────────────────────────
+    // Index into _playbackTracks of the currently playing track (-1 = not playing).
+    property int _playingIndex: -1
+    // ratingKey of the album currently being played.
+    property string _playingAlbumKey: ""
+    // Metadata of the currently playing track (for Now Playing display).
+    property var _nowPlayingTrack: ({})
+    // Full track list for the current album.
+    property var _playbackTracks: []
+    // Album metadata for Now Playing display.
+    property var _playbackAlbumData: ({})
+    // Track name shown in the persistent status bar indicator.
+    property string nowPlayingTrack: ""
+
+    // ── Global audio player ───────────────────────────────────────────────────
+    MediaPlayer {
+        id: musicPlayer
+        audioOutput: AudioOutput { id: audioOut; volume: 1.0 }
+
+        onMediaStatusChanged: {
+            if (mediaStatus === MediaPlayer.EndOfMedia) {
+                homeScreen._playNext()
+            }
+        }
+    }
+
+    // Expose playback state as properties so child screens (loaded via Loader)
+    // can bind to them without needing direct access to the musicPlayer id.
+    readonly property int musicPlaybackState: musicPlayer.playbackState
+    readonly property int musicPosition: musicPlayer.position
+    readonly property int musicDuration: musicPlayer.duration
+
+    // ── Global playback functions ─────────────────────────────────────────────
+    function _playAlbum(tracks, albumData, startIndex) {
+        if (!tracks || tracks.length === 0) return
+        _playbackTracks = tracks
+        _playbackAlbumData = albumData
+        _playingAlbumKey = albumData.ratingKey || ""
+        _playTrackAtIndex(startIndex)
+    }
+
+    function _playTrackAtIndex(idx) {
+        if (idx < 0 || idx >= _playbackTracks.length) {
+            // End of album
+            _playingIndex = -1
+            _nowPlayingTrack = {}
+            nowPlayingTrack = ""
+            musicPlayer.stop()
+            return
+        }
+        _playingIndex = idx
+        var track = _playbackTracks[idx]
+        _nowPlayingTrack = track
+        nowPlayingTrack = track.title || ""
+        var url = plex.getTrackStreamUrl(track.mediaKey)
+        musicPlayer.source = url
+        musicPlayer.play()
+    }
+
+    function _playNext() {
+        if (_playingIndex >= 0 && _playingIndex < _playbackTracks.length - 1) {
+            _playTrackAtIndex(_playingIndex + 1)
+        } else {
+            _playingIndex = -1
+            _nowPlayingTrack = {}
+            nowPlayingTrack = ""
+        }
+    }
+
+    function _togglePlayPause() {
+        if (musicPlayer.playbackState === MediaPlayer.PlayingState) {
+            musicPlayer.pause()
+        } else {
+            musicPlayer.play()
+        }
+    }
+
+    function _formatDuration(ms) {
+        if (!ms || ms <= 0) return "0:00"
+        var totalSec = Math.floor(ms / 1000)
+        var min = Math.floor(totalSec / 60)
+        var sec = totalSec % 60
+        return min + ":" + (sec < 10 ? "0" : "") + sec
+    }
+
     // Intercept LB/RB and Start at the HomeScreen level so they work even
     // when focus is inside the content area.
+    // Also intercept X button (isContext1) for global play/pause when music is loaded.
     Keys.onPressed: (event) => {
         if (keys.isMenu(event)) {
             event.accepted = true
             homeScreen.requestQuit()
+        } else if (keys.isContext1(event) && musicPlayer.playbackState !== MediaPlayer.StoppedState) {
+            // Global X button play/pause — only when music is actively playing or paused.
+            // When stopped (no music loaded or album ended), let the event pass through
+            // to child screens (e.g. Retro Games uses X for Favorite).
+            event.accepted = true
+            homeScreen._togglePlayPause()
         } else if (keys.isPrevTab(event)) {
             event.accepted = true
             if (currentTab > 0) {
@@ -188,6 +281,24 @@ FocusScope {
         }
         online: networkMonitor ? networkMonitor.online : true
         visible: settings ? settings.showNetworkIndicator : true
+    }
+
+    // ── Now Playing persistent indicator ─────────────────────────────────────
+    // Shows "♫ Track Name" in the top-right status bar when music is playing/paused.
+    Text {
+        id: nowPlayingIndicator
+        visible: homeScreen.nowPlayingTrack !== ""
+        text: "♫ " + homeScreen.nowPlayingTrack
+        color: Theme.colorTextDim
+        font.family: Theme.fontFamily
+        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        elide: Text.ElideRight
+        width: Math.min(implicitWidth, root.vpx(200))
+        anchors {
+            right: networkIndicator.left
+            rightMargin: root.vpx(12)
+            verticalCenter: tabBar.verticalCenter
+        }
     }
 
     // Thin separator line below the tab bar

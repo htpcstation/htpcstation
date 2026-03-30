@@ -1,14 +1,14 @@
 import QtQuick
-import QtMultimedia
 import ".."
 import "../components"
 
 // Listen section screen — Plex music library browser.
 //
-// Three views:
-//   "artists"  — grid of artists from the Plex music library
-//   "detail"   — artist detail view showing album list
-//   "album"    — album detail view showing track listing
+// Four views:
+//   "artists"    — grid of artists from the Plex music library
+//   "detail"     — artist detail view showing album list
+//   "album"      — album detail view showing track listing
+//   "nowplaying" — Now Playing view with album art, track info, and controls
 //
 // Focus flow:
 //   Enter ListenScreen → artistGrid gets focus (after library is selected)
@@ -18,6 +18,10 @@ import "../components"
 //   B (Escape)          — from "artists": emit back() to return to tab bar
 //                         from "detail":  return to "artists" view
 //                         from "album":   return to "detail" view
+//                         from "nowplaying": return to "album" view
+//
+// Playback is handled by HomeScreen's musicPlayer (background playback).
+// ListenScreen calls homeScreen._playAlbum() / homeScreen._togglePlayPause() etc.
 FocusScope {
     id: listenScreen
 
@@ -31,7 +35,7 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
-    // Current view: "artists", "detail", or "album"
+    // Current view: "artists", "detail", "album", or "nowplaying"
     property string currentView: "artists"
 
     // Section key of the music library (set on first load).
@@ -59,53 +63,6 @@ FocusScope {
     // Album detail data and track list (populated when entering album view).
     property var _albumData: ({})
     property var _tracks: []
-
-    // ── Playback state ────────────────────────────────────────────────────────
-    // Index into _tracks of the currently playing track (-1 = not playing).
-    property int _playingIndex: -1
-    // ratingKey of the album currently being played.
-    property string _playingAlbumKey: ""
-
-    // ── Audio player ──────────────────────────────────────────────────────────
-    MediaPlayer {
-        id: musicPlayer
-        audioOutput: AudioOutput { id: audioOut; volume: 1.0 }
-
-        onMediaStatusChanged: {
-            if (mediaStatus === MediaPlayer.EndOfMedia) {
-                listenScreen._playNext()
-            }
-        }
-    }
-
-    // ── Playback functions ────────────────────────────────────────────────────
-    function _playAlbum(startIndex) {
-        if (_tracks.length === 0) return
-        _playingAlbumKey = _selectedAlbumKey
-        _playTrackAtIndex(startIndex)
-    }
-
-    function _playTrackAtIndex(idx) {
-        if (idx < 0 || idx >= _tracks.length) {
-            // End of album
-            _playingIndex = -1
-            musicPlayer.stop()
-            return
-        }
-        _playingIndex = idx
-        var track = _tracks[idx]
-        var url = plex.getTrackStreamUrl(track.mediaKey)
-        musicPlayer.source = url
-        musicPlayer.play()
-    }
-
-    function _playNext() {
-        if (_playingIndex >= 0 && _playingIndex < _tracks.length - 1) {
-            _playTrackAtIndex(_playingIndex + 1)
-        } else {
-            _playingIndex = -1
-        }
-    }
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
@@ -188,6 +145,8 @@ FocusScope {
             trackList.forceActiveFocus()
             trackList.currentIndex = 0
             trackList.positionViewAtBeginning()
+        } else if (currentView === "nowplaying") {
+            nowPlayingView.forceActiveFocus()
         }
     }
 
@@ -207,13 +166,6 @@ FocusScope {
     }
 
     onCurrentViewChanged: {
-        // Stop playback when leaving the album view (no background playback for v1)
-        if (currentView !== "album") {
-            musicPlayer.stop()
-            _playingIndex = -1
-            _playingAlbumKey = ""
-        }
-
         if (currentView === "detail" && _selectedArtistKey) {
             _artistData = plex.getArtist(_selectedArtistKey)
             _albums = plex.getArtistAlbums(_selectedArtistKey)
@@ -545,7 +497,8 @@ FocusScope {
                     // Play All button is focused
                     if (keys.isAccept(event)) {
                         event.accepted = true
-                        listenScreen._playAlbum(0)
+                        homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
+                        listenScreen.currentView = "nowplaying"
                     } else if (event.key === Qt.Key_Down) {
                         event.accepted = true
                         trackList._playAllFocused = false
@@ -573,11 +526,15 @@ FocusScope {
                         }
                     } else if (keys.isAccept(event)) {
                         event.accepted = true
-                        listenScreen._playAlbum(trackList.currentIndex)
+                        homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, trackList.currentIndex)
+                        listenScreen.currentView = "nowplaying"
                     } else if (keys.isContext1(event)) {
                         // X button — Play All (from track 1)
+                        // Note: HomeScreen's global X handler will catch this if music is already playing.
+                        // If no music is loaded yet, start playback here.
                         event.accepted = true
-                        listenScreen._playAlbum(0)
+                        homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
+                        listenScreen.currentView = "nowplaying"
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
                         listenScreen.currentView = "detail"
@@ -809,7 +766,10 @@ FocusScope {
                                 id: playAllMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: listenScreen._playAlbum(0)
+                                onClicked: {
+                                    homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
+                                    listenScreen.currentView = "nowplaying"
+                                }
                             }
                         }
                     }
@@ -834,8 +794,8 @@ FocusScope {
                 id: trackDelegate
 
                 // True when this track is the one currently playing
-                readonly property bool isPlaying: listenScreen._playingAlbumKey === listenScreen._selectedAlbumKey
-                                                  && listenScreen._playingIndex === index
+                readonly property bool isPlaying: homeScreen._playingAlbumKey === listenScreen._selectedAlbumKey
+                                                  && homeScreen._playingIndex === index
 
                 width: trackList.width
                 height: root.vpx(48)
@@ -909,7 +869,8 @@ FocusScope {
                     onDoubleClicked: {
                         trackList.currentIndex = index
                         trackList.forceActiveFocus()
-                        listenScreen._playAlbum(index)
+                        homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, index)
+                        listenScreen.currentView = "nowplaying"
                     }
                 }
             }
@@ -934,6 +895,276 @@ FocusScope {
                       + keys.context1Label + "] Play All    ["
                       + keys.cancelLabel + "] Back"
                     : "[Enter] Play from track    [Esc] Back"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+        }
+    }
+
+    // ── Now Playing view ──────────────────────────────────────────────────────
+    FocusScope {
+        id: nowPlayingView
+
+        anchors.fill: parent
+        visible: listenScreen.currentView === "nowplaying"
+
+        Keys.onPressed: (event) => {
+            if (keys.isCancel(event)) {
+                event.accepted = true
+                listenScreen.currentView = "album"
+            } else if (keys.isAccept(event)) {
+                // A button — play/pause
+                event.accepted = true
+                homeScreen._togglePlayPause()
+            } else if (keys.isContext1(event)) {
+                // X button — play/pause (handled globally by HomeScreen, but accept here too)
+                event.accepted = true
+                homeScreen._togglePlayPause()
+            } else if (event.key === Qt.Key_Left || keys.isPrevTab(event)) {
+                event.accepted = true
+                if (homeScreen._playingIndex > 0) {
+                    homeScreen._playTrackAtIndex(homeScreen._playingIndex - 1)
+                }
+            } else if (event.key === Qt.Key_Right || keys.isNextTab(event)) {
+                event.accepted = true
+                homeScreen._playNext()
+            }
+        }
+
+        // ── Now Playing header bar ───────────────────────────────────────────
+        Rectangle {
+            id: nowPlayingHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "◀  Now Playing"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+        }
+
+        // ── Main content area ────────────────────────────────────────────────
+        Item {
+            id: nowPlayingContent
+
+            anchors {
+                top: nowPlayingHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: nowPlayingActionBar.top
+                margins: root.vpx(24)
+            }
+
+            // ── Left: album art ──────────────────────────────────────────────
+            Item {
+                id: nowPlayingArtArea
+
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    bottom: parent.bottom
+                }
+                width: Math.min(root.vpx(250), parent.height * 0.55)
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.darker(Theme.colorSecondary, 1.4)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: nowPlayingArt.status !== Image.Ready
+                             || !homeScreen._playbackAlbumData.posterLocal
+
+                    Text {
+                        anchors.centerIn: parent
+                        width: parent.width - root.vpx(8)
+                        text: homeScreen._playbackAlbumData.title || ""
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                }
+
+                Image {
+                    id: nowPlayingArt
+
+                    anchors.fill: parent
+                    source: homeScreen._playbackAlbumData.posterLocal || ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    visible: status === Image.Ready
+                             && !!homeScreen._playbackAlbumData.posterLocal
+                }
+            }
+
+            // ── Right: track info + controls ─────────────────────────────────
+            Column {
+                id: nowPlayingInfoColumn
+
+                anchors {
+                    top: parent.top
+                    left: nowPlayingArtArea.right
+                    right: parent.right
+                    leftMargin: root.vpx(32)
+                }
+                spacing: root.vpx(8)
+
+                // Track title
+                Text {
+                    width: parent.width
+                    text: homeScreen._nowPlayingTrack.title || ""
+                    color: Theme.colorPrimary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                    elide: Text.ElideRight
+                    wrapMode: Text.NoWrap
+                }
+
+                // Artist name
+                Text {
+                    width: parent.width
+                    text: homeScreen._playbackAlbumData.parentTitle || ""
+                    color: Theme.colorText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    elide: Text.ElideRight
+                    wrapMode: Text.NoWrap
+                }
+
+                // Album name
+                Text {
+                    width: parent.width
+                    text: homeScreen._playbackAlbumData.title || ""
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    elide: Text.ElideRight
+                    wrapMode: Text.NoWrap
+                }
+
+                // Year
+                Text {
+                    width: parent.width
+                    text: homeScreen._playbackAlbumData.year > 0
+                        ? "" + homeScreen._playbackAlbumData.year
+                        : ""
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    visible: homeScreen._playbackAlbumData.year > 0
+                }
+
+                // Spacer
+                Item { width: 1; height: root.vpx(16) }
+
+                // ── Playback controls (visual, not focusable) ────────────────
+                Row {
+                    spacing: root.vpx(32)
+
+                    // Skip back
+                    Text {
+                        text: "◀◀"
+                        color: homeScreen._playingIndex > 0
+                            ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(28)
+                        opacity: homeScreen._playingIndex > 0 ? 1.0 : 0.4
+                    }
+
+                    // Play/Pause
+                    Text {
+                        text: homeScreen.musicPlaybackState === 1  // MediaPlayer.PlayingState == 1
+                            ? "❚❚" : "▶"
+                        color: Theme.colorPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(32)
+                    }
+
+                    // Skip forward
+                    Text {
+                        text: "▶▶"
+                        color: homeScreen._playingIndex < homeScreen._playbackTracks.length - 1
+                            ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(28)
+                        opacity: homeScreen._playingIndex < homeScreen._playbackTracks.length - 1
+                            ? 1.0 : 0.4
+                    }
+                }
+
+                // Spacer
+                Item { width: 1; height: root.vpx(8) }
+
+                // ── Progress bar ─────────────────────────────────────────────
+                Item {
+                    width: parent.width
+                    height: root.vpx(6)
+
+                    // Track background
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Qt.darker(Theme.colorSecondary, 1.6)
+                        radius: root.vpx(3)
+                    }
+
+                    // Progress fill
+                    Rectangle {
+                        width: homeScreen.musicDuration > 0
+                            ? parent.width * (homeScreen.musicPosition / homeScreen.musicDuration)
+                            : 0
+                        height: parent.height
+                        color: Theme.colorPrimary
+                        radius: root.vpx(3)
+                    }
+                }
+
+                // Time display
+                Text {
+                    text: homeScreen._formatDuration(homeScreen.musicPosition)
+                        + " / "
+                        + homeScreen._formatDuration(homeScreen.musicDuration)
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                }
+
+                // ── Space reserved for future lyrics toggle ──────────────────
+                Item { width: 1; height: root.vpx(16) }
+            }
+        }
+
+        // ── Action bar ───────────────────────────────────────────────────────
+        Rectangle {
+            id: nowPlayingActionBar
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: root.vpx(40)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors.centerIn: parent
+                text: keys.useGamepadLabels
+                    ? "[" + keys.acceptLabel + "] Play/Pause    ["
+                      + keys.cancelLabel + "] Back    [◀] Prev    [▶] Next"
+                    : "[Enter] Play/Pause    [Esc] Back    [←] Prev    [→] Next"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
