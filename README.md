@@ -197,4 +197,4 @@ For those interested in what's under the hood:
 
 ## Credits and Acknowledgments
 
-HTPC Station was developed with the assistance of AI coding agents, coordinated through OpenCode. It builds on the work of many excellent open-source projects: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, Brave, and ES-DE (for ROM scraping and metadata). Thank you to all the developers and communities behind these tools.
+HTPC Station was developed with the assistance of AI coding agents, coordinated through OpenCode. It builds on the work of many excellent open-source projects: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, Brave, Pegasus, and ES-DE. Thank you to all the developers and communities behind these tools.
