@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 8)
+# HTPC Station — Project Resume Document (Checkpoint 9)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen). This checkpoint covers controller mapping, Flatpak gamepad access, Plex modal navigation, and button layout settings.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout). This checkpoint covers Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, and DOM architecture lessons.
 
 ---
 
@@ -107,7 +107,8 @@ htpcstation/
       default.js                       # No-op fallback mapping for non-Plex sites
       index.js                         # Site matcher: selects mapping based on URL path
       plex.js                          # Plex Web mapping: player controls, virtual focus cursor,
-                                       # auto-user-select, auto-play
+                                        # popup/dropdown navigation, focus stack, stale focus recovery,
+                                        # auto-user-select, auto-play (~867 lines, includes TEMP debug overlay)
   qml/
     main.qml                           # ApplicationWindow, vpx(), QuitDialog
     Theme.qml                          # Singleton: colors, fonts, animation durations
@@ -269,7 +270,8 @@ htpcstation/
   - Player mode: D-pad navigates player control bar buttons via virtual focus cursor (with `showPlayerControls()` mouse-move simulation to reveal hidden controls), accept=click focused control or play/pause, cancel=clear focus or close player, X=play/pause, L2/R2=seek back/forward, Y=fullscreen
   - Navigation mode: virtual focus cursor with spatial navigation, accept=click, cancel=escape, Start=exit
   - **Modal support:** When a modal dialog is open (e.g., "Resume Playback"), input routes to navigation mode regardless of player state. D-pad navigates modal options, accept selects, cancel closes.
-  - **WIP — Player popup menus:** Playback Settings, Subtitles, and other popup panels that appear over the player are not yet navigable with the gamepad. The virtual focus cursor's `getInteractiveElements()` may not find elements in these popups due to Plex's DOM structure. **Next step:** User will provide the actual HTML elements for the Plex Web player controls and popup menus so selectors can be written against the real DOM.
+  - **Player popup/dropdown navigation:** Popup panels (Playback Settings, Chapter Select, Play Queue) and Popper.js dropdown menus are fully navigable with the gamepad. D-pad navigates within the topmost overlay layer; accept clicks; cancel closes the layer and restores focus to the element that opened it. Focus stack tracks layer transitions. Stale focus recovery handles React button swaps (e.g. Repeat/RepeatOne, Play/Pause).
+  - **TEMP debug overlay:** An on-screen debug overlay (`__htpc-debug` div, green text on black background) and `dbg()` calls are present in `plex.js` for kiosk-mode debugging. These should be removed when debugging is complete.
 - **Auto-user-select:** Reads `htpc_user` from URL, polls for `.user-select-modal`, clicks matching user tile, re-navigates to original deep link after 1.5s
 - **Auto-play:** Polls for `[data-testid="preplay-play"]` button, clicks it. Triggers on both page load and `hashchange` events (SPA navigation).
 - **Extension deployment:** Copied to `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-extension/` before each launch (flatpak sandbox access)
@@ -489,6 +491,43 @@ The generated mapping used internal action names (`dpad_up`, `left_shoulder`) bu
 ### D-Input Mode Reports D-pad as Analog Axes
 Some controllers in D-input mode report D-pad as ABS_X/ABS_Y (range 0-255, centered at 127) instead of ABS_HAT0X/ABS_HAT0Y (range -1 to 1). The raw values (0, 127, 255) must be normalized to -1/0/1 using the axis range for both the mapping dialog (recording) and runtime (key injection). Without normalization, the evdev lookup stores wrong values and D-pad directions collide.
 
+### Plex Web Uses Popper.js for Dropdown Menus (Not Radix)
+Plex Web renders dropdown menus (quality, audio track, subtitle track) as Popper.js portals inside `#modal-root`. They are detected via `[data-popper-placement]` or `[class*="Menu-menuPortal"]` with `[role="menuitem"]` descendant check to avoid false-positives on tooltips. These are NOT modals — `getActiveModal()` won't find them.
+
+### Plex Player Popup Panels Float Above the Control Bar
+Popup panels (Playback Settings, Chapter Select, Play Queue) are absolutely positioned divs, not modals. They use different container classes:
+- **Playback Settings:** `AudioVideoStripeContainer-container-*` with `[data-testid="playbackSettingsContainer"]`
+- **Chapter Select:** `AudioVideoStripeContainer-container-*` with `VideoChapters-container-*`
+- **Play Queue:** `AudioVideoPlayQueue-container-*` (does NOT have `AudioVideoStripeContainer`)
+Detection uses `[data-testid="playbackSettingsContainer"]` → `[class*="AudioVideoStripeContainer"]` → `[class*="AudioVideoPlayQueue-container"]` with a visibility check (`getBoundingClientRect()` width/height > 0).
+
+### Plex Class Name Hashes Change Between Versions
+Plex Web uses CSS Modules with hashed suffixes (e.g., `AudioVideoStripeContainer-container-mixkS9`). These hashes change between Plex versions. **Rule:** Always use `[class*="prefix"]` partial matching, never exact class names. Prefer `data-testid` attributes where available — they are stable across versions.
+
+### Escape Key Must Be Dispatched on the Overlay Element
+Plex's menu handlers listen on the menu container, not on `document`. Dispatching Escape on `document` does nothing. **Fix:** Dispatch Escape on the overlay element itself (or a focused element within it). For dropdowns, dispatch on the dropdown container or the focused menuitem. For popup panels, dispatch on the panel container.
+
+### Bare .click() Doesn't Work on Plex React Buttons
+Plex's React event system requires the full pointer/mouse event sequence: `pointerdown` → `mousedown` → `pointerup` → `mouseup` → `click`. A bare `.click()` only fires the click event and misses handlers registered on `pointerdown`/`mousedown`. The events must include `buttons: 1` for down events, `buttons: 0` for up/click events, and bounding rect center coordinates for `clientX`/`clientY` (some handlers validate pointer position).
+
+### Plex React Re-renders Swap DOM Elements on Click
+Clicking certain player buttons causes React to replace the DOM element entirely (e.g., `repeatButton` → `repeatOneButton`, `pauseButton` → `resumeButton`). The old element is removed from the DOM. **Fix:** Save the focused element's center coordinates (`lastFocusCX`/`lastFocusCY`) in `setFocus()`. When the focused element is no longer in the DOM, use `document.elementFromPoint()` at the saved coordinates to find the replacement. `getBoundingClientRect()` returns zeros for removed elements — coordinates must be captured BEFORE removal.
+
+### Focus Stack Must Only Push for Layer-Opening Clicks
+Every `accept` press was originally pushing to the focus stack, causing stack pollution. When navigating within a popup panel (e.g., clicking a chapter item or quality option), the stack grew with non-layer-opening elements. On cancel, the stack would pop to a stale element instead of the button that opened the panel. **Fix:** Only push when the clicked element has `aria-haspopup` or matches known trigger button `data-testid` values (`videoSettingsButton`, `chaptersButton`, `playQueueButton`, `moreButton`).
+
+### Popup Cancel Fallback Must Identify the Panel Type
+The 150ms fallback timer for closing popup panels (when Escape doesn't work) was always clicking `videoSettingsButton` regardless of which panel was open. This caused the wrong panel to toggle. **Fix:** Identify the panel type (Playback Settings vs Chapter Select vs Play Queue) and click the correct toggle button (`videoSettingsButton`, `chaptersButton`, or `playQueueButton`).
+
+### Player Control Bar Scoping Prevents Unwanted Navigation
+Without scoping, `getInteractiveElements()` finds elements in the seek bar, volume slider, metadata links, and other non-useful areas of the player. **Fix:** `getPlayerNavigableElements()` restricts navigation to the top bar (`AudioVideoFullPlayer-topBar`) and bottom control bar (`[data-testid="playerControlsContainer"]`) only. Excludes `metadataTitleLink` (navigates away), `mediaDuration` (not actionable), and volume slider (controlled via TV/receiver).
+
+### showPlayerControls() Mouse-Move Can Dismiss Overlays
+The `showPlayerControls()` function dispatches a synthetic `mousemove` event to reveal the hidden player control bar. This mouse-move can cause Plex to dismiss an open dropdown or popup panel. **Fix:** Only call `showPlayerControls()` when no popup panel or dropdown is currently open.
+
+### Kiosk Mode Blocks All DevTools Access
+In Brave's `--kiosk` mode, Ctrl+Shift+I, Ctrl+Shift+J, F12, and `--auto-open-devtools-for-tabs` are all blocked. `console.log()` output goes to the inaccessible JS console. **Workaround:** Inject a TEMP on-screen debug overlay (`__htpc-debug` div, green text on black background, top-left corner) at the top of `plex.js`. Use `dbg('message')` to write to it. This overlay and all `dbg()` calls should be removed when debugging is complete.
+
 ### Artwork Override Ambiguity
 When auto-downloaded and user-provided artwork share the same directory and filename, the system cannot distinguish "user replaced the file" from "app downloaded the file." **Fix:** Use separate directories: `artwork_scraped/` for auto-downloaded and `artwork_custom/` for user overrides. Files in `artwork_custom/` always take priority. Both directories are created automatically so users can discover them. This pattern is used for both Moonlight (`***REMOVED***.config/htpcstation/moonlight/`) and Steam (`***REMOVED***.config/htpcstation/steam/`).
 
@@ -527,12 +566,14 @@ These are intentional shortcuts that should be revisited:
 - Path matching robustness in `write_game_stats`
 - Unit test infrastructure improvements, CI
 
-### In Progress — Plex Player Gamepad Controls
-- **Status:** L2/R2 seek works. D-pad navigates the player control bar buttons (play, skip, etc.) but cannot navigate popup menus (Playback Settings, Subtitles). The virtual focus cursor's element discovery doesn't find elements inside Plex's player popup panels.
-- **Root cause:** Unknown — need the actual HTML/DOM structure of the Plex Web player controls and popup panels to write correct selectors. The user will provide this in the next session.
-- **Current player mode mapping:** D-pad → `handleNavAction` (virtual focus cursor with `showPlayerControls()` to reveal hidden controls), A → click focused or play/pause, B → clear focus or close player, X → play/pause, L2/R2 → seek, Y → fullscreen, Start+Select → kill browser
-- **What works:** Control bar button navigation (play, skip back, skip forward, stop), Resume Playback modal, L2/R2 seek, Start+Select close
-- **What doesn't work:** Navigating popup menus opened from control bar buttons (Playback Settings, Subtitles, Audio, etc.)
+### Plex Player Gamepad Controls ✅ (popup/dropdown navigation complete, cleanup remaining)
+- **Status:** Full player gamepad navigation working — control bar, popup panels, dropdown menus, modals. L2/R2 seek, Start+Select close.
+- **Player mode mapping:** D-pad → navigate (scoped to topmost layer), A → click focused element (with focus stack push for layer-opening clicks), B → close topmost layer (dropdown → popup → modal → player → nav), X → play/pause, L2/R2 → seek back/forward, Y → fullscreen, Start+Select → kill browser
+- **What works:** Control bar button navigation (play, skip, repeat, shuffle, etc.), Playback Settings panel, Chapter Select panel, Play Queue panel, Popper.js dropdown menus (quality, audio track, subtitle track), Resume Playback modal, L2/R2 seek, Start+Select close, React button swap recovery (Repeat/RepeatOne, Play/Pause)
+- **Cleanup needed:**
+  - Remove TEMP debug overlay (`__htpc-debug` div injection) and all `dbg()` calls from `plex.js`
+  - The debug overlay was necessary because DevTools cannot be opened in kiosk mode (Ctrl+Shift+I, F12 all blocked, `--auto-open-devtools-for-tabs` flag doesn't work in kiosk)
+- **Known bug — Minimized player on relaunch:** When user closes the kiosk browser during playback (Alt+F4 / Start+Select), then re-launches the same title from HTPC Station "Continue Watching", Plex opens with the player minimized (mini player bar at bottom, home screen visible behind). The `div#plex` element lacks the `show-video-player` class. A `Player-miniPlayerContainer-*` div contains an `expandPlayerButton` (`data-testid="expandPlayerButton"`) that should be auto-clicked to restore full-screen. The existing `tryAutoPlay()` pattern (polling for a `data-testid` button) could be extended for this. Saved HTML at `***REMOVED***opencode/page.html`.
 
 ### Deferred Items (no milestone assigned)
 - **Game metadata scraping for Steam and Moonlight detail views:** Automatically fetch description, publisher, developer, players, release year, genre, etc. from Steam Store API (or IGDB/RAWG as fallback). Retro games already have this from gamelist.xml; Steam and Moonlight detail views currently show minimal metadata (name, install dir, host). The Steam Store API (`store.steampowered.com/api/appdetails/?appids=<id>`) returns rich metadata for Steam games. For Moonlight apps, cross-reference the app name against Steam search (same pattern as artwork lookup) to get the Steam AppID, then fetch details. Cache metadata locally (similar to artwork cache). Non-game apps (Desktop, Playnite, etc.) would show no metadata — graceful fallback.
@@ -681,6 +722,7 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/m5-home-screen/` (tasks 001–006)
 - `***REMOVED***opencode/misc/coding-team/plex-resume-modal/` (task 001)
 - `***REMOVED***opencode/misc/coding-team/controller-mapping/` (tasks 001–003)
+- `***REMOVED***opencode/misc/coding-team/plex-player-popups/` (tasks 001–005)
 
 ---
 
