@@ -45,23 +45,35 @@ FocusScope {
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
-        if (_musicSectionKey) return  // already found
-        if (!plex) return
+        if (_musicSectionKey) return  // already selected
+        if (!plex || !settings) return
+
+        var configuredKey = settings.musicLibraryKey
+        if (configuredKey) {
+            // Use the configured library
+            _musicSectionKey = configuredKey
+            _noLibrary = false
+            plex.selectLibrary(configuredKey)
+            return
+        }
+
+        // No library configured — fall back to first artist library
         var libs = plex.getLibraryList()
         for (var i = 0; i < libs.length; i++) {
             if (libs[i].type === "artist") {
                 _musicSectionKey = libs[i].sectionKey
                 _noLibrary = false
                 plex.selectLibrary(libs[i].sectionKey)
+                // Auto-save the selection
+                if (settings) settings.setMusicLibraryKey(libs[i].sectionKey)
                 return
             }
         }
-        // Libraries loaded but no music library found
+
         if (libs.length > 0) {
             _loading = false
             _noLibrary = true
         }
-        // If libs is empty, libraries haven't loaded yet — wait for signal
     }
 
     // ── Connections ───────────────────────────────────────────────────────────

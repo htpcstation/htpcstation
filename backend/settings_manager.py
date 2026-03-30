@@ -60,6 +60,7 @@ class SettingsManager(QObject):
     browserCommandChanged = Signal()
     moonlightCommandChanged = Signal()
     moonlightHostUuidChanged = Signal()
+    musicLibraryKeyChanged = Signal()
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
     showNetworkIndicatorChanged = Signal()
@@ -121,6 +122,9 @@ class SettingsManager(QObject):
 
     def _get_moonlight_host_uuid(self) -> str:
         return self._config.moonlight_host_uuid
+
+    def _get_music_library_key(self) -> str:
+        return self._config.music_library_key
 
     def _get_video_snap_autoplay(self) -> bool:
         return self._config.video_snap_autoplay
@@ -184,6 +188,11 @@ class SettingsManager(QObject):
         str,
         fget=_get_moonlight_host_uuid,
         notify=moonlightHostUuidChanged,
+    )
+    musicLibraryKey = Property(
+        str,
+        fget=_get_music_library_key,
+        notify=musicLibraryKeyChanged,
     )
     videoSnapAutoplay = Property(
         bool,
@@ -270,6 +279,12 @@ class SettingsManager(QObject):
         self.moonlightHostUuidChanged.emit()
         if self._moonlight_library is not None:
             self._moonlight_library.setSelectedHost(uuid)
+
+    @Slot(str)
+    def setMusicLibraryKey(self, key: str) -> None:
+        """Set the selected Plex music library section key."""
+        self._config.set_music_library_key(key)
+        self.musicLibraryKeyChanged.emit()
 
     @Slot(bool)
     def setVideoSnapAutoplay(self, enabled: bool) -> None:

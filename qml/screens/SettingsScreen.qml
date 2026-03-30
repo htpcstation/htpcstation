@@ -39,6 +39,7 @@ FocusScope {
         { type: "button",  label: "Test Connection",   action: "testPlex" },
         { type: "select",  label: "Server",            settingKey: "plexServer" },
         { type: "select",  label: "User",              settingKey: "plexUser" },
+        { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
         { type: "header",  label: "Moonlight" },
@@ -93,6 +94,14 @@ FocusScope {
             }
             return "Not selected"
         }
+        if (key === "musicLibrary") {
+            if (!plex) return "Not selected"
+            var musicLibs = plex.getMusicLibraries()
+            for (var m = 0; m < musicLibs.length; m++) {
+                if (musicLibs[m].id === settings.musicLibraryKey) return musicLibs[m].label
+            }
+            return "Not selected"
+        }
         if (key === "browserCommand")     return settings.browserCommand
         if (key === "moonlightCommand")   return settings.moonlightCommand
         if (key === "moonlightHost") {
@@ -129,6 +138,7 @@ FocusScope {
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
         else if (key === "moonlightCommand")   settings.setMoonlightCommand(value)
         else if (key === "moonlightHost")      settings.setMoonlightHostUuid(value)
+        else if (key === "musicLibrary")       settings.setMusicLibraryKey(value)
         else if (key === "videoSnapAutoplay")      settings.setVideoSnapAutoplay(value)
         else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
         else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
@@ -414,6 +424,10 @@ FocusScope {
                         if (rowData.settingKey === "moonlightHost") {
                             if (!settings) return []
                             return settings.getHostsList()
+                        }
+                        if (rowData.settingKey === "musicLibrary") {
+                            if (!plex) return []
+                            return plex.getMusicLibraries()
                         }
                         if (!plex) return []
                         if (rowData.settingKey === "plexServer") {

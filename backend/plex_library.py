@@ -619,6 +619,18 @@ class PlexLibrary(QObject):
         })
         return result
 
+    @Slot(result="QVariant")
+    def getMusicLibraries(self) -> list:
+        """Return music (artist-type) libraries as [{id, label}] for the settings dropdown."""
+        result = []
+        for lib in self._libraries_model._items:
+            if lib.get("type") == "artist":
+                result.append({
+                    "id": str(lib.get("key", "")),
+                    "label": lib.get("title", ""),
+                })
+        return result
+
     @Slot()
     def refresh(self) -> None:
         """Re-fetch library list and on-deck, check server availability."""

@@ -783,3 +783,156 @@ class TestArtistsModelProperty:
         lib = _make_lib()
         assert lib.artistsModel is lib._artists_model
         assert isinstance(lib.artistsModel, PlexArtistListModel)
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getMusicLibraries
+# ---------------------------------------------------------------------------
+
+
+class TestGetMusicLibraries:
+    def test_returns_only_artist_type_libraries(self) -> None:
+        """getMusicLibraries returns only libraries with type == 'artist'."""
+        lib = _make_lib()
+        lib._libraries_model._items = [
+            {"key": "1", "title": "Movies", "type": "movie"},
+            {"key": "2", "title": "TV Shows", "type": "show"},
+            {"key": "3", "title": "Music", "type": "artist"},
+            {"key": "4", "title": "Audiobooks", "type": "artist"},
+        ]
+
+        result = lib.getMusicLibraries()
+
+        assert len(result) == 2
+        ids = [r["id"] for r in result]
+        labels = [r["label"] for r in result]
+        assert "3" in ids
+        assert "4" in ids
+        assert "Music" in labels
+        assert "Audiobooks" in labels
+
+    def test_returns_empty_list_when_no_artist_libraries(self) -> None:
+        """getMusicLibraries returns [] when no artist-type libraries exist."""
+        lib = _make_lib()
+        lib._libraries_model._items = [
+            {"key": "1", "title": "Movies", "type": "movie"},
+            {"key": "2", "title": "TV Shows", "type": "show"},
+        ]
+
+        result = lib.getMusicLibraries()
+
+        assert result == []
+
+    def test_returns_empty_list_when_libraries_not_loaded(self) -> None:
+        """getMusicLibraries returns [] when the libraries model is empty."""
+        lib = _make_lib()
+        lib._libraries_model._items = []
+
+        result = lib.getMusicLibraries()
+
+        assert result == []
+
+    def test_result_has_id_and_label_keys(self) -> None:
+        """getMusicLibraries entries have 'id' and 'label' keys."""
+        lib = _make_lib()
+        lib._libraries_model._items = [
+            {"key": "5", "title": "My Music", "type": "artist"},
+        ]
+
+        result = lib.getMusicLibraries()
+
+        assert len(result) == 1
+        assert "id" in result[0]
+        assert "label" in result[0]
+        assert result[0]["id"] == "5"
+        assert result[0]["label"] == "My Music"
+
+    def test_id_is_string_even_when_key_is_int(self) -> None:
+        """getMusicLibraries coerces the key to a string for the 'id' field."""
+        lib = _make_lib()
+        lib._libraries_model._items = [
+            {"key": 7, "title": "Music", "type": "artist"},
+        ]
+
+        result = lib.getMusicLibraries()
+
+        assert result[0]["id"] == "7"
+        assert isinstance(result[0]["id"], str)
+
+
+# ---------------------------------------------------------------------------
+# Config — music_library_key round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestConfigMusicLibraryKey:
+    def _make_config(self, tmp_path, data=None):
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config(), config_file
+
+    def test_music_library_key_default_is_empty(self, tmp_path) -> None:
+        """Config.music_library_key defaults to empty string."""
+        config, _ = self._make_config(tmp_path)
+        assert config.music_library_key == ""
+
+    def test_set_music_library_key_persists(self, tmp_path) -> None:
+        """set_music_library_key updates the property and saves to disk."""
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_music_library_key("42")
+
+        assert config.music_library_key == "42"
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["music_library_key"] == "42"
+
+    def test_load_reads_music_library_key_from_plex_section(self, tmp_path) -> None:
+        """Config._load() reads music_library_key from the plex section."""
+        config, _ = self._make_config(
+            tmp_path,
+            {"plex": {"music_library_key": "99"}},
+        )
+        assert config.music_library_key == "99"
+
+    def test_music_library_key_missing_from_plex_section_uses_empty(self, tmp_path) -> None:
+        """Config without music_library_key in plex section defaults to empty string."""
+        config, _ = self._make_config(
+            tmp_path,
+            {"plex": {"token": "tok"}},
+        )
+        assert config.music_library_key == ""
+
+    def test_save_includes_music_library_key_in_plex_section(self, tmp_path) -> None:
+        """Config.save() writes music_library_key to the plex section."""
+        import json
+        from pathlib import Path
+        from unittest.mock import patch
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config._music_library_key = "77"
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["music_library_key"] == "77"

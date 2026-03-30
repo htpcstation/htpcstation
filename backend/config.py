@@ -86,6 +86,8 @@ class Config:
         self.video_snap_delay_ms: int = 1500
         self.show_network_indicator: bool = True
         self.button_layout: str = "standard"  # "standard" or "alternate"
+        # Music library selection
+        self._music_library_key: str = ""
 
         if CONFIG_FILE.exists():
             self._load()
@@ -149,6 +151,11 @@ class Config:
         """UUID of the selected Moonlight host. Empty string if not configured."""
         return self._moonlight_host_uuid
 
+    @property
+    def music_library_key(self) -> str:
+        """Plex section key of the selected music library. Empty string if not configured."""
+        return self._music_library_key
+
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
@@ -182,6 +189,11 @@ class Config:
     def set_moonlight_host_uuid(self, uuid: str) -> None:
         """Set the selected Moonlight host UUID and persist the config."""
         self._moonlight_host_uuid = uuid
+        self.save()
+
+    def set_music_library_key(self, key: str) -> None:
+        """Set the selected Plex music library section key and persist the config."""
+        self._music_library_key = key
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -246,6 +258,7 @@ class Config:
                 "token": self._plex_token or "",
                 "server_id": self._plex_server_id or "",
                 "user_id": self._plex_user_id or 0,
+                "music_library_key": self._music_library_key,
             },
             "browser": {
                 "command": self._browser_command,
@@ -324,6 +337,7 @@ class Config:
             user_id = plex.get("user_id", 0)
             if user_id:
                 self._plex_user_id = int(user_id)
+            self._music_library_key = plex.get("music_library_key", "")
             # Backward compatibility: old configs may have server_url — ignore it gracefully
 
         # browser section
