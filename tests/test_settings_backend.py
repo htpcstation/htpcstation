@@ -1717,3 +1717,276 @@ class TestSettingsManagerSortPreferences:
         manager.setFilterPlexMovieGenre("")
 
         assert config.filter_plex_movie_genre == ""
+
+
+# ---------------------------------------------------------------------------
+# Config — tab visibility settings
+# ---------------------------------------------------------------------------
+
+
+class TestConfigTabVisibility:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_all_tab_visibility_defaults_are_true(self, tmp_path: Path) -> None:
+        """All tab visibility settings default to True."""
+        config = self._make_config(tmp_path)
+        assert config.show_retro_games_tab is True
+        assert config.show_pc_games_tab is True
+        assert config.show_watch_tab is True
+        assert config.show_listen_tab is True
+
+    def test_tabs_section_loaded_from_json(self, tmp_path: Path) -> None:
+        """Config._load() reads tab visibility from the tabs section."""
+        config = self._make_config(tmp_path, {
+            "tabs": {
+                "show_retro_games": False,
+                "show_pc_games": False,
+                "show_watch": False,
+                "show_listen": False,
+            }
+        })
+        assert config.show_retro_games_tab is False
+        assert config.show_pc_games_tab is False
+        assert config.show_watch_tab is False
+        assert config.show_listen_tab is False
+
+    def test_tabs_section_partial_load_uses_defaults_for_missing(self, tmp_path: Path) -> None:
+        """Missing keys in tabs section fall back to True."""
+        config = self._make_config(tmp_path, {
+            "tabs": {"show_retro_games": False}
+        })
+        assert config.show_retro_games_tab is False
+        assert config.show_pc_games_tab is True
+        assert config.show_watch_tab is True
+        assert config.show_listen_tab is True
+
+    def test_tabs_section_missing_uses_defaults(self, tmp_path: Path) -> None:
+        """Config without a tabs section uses all-True defaults."""
+        config = self._make_config(tmp_path, {"ui": {}})
+        assert config.show_retro_games_tab is True
+        assert config.show_pc_games_tab is True
+
+    def test_tabs_section_saved_to_json(self, tmp_path: Path) -> None:
+        """Config.save() writes the tabs section to disk."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config._show_retro_games_tab = False
+            config._show_pc_games_tab = True
+            config._show_watch_tab = False
+            config._show_listen_tab = True
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert "tabs" in saved
+        assert saved["tabs"]["show_retro_games"] is False
+        assert saved["tabs"]["show_pc_games"] is True
+        assert saved["tabs"]["show_watch"] is False
+        assert saved["tabs"]["show_listen"] is True
+
+    def test_set_show_retro_games_tab_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_retro_games_tab updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_retro_games_tab(False)
+
+        assert config.show_retro_games_tab is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_retro_games"] is False
+
+    def test_set_show_pc_games_tab_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_pc_games_tab updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_pc_games_tab(False)
+
+        assert config.show_pc_games_tab is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_pc_games"] is False
+
+    def test_set_show_watch_tab_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_watch_tab updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_watch_tab(False)
+
+        assert config.show_watch_tab is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_watch"] is False
+
+    def test_set_show_listen_tab_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_listen_tab updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_listen_tab(False)
+
+        assert config.show_listen_tab is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_listen"] is False
+
+    def test_tab_visibility_round_trip(self, tmp_path: Path) -> None:
+        """Tab visibility settings survive a save/load round-trip."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_retro_games_tab(False)
+            config.set_show_listen_tab(False)
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.show_retro_games_tab is False
+        assert config2.show_pc_games_tab is True
+        assert config2.show_watch_tab is True
+        assert config2.show_listen_tab is False
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — tab visibility properties and slots
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerTabVisibility:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_all_tab_visibility_properties_default_true(self, tmp_path: Path) -> None:
+        """All tab visibility properties return True by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.showRetroGamesTab is True
+        assert manager.showPcGamesTab is True
+        assert manager.showWatchTab is True
+        assert manager.showListenTab is True
+
+    def test_tab_visibility_properties_reflect_config(self, tmp_path: Path) -> None:
+        """Tab visibility properties reflect values loaded from config."""
+        manager, _ = self._make_manager(tmp_path, {
+            "tabs": {
+                "show_retro_games": False,
+                "show_pc_games": True,
+                "show_watch": False,
+                "show_listen": True,
+            }
+        })
+        assert manager.showRetroGamesTab is False
+        assert manager.showPcGamesTab is True
+        assert manager.showWatchTab is False
+        assert manager.showListenTab is True
+
+    def test_set_show_retro_games_tab_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowRetroGamesTab updates config and emits tabVisibilityChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowRetroGamesTab(False)
+
+        assert config.show_retro_games_tab is False
+        assert len(emitted) == 1
+
+    def test_set_show_pc_games_tab_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowPcGamesTab updates config and emits tabVisibilityChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowPcGamesTab(False)
+
+        assert config.show_pc_games_tab is False
+        assert len(emitted) == 1
+
+    def test_set_show_watch_tab_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowWatchTab updates config and emits tabVisibilityChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowWatchTab(False)
+
+        assert config.show_watch_tab is False
+        assert len(emitted) == 1
+
+    def test_set_show_listen_tab_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowListenTab updates config and emits tabVisibilityChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowListenTab(False)
+
+        assert config.show_listen_tab is False
+        assert len(emitted) == 1
+
+    def test_all_setters_emit_same_tab_visibility_changed_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """All four tab setters emit the shared tabVisibilityChanged signal."""
+        manager, _ = self._make_manager(tmp_path)
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowRetroGamesTab(False)
+        manager.setShowPcGamesTab(False)
+        manager.setShowWatchTab(False)
+        manager.setShowListenTab(False)
+
+        assert len(emitted) == 4
+
+    def test_re_enabling_tab_emits_signal(self, tmp_path: Path) -> None:
+        """Re-enabling a hidden tab also emits tabVisibilityChanged."""
+        manager, config = self._make_manager(tmp_path, {
+            "tabs": {"show_retro_games": False}
+        })
+        emitted = []
+        manager.tabVisibilityChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowRetroGamesTab(True)
+
+        assert config.show_retro_games_tab is True
+        assert len(emitted) == 1

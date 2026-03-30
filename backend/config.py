@@ -86,6 +86,11 @@ class Config:
         self.video_snap_delay_ms: int = 1500
         self.show_network_indicator: bool = True
         self.button_layout: str = "standard"  # "standard" or "alternate"
+        # Tab visibility settings
+        self._show_retro_games_tab: bool = True
+        self._show_pc_games_tab: bool = True
+        self._show_watch_tab: bool = True
+        self._show_listen_tab: bool = True
         # Music library selection
         self._music_library_key: str = ""
         # Sort preferences
@@ -315,6 +320,46 @@ class Config:
             self.button_layout = layout
             self.save()
 
+    @property
+    def show_retro_games_tab(self) -> bool:
+        """Whether the Retro Games tab is visible. Defaults to True."""
+        return self._show_retro_games_tab
+
+    @property
+    def show_pc_games_tab(self) -> bool:
+        """Whether the PC Games tab is visible. Defaults to True."""
+        return self._show_pc_games_tab
+
+    @property
+    def show_watch_tab(self) -> bool:
+        """Whether the Watch tab is visible. Defaults to True."""
+        return self._show_watch_tab
+
+    @property
+    def show_listen_tab(self) -> bool:
+        """Whether the Listen tab is visible. Defaults to True."""
+        return self._show_listen_tab
+
+    def set_show_retro_games_tab(self, enabled: bool) -> None:
+        """Set the Retro Games tab visibility and persist the config."""
+        self._show_retro_games_tab = enabled
+        self.save()
+
+    def set_show_pc_games_tab(self, enabled: bool) -> None:
+        """Set the PC Games tab visibility and persist the config."""
+        self._show_pc_games_tab = enabled
+        self.save()
+
+    def set_show_watch_tab(self, enabled: bool) -> None:
+        """Set the Watch tab visibility and persist the config."""
+        self._show_watch_tab = enabled
+        self.save()
+
+    def set_show_listen_tab(self, enabled: bool) -> None:
+        """Set the Listen tab visibility and persist the config."""
+        self._show_listen_tab = enabled
+        self.save()
+
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
         ensure_config_dir()
@@ -359,6 +404,12 @@ class Config:
                 "plex_shows": self._sort_plex_shows,
                 "plex_movie_genre": self._filter_plex_movie_genre,
                 "plex_show_genre": self._filter_plex_show_genre,
+            },
+            "tabs": {
+                "show_retro_games": self._show_retro_games_tab,
+                "show_pc_games": self._show_pc_games_tab,
+                "show_watch": self._show_watch_tab,
+                "show_listen": self._show_listen_tab,
             },
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -464,6 +515,18 @@ class Config:
             self._sort_plex_shows = sort_prefs.get("plex_shows", "")
             self._filter_plex_movie_genre = sort_prefs.get("plex_movie_genre", "")
             self._filter_plex_show_genre = sort_prefs.get("plex_show_genre", "")
+
+        # tabs section
+        tabs = raw.get("tabs", {})
+        if isinstance(tabs, dict):
+            if "show_retro_games" in tabs:
+                self._show_retro_games_tab = bool(tabs["show_retro_games"])
+            if "show_pc_games" in tabs:
+                self._show_pc_games_tab = bool(tabs["show_pc_games"])
+            if "show_watch" in tabs:
+                self._show_watch_tab = bool(tabs["show_watch"])
+            if "show_listen" in tabs:
+                self._show_listen_tab = bool(tabs["show_listen"])
 
 
 def ensure_config_dir() -> None:

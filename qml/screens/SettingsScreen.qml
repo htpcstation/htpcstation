@@ -57,6 +57,11 @@ FocusScope {
         { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
           min: 0, max: 5000, step: 100, suffix: "ms" },
         { type: "toggle",  label: "Network Indicator",   settingKey: "showNetworkIndicator" },
+        { type: "header",  label: "Tabs" },
+        { type: "toggle",  label: "Retro Games",         settingKey: "showRetroGamesTab" },
+        { type: "toggle",  label: "PC Games",            settingKey: "showPcGamesTab" },
+        { type: "toggle",  label: "Watch",               settingKey: "showWatchTab" },
+        { type: "toggle",  label: "Listen",              settingKey: "showListenTab" },
     ]
 
     // ── Toast notification ────────────────────────────────────────────────────
@@ -120,6 +125,10 @@ FocusScope {
         if (key === "buttonLayout") {
             return settings.buttonLayout === "alternate" ? "Alternate (A=South)" : "Standard (A=East)"
         }
+        if (key === "showRetroGamesTab")  return settings.showRetroGamesTab
+        if (key === "showPcGamesTab")     return settings.showPcGamesTab
+        if (key === "showWatchTab")       return settings.showWatchTab
+        if (key === "showListenTab")      return settings.showListenTab
         return ""
     }
 
@@ -145,6 +154,10 @@ FocusScope {
         else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
         else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
         else if (key === "buttonLayout")           settings.setButtonLayout(value)
+        else if (key === "showRetroGamesTab")      settings.setShowRetroGamesTab(value)
+        else if (key === "showPcGamesTab")         settings.setShowPcGamesTab(value)
+        else if (key === "showWatchTab")           settings.setShowWatchTab(value)
+        else if (key === "showListenTab")          settings.setShowListenTab(value)
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────

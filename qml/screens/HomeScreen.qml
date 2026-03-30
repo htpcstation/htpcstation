@@ -28,14 +28,46 @@ FocusScope {
     // Index of the currently selected (displayed) tab.
     property int currentTab: 0
 
-    readonly property var tabNames: ["Retro Games", "PC Games", "Watch", "Listen", "Settings"]
-    readonly property var tabSources: [
-        "RetroGamesScreen.qml",
-        "PcGamesScreen.qml",
-        "WatchScreen.qml",
-        "ListenScreen.qml",
-        "SettingsScreen.qml"
+    // All possible tabs (Settings is always last and always visible)
+    readonly property var _allTabs: [
+        { name: "Retro Games", source: "RetroGamesScreen.qml", setting: "showRetroGamesTab" },
+        { name: "PC Games",    source: "PcGamesScreen.qml",    setting: "showPcGamesTab" },
+        { name: "Watch",       source: "WatchScreen.qml",      setting: "showWatchTab" },
+        { name: "Listen",      source: "ListenScreen.qml",     setting: "showListenTab" },
     ]
+
+    property var tabNames: _buildTabNames()
+    property var tabSources: _buildTabSources()
+
+    function _buildTabNames() {
+        var names = []
+        for (var i = 0; i < _allTabs.length; i++) {
+            if (settings[_allTabs[i].setting]) names.push(_allTabs[i].name)
+        }
+        names.push("Settings")
+        return names
+    }
+
+    function _buildTabSources() {
+        var sources = []
+        for (var i = 0; i < _allTabs.length; i++) {
+            if (settings[_allTabs[i].setting]) sources.push(_allTabs[i].source)
+        }
+        sources.push("SettingsScreen.qml")
+        return sources
+    }
+
+    Connections {
+        target: settings
+        function onTabVisibilityChanged() {
+            homeScreen.tabNames = homeScreen._buildTabNames()
+            homeScreen.tabSources = homeScreen._buildTabSources()
+            // Ensure currentTab is still valid
+            if (homeScreen.currentTab >= homeScreen.tabNames.length) {
+                homeScreen.currentTab = homeScreen.tabNames.length - 1
+            }
+        }
+    }
 
     // Set to true when LB/RB is pressed while focus is in the content area,
     // so onLoaded can give focus to the newly loaded content item.

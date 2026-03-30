@@ -71,6 +71,7 @@ class SettingsManager(QObject):
     sortPlexShowsChanged = Signal()
     filterPlexMovieGenreChanged = Signal()
     filterPlexShowGenreChanged = Signal()
+    tabVisibilityChanged = Signal()
 
     def __init__(
         self,
@@ -162,6 +163,18 @@ class SettingsManager(QObject):
 
     def _get_filter_plex_show_genre(self) -> str:
         return self._config.filter_plex_show_genre
+
+    def _get_show_retro_games_tab(self) -> bool:
+        return self._config.show_retro_games_tab
+
+    def _get_show_pc_games_tab(self) -> bool:
+        return self._config.show_pc_games_tab
+
+    def _get_show_watch_tab(self) -> bool:
+        return self._config.show_watch_tab
+
+    def _get_show_listen_tab(self) -> bool:
+        return self._config.show_listen_tab
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -271,6 +284,26 @@ class SettingsManager(QObject):
         str,
         fget=_get_filter_plex_show_genre,
         notify=filterPlexShowGenreChanged,
+    )
+    showRetroGamesTab = Property(
+        bool,
+        fget=_get_show_retro_games_tab,
+        notify=tabVisibilityChanged,
+    )
+    showPcGamesTab = Property(
+        bool,
+        fget=_get_show_pc_games_tab,
+        notify=tabVisibilityChanged,
+    )
+    showWatchTab = Property(
+        bool,
+        fget=_get_show_watch_tab,
+        notify=tabVisibilityChanged,
+    )
+    showListenTab = Property(
+        bool,
+        fget=_get_show_listen_tab,
+        notify=tabVisibilityChanged,
     )
 
     # ------------------------------------------------------------------
@@ -408,6 +441,30 @@ class SettingsManager(QObject):
         """Persist the genre filter for Plex shows."""
         self._config.set_filter_plex_show_genre(key)
         self.filterPlexShowGenreChanged.emit()
+
+    @Slot(bool)
+    def setShowRetroGamesTab(self, enabled: bool) -> None:
+        """Set the Retro Games tab visibility."""
+        self._config.set_show_retro_games_tab(enabled)
+        self.tabVisibilityChanged.emit()
+
+    @Slot(bool)
+    def setShowPcGamesTab(self, enabled: bool) -> None:
+        """Set the PC Games tab visibility."""
+        self._config.set_show_pc_games_tab(enabled)
+        self.tabVisibilityChanged.emit()
+
+    @Slot(bool)
+    def setShowWatchTab(self, enabled: bool) -> None:
+        """Set the Watch tab visibility."""
+        self._config.set_show_watch_tab(enabled)
+        self.tabVisibilityChanged.emit()
+
+    @Slot(bool)
+    def setShowListenTab(self, enabled: bool) -> None:
+        """Set the Listen tab visibility."""
+        self._config.set_show_listen_tab(enabled)
+        self.tabVisibilityChanged.emit()
 
     # -- Button layout ----------------------------------------------------
 
