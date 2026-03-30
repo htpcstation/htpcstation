@@ -398,7 +398,7 @@ FocusScope {
                         } else if (action === "clearRetroRecent") {
                             if (library) library.clearRecentlyPlayed()
                             settingsScreen._showToast("Retro game history cleared")
-
+                        }
                     }
                 }
             }
