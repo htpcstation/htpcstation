@@ -317,4 +317,33 @@
     }
   })();
 
+  // ---------------------------------------------------------------------------
+  // Keyboard navigation — routes arrow keys / Enter / Escape through the same
+  // dispatchAction system as the gamepad so modal dialogs are keyboard-navigable.
+  // ---------------------------------------------------------------------------
+  document.addEventListener('keydown', function (event) {
+    // Don't intercept if the user is typing in an input field.
+    var tag = (document.activeElement || {}).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' ||
+        (document.activeElement && document.activeElement.isContentEditable)) {
+      return;
+    }
+
+    var actionMap = {
+      'ArrowUp':    'up',
+      'ArrowDown':  'down',
+      'ArrowLeft':  'left',
+      'ArrowRight': 'right',
+      'Enter':      'accept',
+      'Escape':     'cancel'
+    };
+
+    var action = actionMap[event.key];
+    if (action && typeof window.__htpcGamepadGetMapping === 'function') {
+      event.preventDefault();
+      event.stopPropagation();
+      dispatchAction(action);
+    }
+  }, true); // Capture phase: intercept before Plex Web's own handlers
+
 }());
