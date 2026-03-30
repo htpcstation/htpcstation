@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 12)
+# HTPC Station — Project Resume Document (Checkpoint 13)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons), Checkpoint 10 (auto-expand minimized player, auto-resume playback, autoplay policy flag), Checkpoint 11 (M5 rich metadata for Steam games, grid spacing fix, UI navigation improvements). This checkpoint covers Listen tab backend (Plex music: artist/album/track models, API slots), grid tile spacing fix, and various UI polish.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons), Checkpoint 10 (auto-expand minimized player, auto-resume playback, autoplay policy flag), Checkpoint 11 (M5 rich metadata for Steam games, grid spacing fix, UI navigation improvements), Checkpoint 12 (Listen tab backend). This checkpoint covers the full Listen tab: artist grid, album detail, track listing, audio playback, artist cache, Music Library setting, and various UI polish.
 
 ---
 
@@ -81,10 +81,11 @@ htpcstation/
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
     models.py                          # Game and System dataclasses
     plex_account.py                    # plex.tv API client: OAuth, server discovery, home users, user switching
-    plex_client.py                     # Plex Media Server HTTP client (requests)
+    plex_client.py                     # Plex Media Server HTTP client (requests), get_hubs() for artist hubs
     plex_library.py                    # PlexLibrary QObject: threaded data loading, models, sort/filter,
+                                        # music: artist/album/track slots, artist cache, Music Library setting
                                        # server discovery, user switching, browser launch
-    plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode dataclasses
+    plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode, PlexArtist, PlexAlbum, PlexTrack dataclasses
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
     moonlight_artwork.py               # Artwork cache: Steam Store lookup, CDN download, manual overrides
     moonlight_client.py                # Moonlight CLI wrapper: list_apps(), MoonlightLauncher (QProcess)
@@ -144,8 +145,11 @@ htpcstation/
       PlexShowGrid.qml                 # TV show poster grid, infinite scroll, sort/filter overlay
       PlexOnDeckGrid.qml               # Continue Watching grid with progress bars
       PlexShowDetail.qml               # Show metadata, horizontal season tabs, episode list
+      ListenScreen.qml                 # Plex music: artist grid, artist detail (album list), album detail
+                                        # (metadata + track listing), audio playback (MediaPlayer + AudioOutput)
       ControllerMappingDialog.qml       # Full-screen controller mapping dialog (14 inputs)
-      SettingsScreen.qml               # 6-section settings menu (Games, Plex, Browser, Moonlight, Controller, UI)
+      SettingsScreen.qml               # 7-section settings menu (Games, Plex, Browser, Moonlight, Controller, UI)
+                                        # includes Music Library dropdown
   tests/
     conftest.py                        # Session-scoped QCoreApplication fixture
     test_gamelist_parser_fixes.py      # 7 tests
@@ -564,16 +568,34 @@ These are intentional shortcuts that should be revisited:
 
 ## 10. Remaining Milestones
 
-### Listen Tab — Plex Music (in progress)
-- ✅ **Backend complete:** `PlexArtist`, `PlexAlbum`, `PlexTrack` dataclasses and parse functions in `plex_models.py`. `PlexArtistListModel` and `artistsModel` property in `plex_library.py`. Slots: `getArtist()`, `getAlbums()`, `getTracks()`, `getTrackStreamUrl()`. Artist libraries included in `plex_client.py` type filter. 49 tests.
-- **Remaining tasks:**
-  - Task 002: Add "Listen" tab to HomeScreen + stub ListenScreen.qml
-  - Task 003: ListenScreen + PlexArtistGrid (artist browsing)
-  - Task 004: PlexArtistDetail (album tabs + track list, like PlexShowDetail)
-  - Task 005: Audio playback (Qt MediaPlayer + AudioOutput, album sequential play)
-- **Architecture:** Navigation: Artists grid → Artist detail (albums as horizontal tabs, tracks as vertical list) → Play. Playback: Qt `MediaPlayer` + `AudioOutput` in QML. Track stream URL: `{server_url}{media_key}?X-Plex-Token={token}`.
-- **v1 non-goals (future milestones):** Background playback across tabs, playlist/queue management, local file playback, shuffle/repeat, search, album art in now-playing.
-- **Task briefs:** `***REMOVED***opencode/misc/coding-team/listen-tab/`
+### Listen Tab — Plex Music ✅ (v1 complete)
+- **Navigation:** Listen tab → Artist grid → Artist detail (album list grouped by category) → Album detail (metadata + track listing) → Play
+- **Audio playback:** Qt `MediaPlayer` + `AudioOutput` in QML. Plays Plex audio streams via authenticated URLs (`{server_url}{media_key}?X-Plex-Token={token}`). Auto-advance to next track on EndOfMedia. Playback stops when leaving album view.
+- **Artist cache:** Artist list cached to `***REMOVED***.config/htpcstation/poster_cache/artists_cache_{sectionKey}.json` for instant load on subsequent launches. Poster paths pre-resolved from disk cache to avoid executor queue bottleneck. Background API refresh updates cache silently.
+- **Music Library setting:** Dropdown in Settings → Plex section. Persisted as `music_library_key` in config. Supports multiple music-type libraries (e.g., Music vs Audiobooks).
+- **Album categories:** Uses Plex hubs API (`/hubs/metadata/{ratingKey}`) to fetch Albums, Singles & EPs, Demos, Compilations. Grouped with section headers in the album list. Headers are non-focusable (D-pad skips them).
+- **Album detail layout:** Three-column header (album art, metadata, summary), track list with Play All button. Action bar shows button hints.
+- **Play All:** Centered button on Tracks header, navigable via D-pad (focused on album entry, A activates). X button shortcut from track list. A/Enter on any track plays from that track through end of album.
+- **Now-playing indicator:** Playing track shows ▶ in accent color instead of track number.
+- **Key files:**
+  - `qml/screens/ListenScreen.qml` — All three views (artist grid, artist detail, album detail) + audio playback
+  - `qml/screens/HomeScreen.qml` — "Listen" tab added between Watch and Settings
+  - `backend/plex_models.py` — PlexArtist, PlexAlbum (with summary, studio, genre, rating), PlexTrack dataclasses
+  - `backend/plex_library.py` — PlexArtistListModel, artistsModel, getArtist(), getAlbum(), getAlbums(), getArtistAlbums(), getTracks(), getTrackStreamUrl(), getMusicLibraries(), fetchMetadata(), artist cache read/write
+  - `backend/plex_client.py` — get_hubs() for artist hubs, "artist" type in library filter
+  - `backend/config.py` + `backend/settings_manager.py` — music_library_key setting
+  - `qml/screens/SettingsScreen.qml` — Music Library dropdown
+- **v1 non-goals (future milestones):** Background playback across tabs, playlist/queue management, local file playback, shuffle/repeat, search, on-screen keyboard, play/pause toggle, progress bar/seek, volume control.
+- **Task briefs:** `***REMOVED***opencode/misc/coding-team/listen-tab/` (tasks 001–009)
+
+#### Listen Tab Gotchas
+- **Plex hubs endpoint path:** `/hubs/metadata/{ratingKey}` (NOT `/library/metadata/{ratingKey}/hubs` — the latter returns 404). Hub identifiers use `"artist.albums"` prefix (not `"hub.artist.albums"`).
+- **`leafCount` is None** from hubs and children endpoints. Only the direct metadata endpoint (`/library/metadata/{ratingKey}`) returns `leafCount`. Album detail fetches it via `getAlbum()`.
+- **`subformat` is not available** on this Plex server version. Album categorization (Albums vs Singles & EPs vs Demos vs Compilations) comes from the hubs API, not from a `subformat` field on individual albums.
+- **Artist cache timing:** `selectLibrary()` must be called AFTER libraries model is populated (it needs the model to resolve section type to `"artist"`). If called before, `section_type` is empty and the artist cache/API branch never runs. `_trySelectMusicLibrary()` waits for `getLibraryList()` to be non-empty.
+- **Poster download bottleneck:** `_on_artists_ready` must skip poster downloads for artists that already have `poster_local` set (from cache). Otherwise hundreds of executor tasks queue up even when all posters are cached on disk. API results also pre-resolve poster paths from disk in the worker thread.
+- **`MediaPlayer.onMediaStatusChanged` with `EndOfMedia`** is more reliable than `onPlaybackStateChanged` for auto-advance to next track.
+- **`keys.isContext1`** = X button (north, standard layout). `keys.isContext2` = Y button (west, standard layout). The label properties (`context1Label`, `context2Label`) return the correct letter for the current button layout.
 
 ### M5 — Home Screen (remaining items)
 - ✅ **Steam rich metadata** — gamelist.xml reader/writer, Steam Store API fetcher, SteamGameDetail.qml updated with developer, publisher, genre, players, release date, rating, description. Lazy fetch on detail view open, writes back to `***REMOVED***.config/htpcstation/steam/gamelist.xml`. User-editable.
@@ -760,7 +782,7 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/plex-mini-player-expand/` (tasks 001–004)
 - `***REMOVED***opencode/misc/coding-team/dpad-up-to-tabbar/` (task 001)
 - `***REMOVED***opencode/misc/coding-team/m5-rich-metadata/` (tasks 001–004, Steam complete, Moonlight pending)
-- `***REMOVED***opencode/misc/coding-team/listen-tab/` (task 001 complete, tasks 002–005 pending)
+- `***REMOVED***opencode/misc/coding-team/listen-tab/` (tasks 001–009, v1 complete)
 
 ---
 
