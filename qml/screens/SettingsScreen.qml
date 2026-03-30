@@ -209,18 +209,13 @@ FocusScope {
             if (delta < 0 && newIndex < 0) settingsScreen.back()
         }
 
-        // Initialize to first non-header row
+        // Initialize to first non-header row.  Only sets currentIndex —
+        // actual focus is routed via onActiveFocusChanged when the user
+        // enters the content area (Down/A from tab bar).
         Component.onCompleted: {
             for (var i = 0; i < model.length; i++) {
                 if (model[i].type !== "header") {
                     currentIndex = i
-                    // Defer forceActiveFocus to next frame so the Loader has finished
-                    Qt.callLater(function() {
-                        var item = settingsList.currentItem
-                        if (item && item.children[0] && item.children[0].item) {
-                            item.children[0].item.forceActiveFocus()
-                        }
-                    })
                     break
                 }
             }
