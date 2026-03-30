@@ -1054,9 +1054,38 @@ class PlexLibrary(QObject):
                 })
         return albums
 
+    # Maximum track count for playlists.  Playlists larger than this are
+    # hidden to avoid freezing the UI with a synchronous fetch of tens of
+    # thousands of tracks.
+    _MAX_PLAYLIST_TRACKS = 1000
+
+    # Emoji → text replacements for playlist titles.  The app font may not
+    # render all emoji; these common ones are replaced with text equivalents.
+    _EMOJI_REPLACEMENTS = {
+        "\u2764\ufe0f": "\u2665",   # ❤️  → ♥
+        "\u2764": "\u2665",          # ❤   → ♥
+        "\U0001f49c": "\u2665",      # 💜  → ♥
+        "\U0001f499": "\u2665",      # 💙  → ♥
+        "\U0001f49a": "\u2665",      # 💚  → ♥
+        "\U0001f3b5": "\u266b",      # 🎵  → ♫
+        "\U0001f3b6": "\u266b",      # 🎶  → ♫
+        "\u2b50": "\u2605",          # ⭐  → ★
+        "\U0001f525": "*",           # 🔥  → *
+    }
+
+    @classmethod
+    def _replace_emoji(cls, text: str) -> str:
+        for emoji, replacement in cls._EMOJI_REPLACEMENTS.items():
+            text = text.replace(emoji, replacement)
+        return text
+
     @Slot(result="QVariant")
     def getPlaylists(self) -> list:
-        """Return audio playlists as a list of dicts."""
+        """Return audio playlists as a list of dicts.
+
+        Filters out non-audio playlists and playlists with more than
+        _MAX_PLAYLIST_TRACKS tracks (to avoid UI freezes).
+        """
         if self._client is None:
             return []
         raw = self._client.get_playlists()
@@ -1064,10 +1093,13 @@ class PlexLibrary(QObject):
         for p in raw:
             if p.get("playlistType") != "audio":
                 continue
+            leaf_count = int(p.get("leafCount", 0) or 0)
+            if leaf_count > self._MAX_PLAYLIST_TRACKS:
+                continue
             result.append({
                 "ratingKey": str(p.get("ratingKey", "")),
-                "title": p.get("title", ""),
-                "leafCount": int(p.get("leafCount", 0) or 0),
+                "title": self._replace_emoji(p.get("title", "")),
+                "leafCount": leaf_count,
                 "duration": int(p.get("duration", 0) or 0),
                 "smart": bool(p.get("smart", False)),
             })
