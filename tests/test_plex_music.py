@@ -10,6 +10,8 @@ Covers:
   - PlexLibrary.getAlbums: returns list of album dicts, filters non-album children
   - PlexLibrary.getTracks: returns list of track dicts with media_key
   - PlexLibrary.getTrackStreamUrl: returns correct URL with token
+  - PlexClient.get_hubs: returns Hub array from API response
+  - PlexLibrary.getArtistAlbums: returns grouped list with headers and albums
 """
 
 from __future__ import annotations
@@ -936,3 +938,318 @@ class TestConfigMusicLibraryKey:
 
         saved = json.loads(config_file.read_text(encoding="utf-8"))
         assert saved["plex"]["music_library_key"] == "77"
+
+
+# ---------------------------------------------------------------------------
+# PlexClient.get_hubs
+# ---------------------------------------------------------------------------
+
+
+class TestGetHubs:
+    def test_returns_hub_array_from_api_response(self) -> None:
+        from backend.plex_client import PlexClient
+
+        hubs = [
+            {"hubIdentifier": "hub.artist.albums", "title": "3 Albums", "type": "album"},
+            {"hubIdentifier": "hub.artist.albums.singles", "title": "Singles & EPs", "type": "album"},
+        ]
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "MediaContainer": {"Hub": hubs}
+            }
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_hubs("500")
+
+        assert result == hubs
+        assert len(result) == 2
+        assert result[0]["hubIdentifier"] == "hub.artist.albums"
+
+    def test_returns_empty_list_on_error(self) -> None:
+        from backend.plex_client import PlexClient
+        import requests as req
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.get.side_effect = req.exceptions.ConnectionError("refused")
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_hubs("500")
+
+        assert result == []
+
+    def test_returns_empty_list_when_no_hub_key(self) -> None:
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {"MediaContainer": {}}
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_hubs("500")
+
+        assert result == []
+
+    def test_calls_correct_endpoint(self) -> None:
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {"MediaContainer": {"Hub": []}}
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            client.get_hubs("42")
+
+        call_url = mock_session.get.call_args[0][0]
+        assert call_url == "http://server:32400/library/metadata/42/hubs"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getArtistAlbums
+# ---------------------------------------------------------------------------
+
+
+def _make_hub_response(hubs: list) -> list:
+    """Helper to build a hub list as returned by get_hubs()."""
+    return hubs
+
+
+class TestGetArtistAlbums:
+    def _make_hub(
+        self,
+        hub_id: str,
+        title: str,
+        metadata: list | None = None,
+    ) -> dict:
+        return {
+            "hubIdentifier": hub_id,
+            "title": title,
+            "type": "album",
+            "Metadata": metadata or [],
+        }
+
+    def _make_album_item(
+        self,
+        rating_key: str,
+        title: str,
+        year: int = 0,
+        leaf_count: int = 0,
+        thumb: str = "",
+    ) -> dict:
+        return {
+            "type": "album",
+            "ratingKey": rating_key,
+            "title": title,
+            "year": year,
+            "leafCount": leaf_count,
+            "thumb": thumb,
+        }
+
+    def test_returns_grouped_list_with_headers_and_albums(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "3 Albums", [
+                self._make_album_item("600", "Abbey Road", 1969, 17),
+                self._make_album_item("601", "Let It Be", 1970, 12),
+                self._make_album_item("602", "Help!", 1965, 14),
+            ]),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        # Should have 1 header + 3 albums = 4 entries
+        assert len(result) == 4
+        assert result[0]["type"] == "header"
+        assert result[0]["title"] == "Albums"
+        assert result[1]["type"] == "album"
+        assert result[2]["type"] == "album"
+        assert result[3]["type"] == "album"
+
+    def test_filters_to_album_type_hubs_only(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "2 Albums", [
+                self._make_album_item("600", "Abbey Road", 1969),
+                self._make_album_item("601", "Let It Be", 1970),
+            ]),
+            # Non-album hubs should be ignored
+            {
+                "hubIdentifier": "hub.artist.similar",
+                "title": "Similar Artists",
+                "type": "artist",
+                "Metadata": [{"ratingKey": "999", "title": "Similar Artist"}],
+            },
+            {
+                "hubIdentifier": "hub.artist.popularTracks",
+                "title": "Popular Tracks",
+                "type": "track",
+                "Metadata": [],
+            },
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        # Only the albums hub should be included
+        assert len(result) == 3  # 1 header + 2 albums
+        types = [e["type"] for e in result]
+        assert types == ["header", "album", "album"]
+
+    def test_sorts_albums_within_category_by_year_descending(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "3 Albums", [
+                self._make_album_item("600", "Abbey Road", 1969),
+                self._make_album_item("601", "Let It Be", 1970),
+                self._make_album_item("602", "Help!", 1965),
+            ]),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        albums = [e for e in result if e["type"] == "album"]
+        years = [a["year"] for a in albums]
+        assert years == sorted(years, reverse=True)
+        assert years == [1970, 1969, 1965]
+
+    def test_strips_count_prefix_from_hub_titles(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "5 Albums", []),
+            self._make_hub("hub.artist.albums.singles", "Singles & EPs", []),
+            self._make_hub("hub.artist.albums.demo", "1 Album", []),
+            self._make_hub("hub.artist.albums.compilation", "Compilations", []),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        headers = [e for e in result if e["type"] == "header"]
+        titles = [h["title"] for h in headers]
+        assert "Albums" in titles
+        assert "Singles & EPs" in titles
+        assert "Albums" in titles  # "1 Album" -> "Albums"
+        assert "Compilations" in titles
+        # Ensure no count prefix remains
+        for title in titles:
+            assert not title[0].isdigit(), f"Title '{title}' still has count prefix"
+
+    def test_returns_empty_list_when_no_hubs_found(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = []
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        assert result == []
+
+    def test_returns_empty_list_when_no_client(self) -> None:
+        lib = _make_lib()
+        lib._client = None
+
+        result = lib.getArtistAlbums("500")
+
+        assert result == []
+
+    def test_multiple_hub_categories_preserve_order(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "2 Albums", [
+                self._make_album_item("600", "Album A", 2020),
+            ]),
+            self._make_hub("hub.artist.albums.singles", "Singles & EPs", [
+                self._make_album_item("700", "Single X", 2021),
+            ]),
+            self._make_hub("hub.artist.albums.compilation", "Compilations", [
+                self._make_album_item("800", "Comp Z", 2019),
+            ]),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        # Should be: header Albums, album A, header Singles & EPs, single X, header Compilations, comp Z
+        assert len(result) == 6
+        assert result[0] == {"type": "header", "title": "Albums"}
+        assert result[1]["title"] == "Album A"
+        assert result[2] == {"type": "header", "title": "Singles & EPs"}
+        assert result[3]["title"] == "Single X"
+        assert result[4] == {"type": "header", "title": "Compilations"}
+        assert result[5]["title"] == "Comp Z"
+
+    def test_album_entries_have_expected_keys(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "1 Album", [
+                self._make_album_item("600", "Abbey Road", 1969, 17),
+            ]),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        album = next(e for e in result if e["type"] == "album")
+        assert "ratingKey" in album
+        assert "title" in album
+        assert "year" in album
+        assert "leafCount" in album
+        assert "posterLocal" in album
+        assert album["ratingKey"] == "600"
+        assert album["title"] == "Abbey Road"
+        assert album["year"] == 1969
+        assert album["leafCount"] == 17
+
+    def test_poster_local_populated_when_thumb_present(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "1 Album", [
+                self._make_album_item("600", "Abbey Road", 1969, 17, "/thumb/600"),
+            ]),
+        ]
+        lib._client = mock_client
+
+        mock_cache = MagicMock()
+        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        lib._poster_cache = mock_cache
+
+        result = lib.getArtistAlbums("500")
+
+        album = next(e for e in result if e["type"] == "album")
+        mock_cache.get_poster.assert_called_once_with(mock_client, "/thumb/600")
+        assert album["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
+
+    def test_hub_with_no_metadata_emits_only_header(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_hubs.return_value = [
+            self._make_hub("hub.artist.albums", "Albums", []),
+        ]
+        lib._client = mock_client
+
+        result = lib.getArtistAlbums("500")
+
+        assert len(result) == 1
+        assert result[0]["type"] == "header"
+        assert result[0]["title"] == "Albums"

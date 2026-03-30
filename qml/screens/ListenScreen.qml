@@ -15,7 +15,6 @@ import "../components"
 //                         select album → store ratingKey (track list: next task)
 //   B (Escape)          — from "artists": emit back() to return to tab bar
 //                         from "detail":  return to "artists" view
-//   Up at row 0         — emit back() / return to "artists" view
 FocusScope {
     id: listenScreen
 
@@ -125,10 +124,16 @@ FocusScope {
     onCurrentViewChanged: {
         if (currentView === "detail" && _selectedArtistKey) {
             _artistData = plex.getArtist(_selectedArtistKey)
-            var albums = plex.getAlbums(_selectedArtistKey)
-            // Sort by year descending (newest first)
-            albums.sort(function(a, b) { return (b.year || 0) - (a.year || 0) })
-            _albums = albums
+            _albums = plex.getArtistAlbums(_selectedArtistKey)
+            // Set initial focus to first non-header entry (index 1, since index 0 is the first header)
+            var firstAlbum = 0
+            for (var i = 0; i < _albums.length; i++) {
+                if (_albums[i].type !== "header") {
+                    firstAlbum = i
+                    break
+                }
+            }
+            albumList.currentIndex = firstAlbum
         }
         _routeFocus()
     }
@@ -413,20 +418,27 @@ FocusScope {
             model: listenScreen._albums
             clip: true
             focus: false
-            keyNavigationEnabled: true
+            keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    var next = albumList.currentIndex + 1
+                    while (next < listenScreen._albums.length && listenScreen._albums[next].type === "header") next++
+                    if (next < listenScreen._albums.length) albumList.currentIndex = next
+                } else if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    var prev = albumList.currentIndex - 1
+                    while (prev >= 0 && listenScreen._albums[prev].type === "header") prev--
+                    if (prev >= 0) albumList.currentIndex = prev
+                } else if (keys.isAccept(event)) {
                     event.accepted = true
                     var album = listenScreen._albums[albumList.currentIndex]
-                    if (album) {
+                    if (album && album.type === "album") {
                         listenScreen._selectedAlbumKey = album.ratingKey
                     }
                 } else if (keys.isCancel(event)) {
-                    event.accepted = true
-                    listenScreen.currentView = "artists"
-                } else if (event.key === Qt.Key_Up && albumList.currentIndex <= 0) {
                     event.accepted = true
                     listenScreen.currentView = "artists"
                 }
@@ -446,122 +458,163 @@ FocusScope {
             delegate: Item {
                 id: albumDelegate
 
+                property bool isHeader: modelData.type === "header"
+
                 width: albumList.width
-                height: root.vpx(96)
+                height: isHeader ? root.vpx(40) : root.vpx(96)
 
-                // Highlight background for focused item
-                Rectangle {
+                // ── Section header ───────────────────────────────────────────
+                Item {
                     anchors.fill: parent
-                    color: Theme.colorSecondary
-                    opacity: albumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
-                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: albumDelegate.isHeader
 
-                    Behavior on opacity {
-                        NumberAnimation { duration: Theme.animDurationFast }
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: root.vpx(8)
+                            bottom: parent.bottom
+                            bottomMargin: root.vpx(6)
+                        }
+                        text: modelData.title || ""
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        font.bold: true
+                    }
+
+                    Rectangle {
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            bottom: parent.bottom
+                            leftMargin: root.vpx(8)
+                            rightMargin: root.vpx(8)
+                        }
+                        height: 1
+                        color: Theme.colorTextDim
+                        opacity: 0.3
                     }
                 }
 
-                Row {
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        leftMargin: root.vpx(8)
-                        rightMargin: root.vpx(8)
-                        verticalCenter: parent.verticalCenter
+                // ── Album row ────────────────────────────────────────────────────────────
+                Item {
+                    anchors.fill: parent
+                    visible: !albumDelegate.isHeader
+
+                    // Highlight background for focused item
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: albumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.animDurationFast }
+                        }
                     }
-                    spacing: root.vpx(12)
 
-                    // ── Album art thumbnail ──────────────────────────────────
-                    Item {
-                        width: root.vpx(80)
-                        height: root.vpx(80)
+                    Row {
+                        anchors {
+                            left: parent.left
+                            right: parent.right
+                            leftMargin: root.vpx(8)
+                            rightMargin: root.vpx(8)
+                            verticalCenter: parent.verticalCenter
+                        }
+                        spacing: root.vpx(12)
 
-                        // Placeholder shown when there is no art or while loading
-                        Rectangle {
-                            anchors.fill: parent
-                            color: Qt.darker(Theme.colorSecondary, 1.4)
-                            radius: root.vpx(Theme.focusRingRadius)
-                            visible: albumArt.status !== Image.Ready || !modelData.posterLocal
+                        // ── Album art thumbnail ──────────────────────────
+                        Item {
+                            width: root.vpx(80)
+                            height: root.vpx(80)
+
+                            // Placeholder shown when there is no art or while loading
+                            Rectangle {
+                                anchors.fill: parent
+                                color: Qt.darker(Theme.colorSecondary, 1.4)
+                                radius: root.vpx(Theme.focusRingRadius)
+                                visible: albumArt.status !== Image.Ready || !modelData.posterLocal
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - root.vpx(8)
+                                    text: modelData.title || ""
+                                    color: Theme.colorTextDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                    wrapMode: Text.Wrap
+                                    horizontalAlignment: Text.AlignHCenter
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Image {
+                                id: albumArt
+
+                                anchors.fill: parent
+                                source: modelData.posterLocal || ""
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                sourceSize.width: root.vpx(80)
+                                sourceSize.height: root.vpx(80)
+                                visible: status === Image.Ready && modelData.posterLocal
+                                clip: true
+                            }
+                        }
+
+                        // ── Album title and subtitle ─────────────────
+                        Column {
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: root.vpx(4)
+                            width: parent.width - root.vpx(80) - root.vpx(12)
 
                             Text {
-                                anchors.centerIn: parent
-                                width: parent.width - root.vpx(8)
+                                width: parent.width
                                 text: modelData.title || ""
+                                color: albumDelegate.ListView.isCurrentItem
+                                    ? Theme.colorText
+                                    : Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                                elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: {
+                                    var yr = modelData.year || ""
+                                    var cnt = modelData.leafCount || 0
+                                    var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
+                                    return yr ? (yr + " · " + trackStr) : trackStr
+                                }
                                 color: Theme.colorTextDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                                wrapMode: Text.Wrap
-                                horizontalAlignment: Text.AlignHCenter
-                                maximumLineCount: 3
                                 elide: Text.ElideRight
+                                wrapMode: Text.NoWrap
                             }
                         }
-
-                        Image {
-                            id: albumArt
-
-                            anchors.fill: parent
-                            source: modelData.posterLocal || ""
-                            fillMode: Image.PreserveAspectCrop
-                            asynchronous: true
-                            sourceSize.width: root.vpx(80)
-                            sourceSize.height: root.vpx(80)
-                            visible: status === Image.Ready && modelData.posterLocal
-                            clip: true
-                        }
                     }
 
-                    // ── Album title and subtitle ─────────────────────────────
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: root.vpx(4)
-                        width: parent.width - root.vpx(80) - root.vpx(12)
+                    // Focus ring
+                    FocusRing {
+                        visible: albumDelegate.ListView.isCurrentItem && albumList.activeFocus
+                    }
 
-                        Text {
-                            width: parent.width
-                            text: modelData.title || ""
-                            color: albumDelegate.ListView.isCurrentItem
-                                ? Theme.colorText
-                                : Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeBody)
-                            elide: Text.ElideRight
-                            wrapMode: Text.NoWrap
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            albumList.currentIndex = index
+                            albumList.forceActiveFocus()
                         }
-
-                        Text {
-                            width: parent.width
-                            text: {
-                                var yr = modelData.year || ""
-                                var cnt = modelData.leafCount || 0
-                                var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
-                                return yr ? (yr + " · " + trackStr) : trackStr
+                        onDoubleClicked: {
+                            albumList.currentIndex = index
+                            var album = listenScreen._albums[index]
+                            if (album && album.type === "album") {
+                                listenScreen._selectedAlbumKey = album.ratingKey
                             }
-                            color: Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                            elide: Text.ElideRight
-                            wrapMode: Text.NoWrap
-                        }
-                    }
-                }
-
-                // Focus ring
-                FocusRing {
-                    visible: albumDelegate.ListView.isCurrentItem && albumList.activeFocus
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: {
-                        albumList.currentIndex = index
-                        albumList.forceActiveFocus()
-                    }
-                    onDoubleClicked: {
-                        albumList.currentIndex = index
-                        var album = listenScreen._albums[index]
-                        if (album) {
-                            listenScreen._selectedAlbumKey = album.ratingKey
                         }
                     }
                 }

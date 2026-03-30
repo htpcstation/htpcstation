@@ -956,6 +956,58 @@ class PlexLibrary(QObject):
         }
 
     @Slot(str, result="QVariant")
+    def getArtistAlbums(self, artist_rating_key: str) -> list:
+        """Return all album categories for an artist as a grouped list.
+
+        Returns a list of dicts, each representing either a section header
+        or an album entry:
+
+        Headers:  {"type": "header", "title": "Albums"}
+        Albums:   {"type": "album", "ratingKey": ..., "title": ..., "year": ...,
+                   "leafCount": ..., "posterLocal": ...}
+
+        Albums within each category are sorted by year descending (newest first).
+        """
+        import re
+
+        if self._client is None:
+            return []
+        hubs = self._client.get_hubs(artist_rating_key)
+        result = []
+        for hub in hubs:
+            hub_id = hub.get("hubIdentifier", "")
+            if not hub_id.startswith("hub.artist.albums"):
+                continue
+            # Clean up the hub title: strip leading count prefix
+            raw_title = hub.get("title", "")
+            clean_title = re.sub(r'^\d+\s+', '', raw_title)
+            # Normalize "Album" -> "Albums" for consistency
+            if clean_title == "Album":
+                clean_title = "Albums"
+            # Parse and sort albums within this category
+            albums = []
+            for item in hub.get("Metadata", []):
+                album = parse_album(item)
+                if album.thumb_path and self._poster_cache:
+                    album.poster_local = self._poster_cache.get_poster(
+                        self._client, album.thumb_path
+                    )
+                albums.append({
+                    "type": "album",
+                    "ratingKey": album.rating_key,
+                    "title": album.title,
+                    "year": album.year,
+                    "leafCount": album.leaf_count,
+                    "posterLocal": album.poster_local,
+                })
+            # Sort albums by year descending (newest first)
+            albums.sort(key=lambda a: a["year"] or 0, reverse=True)
+            # Emit header then albums
+            result.append({"type": "header", "title": clean_title})
+            result.extend(albums)
+        return result
+
+    @Slot(str, result="QVariant")
     def getAlbums(self, artist_rating_key: str) -> list:
         """Return albums list as a list of dicts (synchronous, blocks briefly)."""
         if self._client is None:
