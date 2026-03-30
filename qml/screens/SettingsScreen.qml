@@ -206,6 +206,7 @@ FocusScope {
                 }
                 newIndex += delta
             }
+            if (delta < 0 && newIndex < 0) settingsScreen.back()
         }
 
         // Initialize to first non-header row
