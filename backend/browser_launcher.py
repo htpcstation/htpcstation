@@ -126,6 +126,7 @@ class BrowserLauncher(QObject):
             *tokens,
             "--kiosk",
             "--start-fullscreen",
+            "--autoplay-policy=no-user-gesture-required",
             f"--user-data-dir={self._user_data_dir}",
         ]
         if deployed is not None:

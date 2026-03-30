@@ -242,23 +242,55 @@ window.__htpcGamepadMappings.plex = (function () {
     // Don't auto-play if we're about to do a user selection redirect
     if (hash.indexOf('htpc_user=') !== -1) return;
 
-    console.log('[HTPC Gamepad] Auto-play enabled, waiting for Play button...');
+    dbg('[HTPC Gamepad] Auto-play enabled, waiting for Play button...');
 
     var attempts = 0;
-    var maxAttempts = 100; // 10 seconds at 100ms intervals
+    var maxAttempts = 300; // 30 seconds at 100ms intervals
+    var expandClicked = false;
+    var expandAttempt = 0; // poll tick when expand was clicked
     var interval = setInterval(function() {
       attempts++;
+      if (attempts % 10 === 1) {
+        var v = document.querySelector('video');
+        dbg('autoPlay poll #' + attempts + ' expandClicked=' + expandClicked +
+          ' expandAttempt=' + expandAttempt +
+          ' expandBtn=' + !!document.querySelector('[data-testid="expandPlayerButton"]') +
+          ' video=' + !!v + ' paused=' + (v ? v.paused : 'N/A'));
+      }
 
-      var playBtn = document.querySelector('[data-testid="preplay-play"]');
+      var expandBtn = document.querySelector('[data-testid="expandPlayerButton"]');
+      if (expandBtn && !expandClicked) {
+        dbg('[HTPC Gamepad] Expanding mini player');
+        simulateClick(expandBtn);
+        expandClicked = true;
+        expandAttempt = attempts;
+        return;
+      }
+
+      // After expanding, wait at least 10 polling cycles (1s) for the player
+      // to fully initialize before attempting to resume.
+      var video = document.querySelector('video');
+      if (expandClicked && (attempts - expandAttempt) >= 10 && video && video.paused) {
+        dbg('[HTPC Gamepad] Video paused after expand (waited ' + (attempts - expandAttempt) + ' ticks), calling video.play()');
+        video.play().then(function () {
+          dbg('[HTPC Gamepad] video.play() succeeded');
+        }).catch(function (err) {
+          dbg('[HTPC Gamepad] video.play() failed: ' + err);
+        });
+        clearInterval(interval);
+        return;
+      }
+
+      var playBtn = !expandClicked ? document.querySelector('[data-testid="preplay-play"]') : null;
       if (playBtn) {
-        console.log('[HTPC Gamepad] Clicking Play button');
+        dbg('[HTPC Gamepad] Clicking Play button');
         playBtn.click();
         clearInterval(interval);
         return;
       }
 
       if (attempts >= maxAttempts) {
-        console.log('[HTPC Gamepad] Play button not found, giving up');
+        dbg('[HTPC Gamepad] Play button not found, giving up');
         clearInterval(interval);
       }
     }, 100);

@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 9)
+# HTPC Station — Project Resume Document (Checkpoint 10)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout). This checkpoint covers Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, and DOM architecture lessons.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons). This checkpoint covers auto-expand minimized player, auto-resume playback via video.play(), and autoplay policy browser flag.
 
 ---
 
@@ -528,6 +528,12 @@ The `showPlayerControls()` function dispatches a synthetic `mousemove` event to 
 ### Kiosk Mode Blocks All DevTools Access
 In Brave's `--kiosk` mode, Ctrl+Shift+I, Ctrl+Shift+J, F12, and `--auto-open-devtools-for-tabs` are all blocked. `console.log()` output goes to the inaccessible JS console. **Workaround:** Inject a TEMP on-screen debug overlay (`__htpc-debug` div, green text on black background, top-left corner) at the top of `plex.js`. Use `dbg('message')` to write to it. This overlay and all `dbg()` calls should be removed when debugging is complete.
 
+### Browser Autoplay Policy Blocks video.play() from Content Scripts
+Chromium's autoplay policy requires a trusted user gesture (physical click/keypress with `isTrusted: true`) before `video.play()` can be called. Content script events are synthetic (`isTrusted: false`) and don't satisfy this requirement — `video.play()` throws `NotAllowedError`. Synthetic keyboard events (`sendKey` dispatching `KeyboardEvent`) and `simulateClick` on play/resume buttons also fail for the same reason. Gamepad API button presses don't count as user gestures either. **Fix:** Add `--autoplay-policy=no-user-gesture-required` to the browser launch flags. This is appropriate for a kiosk/HTPC setup where autoplay restrictions serve no purpose.
+
+### Plex Mini Player: Expand + Resume Requires Two-Phase Approach
+When Plex opens with a minimized player (after browser kill mid-playback), the `tryAutoPlay()` polling loop must handle two phases: (1) click the expand button to go full-screen, (2) call `video.play()` to resume playback. These are sequential — the video element only appears after the player expands. An `expandClicked` boolean flag gates the resume phase and prevents the polling loop from clicking the `preplay-play` button (which exists in the DOM behind the mini player and would start playback from scratch instead of resuming).
+
 ### Artwork Override Ambiguity
 When auto-downloaded and user-provided artwork share the same directory and filename, the system cannot distinguish "user replaced the file" from "app downloaded the file." **Fix:** Use separate directories: `artwork_scraped/` for auto-downloaded and `artwork_custom/` for user overrides. Files in `artwork_custom/` always take priority. Both directories are created automatically so users can discover them. This pattern is used for both Moonlight (`***REMOVED***.config/htpcstation/moonlight/`) and Steam (`***REMOVED***.config/htpcstation/steam/`).
 
@@ -573,7 +579,7 @@ These are intentional shortcuts that should be revisited:
 - **Cleanup needed:**
   - Remove TEMP debug overlay (`__htpc-debug` div injection) and all `dbg()` calls from `plex.js`
   - The debug overlay was necessary because DevTools cannot be opened in kiosk mode (Ctrl+Shift+I, F12 all blocked, `--auto-open-devtools-for-tabs` flag doesn't work in kiosk)
-- **Known bug — Minimized player on relaunch:** When user closes the kiosk browser during playback (Alt+F4 / Start+Select), then re-launches the same title from HTPC Station "Continue Watching", Plex opens with the player minimized (mini player bar at bottom, home screen visible behind). The `div#plex` element lacks the `show-video-player` class. A `Player-miniPlayerContainer-*` div contains an `expandPlayerButton` (`data-testid="expandPlayerButton"`) that should be auto-clicked to restore full-screen. The existing `tryAutoPlay()` pattern (polling for a `data-testid` button) could be extended for this. Saved HTML at `***REMOVED***opencode/page.html`.
+- **Fixed — Minimized player on relaunch:** When re-launching a title from "Continue Watching" after killing the browser mid-playback, Plex opened with the player minimized. Fixed by extending `tryAutoPlay()` to: (1) detect and click `[data-testid="expandPlayerButton"]` to expand the mini player, (2) wait for the `<video>` element to appear in paused state, (3) call `video.play()` to resume playback. Required `--autoplay-policy=no-user-gesture-required` browser flag because `video.play()` from a content script is an untrusted context. Synthetic keyboard events (`sendKey`) and `simulateClick` on the resume button both failed due to the autoplay policy — only the direct `video.play()` API with the policy flag works.
 
 ### Deferred Items (no milestone assigned)
 - **Game metadata scraping for Steam and Moonlight detail views:** Automatically fetch description, publisher, developer, players, release year, genre, etc. from Steam Store API (or IGDB/RAWG as fallback). Retro games already have this from gamelist.xml; Steam and Moonlight detail views currently show minimal metadata (name, install dir, host). The Steam Store API (`store.steampowered.com/api/appdetails/?appids=<id>`) returns rich metadata for Steam games. For Moonlight apps, cross-reference the app name against Steam search (same pattern as artwork lookup) to get the Steam AppID, then fetch details. Cache metadata locally (similar to artwork cache). Non-game apps (Desktop, Playnite, etc.) would show no metadata — graceful fallback.
@@ -723,6 +729,7 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/plex-resume-modal/` (task 001)
 - `***REMOVED***opencode/misc/coding-team/controller-mapping/` (tasks 001–003)
 - `***REMOVED***opencode/misc/coding-team/plex-player-popups/` (tasks 001–005)
+- `***REMOVED***opencode/misc/coding-team/plex-mini-player-expand/` (tasks 001–004)
 
 ---
 
