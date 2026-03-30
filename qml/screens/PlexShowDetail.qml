@@ -312,6 +312,10 @@ FocusScope {
                         if (showDetailView.currentSeasonIndex < showDetailView.seasons.length - 1) {
                             showDetailView._selectSeason(showDetailView.currentSeasonIndex + 1)
                         }
+                    } else if (event.key === Qt.Key_Up) {
+                        // Scroll up to show poster and metadata
+                        event.accepted = true
+                        mainFlickable.contentY = 0
                     } else if (event.key === Qt.Key_Down) {
                         event.accepted = true
                         if (episodeList.count > 0) {
@@ -676,6 +680,7 @@ FocusScope {
     // When this view gains focus, route to season tabs
     onActiveFocusChanged: {
         if (activeFocus) {
+            mainFlickable.contentY = 0
             seasonTabsArea.forceActiveFocus()
         }
     }
