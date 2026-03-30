@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 11)
+# HTPC Station — Project Resume Document (Checkpoint 12)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons), Checkpoint 10 (auto-expand minimized player, auto-resume playback, autoplay policy flag). This checkpoint covers M5 rich metadata for Steam games (gamelist.xml, Steam Store API fetcher, detail view), plus Plex mini player fix and UI navigation improvements.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons), Checkpoint 10 (auto-expand minimized player, auto-resume playback, autoplay policy flag), Checkpoint 11 (M5 rich metadata for Steam games, grid spacing fix, UI navigation improvements). This checkpoint covers Listen tab backend (Plex music: artist/album/track models, API slots), grid tile spacing fix, and various UI polish.
 
 ---
 
@@ -564,6 +564,17 @@ These are intentional shortcuts that should be revisited:
 
 ## 10. Remaining Milestones
 
+### Listen Tab — Plex Music (in progress)
+- ✅ **Backend complete:** `PlexArtist`, `PlexAlbum`, `PlexTrack` dataclasses and parse functions in `plex_models.py`. `PlexArtistListModel` and `artistsModel` property in `plex_library.py`. Slots: `getArtist()`, `getAlbums()`, `getTracks()`, `getTrackStreamUrl()`. Artist libraries included in `plex_client.py` type filter. 49 tests.
+- **Remaining tasks:**
+  - Task 002: Add "Listen" tab to HomeScreen + stub ListenScreen.qml
+  - Task 003: ListenScreen + PlexArtistGrid (artist browsing)
+  - Task 004: PlexArtistDetail (album tabs + track list, like PlexShowDetail)
+  - Task 005: Audio playback (Qt MediaPlayer + AudioOutput, album sequential play)
+- **Architecture:** Navigation: Artists grid → Artist detail (albums as horizontal tabs, tracks as vertical list) → Play. Playback: Qt `MediaPlayer` + `AudioOutput` in QML. Track stream URL: `{server_url}{media_key}?X-Plex-Token={token}`.
+- **v1 non-goals (future milestones):** Background playback across tabs, playlist/queue management, local file playback, shuffle/repeat, search, album art in now-playing.
+- **Task briefs:** `***REMOVED***opencode/misc/coding-team/listen-tab/`
+
 ### M5 — Home Screen (remaining items)
 - ✅ **Steam rich metadata** — gamelist.xml reader/writer, Steam Store API fetcher, SteamGameDetail.qml updated with developer, publisher, genre, players, release date, rating, description. Lazy fetch on detail view open, writes back to `***REMOVED***.config/htpcstation/steam/gamelist.xml`. User-editable.
 - **Moonlight rich metadata** — Same architecture needed for Moonlight apps. Backend: reuse Steam metadata fetcher via cached `steam_app_id` from `artwork_index.json`. QML: update `MoonlightAppDetail.qml` and `RecentlyPlayedDetail.qml`. Not yet started (Sunshine PC was offline for testing).
@@ -748,7 +759,8 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/plex-player-popups/` (tasks 001–005)
 - `***REMOVED***opencode/misc/coding-team/plex-mini-player-expand/` (tasks 001–004)
 - `***REMOVED***opencode/misc/coding-team/dpad-up-to-tabbar/` (task 001)
-- `***REMOVED***opencode/misc/coding-team/m5-rich-metadata/` (tasks 001–003, Steam complete, Moonlight pending)
+- `***REMOVED***opencode/misc/coding-team/m5-rich-metadata/` (tasks 001–004, Steam complete, Moonlight pending)
+- `***REMOVED***opencode/misc/coding-team/listen-tab/` (task 001 complete, tasks 002–005 pending)
 
 ---
 
