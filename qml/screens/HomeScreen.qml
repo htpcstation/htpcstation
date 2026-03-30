@@ -27,11 +27,12 @@ FocusScope {
     // Index of the currently selected (displayed) tab.
     property int currentTab: 0
 
-    readonly property var tabNames: ["Retro Games", "PC Games", "Watch", "Settings"]
+    readonly property var tabNames: ["Retro Games", "PC Games", "Watch", "Listen", "Settings"]
     readonly property var tabSources: [
         "RetroGamesScreen.qml",
         "PcGamesScreen.qml",
         "WatchScreen.qml",
+        "ListenScreen.qml",
         "SettingsScreen.qml"
     ]
 
