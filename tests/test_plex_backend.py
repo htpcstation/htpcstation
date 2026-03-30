@@ -368,7 +368,8 @@ class TestPlexClientLibraryFiltering:
             client._session = mock_session
             return client
 
-    def test_filters_to_movie_and_show_only(self) -> None:
+    def test_filters_to_movie_show_and_artist(self) -> None:
+        """get_libraries now includes movie, show, and artist types."""
         from backend.plex_client import PlexClient
 
         directories = [
@@ -376,6 +377,7 @@ class TestPlexClientLibraryFiltering:
             {"title": "TV Shows", "type": "show", "key": "2"},
             {"title": "Music", "type": "artist", "key": "3"},
             {"title": "Audiobooks", "type": "artist", "key": "4"},
+            {"title": "Photos", "type": "photo", "key": "5"},
         ]
 
         with patch("backend.plex_client.requests.Session") as mock_session_cls:
@@ -390,15 +392,16 @@ class TestPlexClientLibraryFiltering:
             client = PlexClient("http://server:32400", "tok")
             libs = client.get_libraries()
 
-        assert len(libs) == 2
+        assert len(libs) == 4
         types = {lib["type"] for lib in libs}
-        assert types == {"movie", "show"}
+        assert types == {"movie", "show", "artist"}
 
     def test_empty_libraries_when_all_filtered(self) -> None:
+        """Unsupported library types (e.g. photo) are still filtered out."""
         from backend.plex_client import PlexClient
 
         directories = [
-            {"title": "Music", "type": "artist", "key": "1"},
+            {"title": "Photos", "type": "photo", "key": "1"},
         ]
 
         with patch("backend.plex_client.requests.Session") as mock_session_cls:

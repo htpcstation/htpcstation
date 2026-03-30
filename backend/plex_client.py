@@ -57,7 +57,7 @@ class PlexClient:
         directories = container.get("Directory", [])
         return [
             d for d in directories
-            if isinstance(d, dict) and d.get("type") in ("movie", "show")
+            if isinstance(d, dict) and d.get("type") in ("movie", "show", "artist")
         ]
 
     def get_library_items(

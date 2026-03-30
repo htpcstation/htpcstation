@@ -166,3 +166,98 @@ def parse_episode(data: dict) -> PlexEpisode:
         viewed=viewed,
         grandparent_title=data.get("grandparentTitle", ""),
     )
+
+
+# ---------------------------------------------------------------------------
+# Music models
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PlexArtist:
+    """Represents a music artist from the Plex library."""
+
+    rating_key: str
+    title: str          # artist name
+    summary: str = ""
+    thumb_path: str = ""
+    genre: str = ""     # comma-joined genres
+    poster_local: str = ""
+
+
+@dataclass
+class PlexAlbum:
+    """Represents a music album from the Plex library."""
+
+    rating_key: str
+    title: str          # album name
+    year: int = 0
+    thumb_path: str = ""
+    leaf_count: int = 0       # track count
+    parent_rating_key: str = ""  # artist's ratingKey
+    parent_title: str = ""       # artist name
+    poster_local: str = ""
+
+
+@dataclass
+class PlexTrack:
+    """Represents a music track from the Plex library."""
+
+    rating_key: str
+    title: str          # track name
+    index: int = 0      # track number
+    duration_ms: int = 0
+    parent_title: str = ""       # album name
+    grandparent_title: str = ""  # artist name
+    media_key: str = ""          # /library/parts/... path for streaming
+
+
+# ---------------------------------------------------------------------------
+# Music parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def parse_artist(data: dict) -> PlexArtist:
+    """Parse a Plex API JSON dict into a PlexArtist dataclass."""
+    raw_genres = data.get("Genre") or []
+    genres = [g["tag"] for g in raw_genres if isinstance(g, dict) and "tag" in g]
+    return PlexArtist(
+        rating_key=str(data.get("ratingKey", "")),
+        title=data.get("title", ""),
+        summary=data.get("summary", ""),
+        thumb_path=data.get("thumb", ""),
+        genre=", ".join(genres),
+    )
+
+
+def parse_album(data: dict) -> PlexAlbum:
+    """Parse a Plex API JSON dict into a PlexAlbum dataclass."""
+    return PlexAlbum(
+        rating_key=str(data.get("ratingKey", "")),
+        title=data.get("title", ""),
+        year=int(data.get("year", 0) or 0),
+        thumb_path=data.get("thumb", ""),
+        leaf_count=int(data.get("leafCount", 0) or 0),
+        parent_rating_key=str(data.get("parentRatingKey", "")),
+        parent_title=data.get("parentTitle", ""),
+    )
+
+
+def parse_track(data: dict) -> PlexTrack:
+    """Parse a Plex API JSON dict into a PlexTrack dataclass."""
+    # Extract the streaming path from Media[0].Part[0].key
+    media_key = ""
+    media_list = data.get("Media") or []
+    if media_list and isinstance(media_list[0], dict):
+        parts = media_list[0].get("Part") or []
+        if parts and isinstance(parts[0], dict):
+            media_key = parts[0].get("key", "")
+    return PlexTrack(
+        rating_key=str(data.get("ratingKey", "")),
+        title=data.get("title", ""),
+        index=int(data.get("index", 0) or 0),
+        duration_ms=int(data.get("duration", 0) or 0),
+        parent_title=data.get("parentTitle", ""),
+        grandparent_title=data.get("grandparentTitle", ""),
+        media_key=media_key,
+    )

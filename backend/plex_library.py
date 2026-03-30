@@ -28,12 +28,16 @@ from backend.config import Config, CONFIG_DIR
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient
 from backend.plex_models import (
+    PlexArtist,
     PlexMovie,
     PlexShow,
+    parse_album,
+    parse_artist,
     parse_episode,
     parse_movie,
     parse_season,
     parse_show,
+    parse_track,
 )
 from backend.poster_cache import PosterCache
 
@@ -352,6 +356,68 @@ class PlexOnDeckModel(QAbstractListModel):
 
 
 # ---------------------------------------------------------------------------
+# PlexArtistListModel
+# ---------------------------------------------------------------------------
+
+
+class PlexArtistListModel(QAbstractListModel):
+    """Model for a list of Plex music artists.
+
+    Roles: ratingKey, title, genre, imageLocal
+    """
+
+    RatingKeyRole = Qt.ItemDataRole.UserRole + 1
+    TitleRole = Qt.ItemDataRole.UserRole + 2
+    GenreRole = Qt.ItemDataRole.UserRole + 3
+    ImageLocalRole = Qt.ItemDataRole.UserRole + 4
+
+    def __init__(self, parent: Optional[QObject] = None) -> None:
+        super().__init__(parent)
+        self._artists: list[PlexArtist] = []
+
+    def set_artists(self, artists: list[PlexArtist]) -> None:
+        """Replace the model contents. Must be called on the main thread."""
+        self.beginResetModel()
+        self._artists = artists
+        self.endResetModel()
+
+    def notify_poster_changed(self, row: int) -> None:
+        """Emit dataChanged for the image role at *row*."""
+        if 0 <= row < len(self._artists):
+            idx = self.index(row, 0)
+            self.dataChanged.emit(idx, idx, [self.ImageLocalRole])
+
+    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: B008
+        if parent.isValid():
+            return 0
+        return len(self._artists)
+
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
+        if not index.isValid() or not (0 <= index.row() < len(self._artists)):
+            return None
+        artist = self._artists[index.row()]
+        if role == self.RatingKeyRole:
+            return artist.rating_key
+        if role == self.TitleRole:
+            return artist.title
+        if role == self.GenreRole:
+            return artist.genre
+        if role == self.ImageLocalRole:
+            return artist.poster_local
+        if role == Qt.ItemDataRole.DisplayRole:
+            return artist.title
+        return None
+
+    def roleNames(self) -> dict[int, bytes]:
+        return {
+            self.RatingKeyRole: b"ratingKey",
+            self.TitleRole: b"title",
+            self.GenreRole: b"genre",
+            self.ImageLocalRole: b"imageLocal",
+        }
+
+
+# ---------------------------------------------------------------------------
 # PlexLibrary — main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -370,6 +436,7 @@ class PlexLibrary(QObject):
     moviesModelChanged = Signal()
     showsModelChanged = Signal()
     onDeckModelChanged = Signal()
+    artistsModelChanged = Signal()
     currentLibraryChanged = Signal(str)
 
     # Internal signals used to marshal results from worker threads to main thread
@@ -380,6 +447,7 @@ class PlexLibrary(QObject):
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
+    _artistsReady = Signal(list, int)  # (artists, total_size)
 
     def __init__(
         self,
@@ -414,6 +482,7 @@ class PlexLibrary(QObject):
         self._movies_model = PlexMovieListModel(self)
         self._shows_model = PlexShowListModel(self)
         self._on_deck_model = PlexOnDeckModel(self)
+        self._artists_model = PlexArtistListModel(self)
 
         # Thread pool for network calls
         self._executor = ThreadPoolExecutor(max_workers=2)
@@ -444,6 +513,7 @@ class PlexLibrary(QObject):
         self._availabilityReady.connect(self._on_availability_ready)
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
+        self._artistsReady.connect(self._on_artists_ready)
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -497,6 +567,11 @@ class PlexLibrary(QObject):
         QObject,
         fget=lambda self: self._on_deck_model,
         notify=onDeckModelChanged,
+    )
+    artistsModel = Property(
+        QObject,
+        fget=lambda self: self._artists_model,
+        notify=artistsModelChanged,
     )
     currentLibrary = Property(
         str,
@@ -847,6 +922,83 @@ class PlexLibrary(QObject):
                 })
         return episodes
 
+    @Slot(str, result="QVariant")
+    def getArtist(self, rating_key: str) -> dict:
+        """Return full artist details as a dict (synchronous, blocks briefly)."""
+        if self._client is None:
+            return {}
+        data = self._client.get_metadata(rating_key)
+        if not data:
+            return {}
+        artist = parse_artist(data)
+        if artist.thumb_path and self._poster_cache:
+            artist.poster_local = self._poster_cache.get_poster(
+                self._client, artist.thumb_path
+            )
+        return {
+            "ratingKey": artist.rating_key,
+            "title": artist.title,
+            "summary": artist.summary,
+            "genre": artist.genre,
+            "posterLocal": artist.poster_local,
+        }
+
+    @Slot(str, result="QVariant")
+    def getAlbums(self, artist_rating_key: str) -> list:
+        """Return albums list as a list of dicts (synchronous, blocks briefly)."""
+        if self._client is None:
+            return []
+        children = self._client.get_children(artist_rating_key)
+        albums = []
+        for item in children:
+            if item.get("type") == "album":
+                album = parse_album(item)
+                if album.thumb_path and self._poster_cache:
+                    album.poster_local = self._poster_cache.get_poster(
+                        self._client, album.thumb_path
+                    )
+                albums.append({
+                    "ratingKey": album.rating_key,
+                    "title": album.title,
+                    "year": album.year,
+                    "leafCount": album.leaf_count,
+                    "parentRatingKey": album.parent_rating_key,
+                    "posterLocal": album.poster_local,
+                })
+        return albums
+
+    @Slot(str, result="QVariant")
+    def getTracks(self, album_rating_key: str) -> list:
+        """Return tracks list as a list of dicts (synchronous, blocks briefly)."""
+        if self._client is None:
+            return []
+        children = self._client.get_children(album_rating_key)
+        tracks = []
+        for item in children:
+            if item.get("type") == "track":
+                track = parse_track(item)
+                tracks.append({
+                    "ratingKey": track.rating_key,
+                    "title": track.title,
+                    "index": track.index,
+                    "durationMs": track.duration_ms,
+                    "parentTitle": track.parent_title,
+                    "grandparentTitle": track.grandparent_title,
+                    "mediaKey": track.media_key,
+                })
+        return tracks
+
+    @Slot(str, result=str)
+    def getTrackStreamUrl(self, media_key: str) -> str:
+        """Return the authenticated stream URL for a track media part.
+
+        Returns {server_url}{media_key}?X-Plex-Token={token}.
+        This URL can be used directly as a MediaPlayer source in QML.
+        """
+        if self._client is None:
+            return ""
+        return self._client.get_poster_url(media_key)
+
     @Slot()
     def launchLiveTv(self) -> None:
         """Launch Plex Web in kiosk browser at the Live TV guide.
@@ -952,9 +1104,15 @@ class PlexLibrary(QObject):
         genre: str = "",
     ) -> None:
         """Worker: load all items for a library section."""
+        if section_type == "artist":
+            # Load all artists at once — most music libraries have <500 artists
+            page_size = 9999
+        else:
+            page_size = _PAGE_SIZE
+
         try:
             items, total = client.get_library_items(
-                section_key, 0, _PAGE_SIZE, sort=sort, genre=genre,
+                section_key, 0, page_size, sort=sort, genre=genre,
                 content_rating=self._content_rating_filter,
             )
         except Exception as exc:  # noqa: BLE001
@@ -967,6 +1125,9 @@ class PlexLibrary(QObject):
         elif section_type == "show":
             shows = [parse_show(item) for item in items]
             self._showsReady.emit(shows, total)
+        elif section_type == "artist":
+            artists = [parse_artist(item) for item in items]
+            self._artistsReady.emit(artists, total)
 
     def _worker_load_more_movies(
         self,
@@ -1084,6 +1245,19 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
 
+    def _on_artists_ready(self, artists: list, total: int) -> None:
+        self._artists_model.set_artists(artists)
+        self.artistsModelChanged.emit()
+
+        # Kick off poster downloads for new items
+        client = self._client
+        if client is not None:
+            for i, artist in enumerate(artists):
+                if artist.thumb_path:
+                    self._executor.submit(
+                        self._worker_fetch_poster, client, artist.thumb_path, "artist", i
+                    )
+
     def _on_on_deck_ready(self, raw_items: list) -> None:
         items = []
         for item in raw_items:
@@ -1124,6 +1298,10 @@ class PlexLibrary(QObject):
             if 0 <= row < len(self._on_deck_model._items):
                 self._on_deck_model._items[row]["poster_local"] = file_url
                 self._on_deck_model.notify_poster_changed(row)
+        elif model_type == "artist":
+            if 0 <= row < len(self._artists_model._artists):
+                self._artists_model._artists[row].poster_local = file_url
+                self._artists_model.notify_poster_changed(row)
 
     # ------------------------------------------------------------------
     # Internal helpers
