@@ -184,7 +184,8 @@ FocusScope {
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
         } else if (currentView === "album") {
-            playAllArea.forceActiveFocus()
+            trackList.forceActiveFocus()
+            trackList.currentIndex = 0
         }
     }
 
@@ -516,84 +517,12 @@ FocusScope {
             }
         }
 
-        // ── Play All button area (focusable) ─────────────────────────────────
-        FocusScope {
-            id: playAllArea
-
-            anchors {
-                top: albumDetailHeaderBar.bottom
-                left: parent.left
-                right: parent.right
-            }
-            height: root.vpx(52)
-
-            // Subtle focus highlight behind the button row
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorPrimary
-                opacity: playAllArea.activeFocus ? 0.08 : 0.0
-                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
-            }
-
-            Row {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    verticalCenter: parent.verticalCenter
-                }
-                spacing: root.vpx(8)
-                height: root.vpx(36)
-
-                // ── Play All button ──────────────────────────────────────────
-                Rectangle {
-                    width: playAllText.implicitWidth + root.vpx(24)
-                    height: parent.height
-                    color: Theme.colorPrimary
-                    radius: root.vpx(Theme.focusRingRadius)
-                    opacity: playAllArea.activeFocus ? 1.0 : 0.85
-
-                    Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
-
-                    Text {
-                        id: playAllText
-                        anchors.centerIn: parent
-                        text: "▶  Play All"
-                        color: Theme.colorBackground
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        font.bold: true
-                    }
-                }
-
-                // Space for future "Shuffle All" button
-            }
-
-            // Focus ring around the Play All area
-            FocusRing {
-                visible: playAllArea.activeFocus
-            }
-
-            Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
-                    event.accepted = true
-                    listenScreen._playAlbum(0)
-                } else if (event.key === Qt.Key_Down) {
-                    event.accepted = true
-                    trackList.forceActiveFocus()
-                    trackList.currentIndex = 0
-                } else if (keys.isCancel(event)) {
-                    event.accepted = true
-                    listenScreen.currentView = "detail"
-                }
-            }
-        }
-
         // ── Track list with album info header ────────────────────────────────
         ListView {
             id: trackList
 
             anchors {
-                top: playAllArea.bottom
+                top: albumDetailHeaderBar.bottom
                 left: parent.left
                 right: parent.right
                 bottom: parent.bottom
@@ -615,9 +544,6 @@ FocusScope {
                     event.accepted = true
                     if (trackList.currentIndex > 0) {
                         trackList.currentIndex--
-                    } else {
-                        // At first track — return focus to Play All button
-                        playAllArea.forceActiveFocus()
                     }
                 } else if (keys.isAccept(event)) {
                     event.accepted = true
@@ -798,10 +724,10 @@ FocusScope {
                         opacity: 0.4
                     }
 
-                    // ── Tracks section label ─────────────────────────────────
+                    // ── Tracks header with Play All button ───────────────────
                     Item {
                         width: parent.width
-                        height: root.vpx(32)
+                        height: root.vpx(36)
 
                         Text {
                             anchors {
@@ -814,6 +740,41 @@ FocusScope {
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)
                             font.bold: true
+                        }
+
+                        // Play All button (subtle, right-aligned)
+                        Rectangle {
+                            id: playAllBtn
+                            anchors {
+                                right: parent.right
+                                rightMargin: root.vpx(16)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            width: playAllLabel.implicitWidth + root.vpx(16)
+                            height: root.vpx(26)
+                            color: "transparent"
+                            border.color: Theme.colorPrimary
+                            border.width: root.vpx(1)
+                            radius: root.vpx(Theme.focusRingRadius)
+                            opacity: playAllMouse.containsMouse ? 1.0 : 0.7
+
+                            Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+
+                            Text {
+                                id: playAllLabel
+                                anchors.centerIn: parent
+                                text: "▶ Play All"
+                                color: Theme.colorPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            }
+
+                            MouseArea {
+                                id: playAllMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: listenScreen._playAlbum(0)
+                            }
                         }
                     }
                 }
