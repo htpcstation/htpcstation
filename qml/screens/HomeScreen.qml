@@ -42,7 +42,8 @@ FocusScope {
     function _buildTabNames() {
         var names = []
         for (var i = 0; i < _allTabs.length; i++) {
-            if (settings[_allTabs[i].setting]) names.push(_allTabs[i].name)
+            // Default to showing all tabs if settings hasn't loaded yet
+            if (!settings || settings[_allTabs[i].setting]) names.push(_allTabs[i].name)
         }
         names.push("Settings")
         return names
@@ -51,7 +52,7 @@ FocusScope {
     function _buildTabSources() {
         var sources = []
         for (var i = 0; i < _allTabs.length; i++) {
-            if (settings[_allTabs[i].setting]) sources.push(_allTabs[i].source)
+            if (!settings || settings[_allTabs[i].setting]) sources.push(_allTabs[i].source)
         }
         sources.push("SettingsScreen.qml")
         return sources
