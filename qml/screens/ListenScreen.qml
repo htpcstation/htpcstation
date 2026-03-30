@@ -220,13 +220,27 @@ FocusScope {
         }
 
         // ── Loading indicator ────────────────────────────────────────────────
-        Text {
+        Column {
             anchors.centerIn: parent
             visible: listenScreen._loading
-            text: "Loading..."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            spacing: root.vpx(8)
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Loading music library..."
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "First load may take several minutes"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                opacity: 0.7
+            }
         }
 
         // ── No library message ───────────────────────────────────────────────
