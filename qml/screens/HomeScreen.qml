@@ -45,7 +45,7 @@ FocusScope {
     property var tabNames:   []
     property var tabSources: []
 
-    Component.onCompleted: {
+    function _initTabs() {
         var names = []
         var sources = []
         var allTabs = _allTabs
@@ -393,10 +393,9 @@ FocusScope {
         if (item) item.forceActiveFocus()
     }
 
-    // On startup, give focus to the first tab.
-    // (tabNames/tabSources are set in the other Component.onCompleted above,
-    // but the Repeater may not have created items yet — defer to next frame.)
+    // On startup, build tab arrays and give focus to the first tab.
     Component.onCompleted: {
+        _initTabs()
         Qt.callLater(function() {
             var item = tabRepeater.itemAt(0)
             if (item) item.forceActiveFocus()
