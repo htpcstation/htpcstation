@@ -58,32 +58,41 @@ FocusScope {
         if (_musicSectionKey) return  // already selected
         if (!plex || !settings) return
 
+        // Wait until libraries are loaded — selectLibrary needs the
+        // libraries model to resolve the section type.  If we call it
+        // before libraries are loaded, section_type is "" and the
+        // artist cache/API branch never runs.
+        var libs = plex.getLibraryList()
+        if (libs.length === 0) return  // not loaded yet — wait for onLibrariesModelChanged
+
         var configuredKey = settings.musicLibraryKey
         if (configuredKey) {
-            // Use the configured library
-            _musicSectionKey = configuredKey
-            _noLibrary = false
-            plex.selectLibrary(configuredKey)
-            return
+            // Verify the configured library still exists
+            for (var i = 0; i < libs.length; i++) {
+                if (libs[i].sectionKey === configuredKey && libs[i].type === "artist") {
+                    _musicSectionKey = configuredKey
+                    _noLibrary = false
+                    plex.selectLibrary(configuredKey)
+                    return
+                }
+            }
+            // Configured library not found — fall through to auto-select
         }
 
-        // No library configured — fall back to first artist library
-        var libs = plex.getLibraryList()
-        for (var i = 0; i < libs.length; i++) {
-            if (libs[i].type === "artist") {
-                _musicSectionKey = libs[i].sectionKey
+        // No library configured or configured one not found — fall back to first artist library
+        for (var j = 0; j < libs.length; j++) {
+            if (libs[j].type === "artist") {
+                _musicSectionKey = libs[j].sectionKey
                 _noLibrary = false
-                plex.selectLibrary(libs[i].sectionKey)
+                plex.selectLibrary(libs[j].sectionKey)
                 // Auto-save the selection
-                if (settings) settings.setMusicLibraryKey(libs[i].sectionKey)
+                if (settings) settings.setMusicLibraryKey(libs[j].sectionKey)
                 return
             }
         }
 
-        if (libs.length > 0) {
-            _loading = false
-            _noLibrary = true
-        }
+        _loading = false
+        _noLibrary = true
     }
 
     // ── Connections ───────────────────────────────────────────────────────────
