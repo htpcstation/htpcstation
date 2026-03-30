@@ -63,7 +63,7 @@ FocusScope {
             margins: root.vpx(32)
         }
 
-        model: library.systemsModel
+        model: library ? library.systemsModel : null
         clip: true
         keyNavigationEnabled: true
         focus: true

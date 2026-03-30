@@ -54,7 +54,7 @@ FocusScope {
     // Delay play() slightly so the source has time to load
     Timer {
         id: playTimer
-        interval: settings.videoSnapDelayMs
+        interval: settings ? settings.videoSnapDelayMs : 1000
         repeat: false
         onTriggered: mediaPlayer.play()
     }

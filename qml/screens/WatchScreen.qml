@@ -59,13 +59,24 @@ FocusScope {
     property bool _availabilityKnown: false
 
     // JS array built from plex.getLibraryList() — used as the ListView model.
+    // Filters out "artist" type libraries (Music, Audiobooks) since those
+    // are accessible under the Listen tab.
     property var _libraryEntries: []
+
+    function _getVideoLibraries() {
+        var all = plex.getLibraryList()
+        var filtered = []
+        for (var i = 0; i < all.length; i++) {
+            if (all[i].type !== "artist") filtered.push(all[i])
+        }
+        return filtered
+    }
 
     Connections {
         target: plex
         function onAvailableChanged() { watchScreen._availabilityKnown = true }
-        function onLibrariesModelChanged() { watchScreen._libraryEntries = plex.getLibraryList() }
-        function onOnDeckModelChanged() { watchScreen._libraryEntries = plex.getLibraryList() }
+        function onLibrariesModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
+        function onOnDeckModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
     }
 
     // Give focus to the appropriate child whenever the view changes or this

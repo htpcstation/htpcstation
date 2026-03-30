@@ -116,7 +116,7 @@ FocusScope {
             margins: root.vpx(16)
         }
 
-        model: library.gamesModel
+        model: library ? library.gamesModel : null
         clip: true
         focus: true
 
