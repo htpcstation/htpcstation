@@ -675,10 +675,6 @@ class PlexLibrary(QObject):
         self._shows_total = 0
         self._shows_loaded = 0
         self._current_library = section_title
-        self._current_sort = ""
-        self._current_genre = ""
-        self._shows_sort = ""
-        self._shows_genre = ""
         self.currentLibraryChanged.emit(section_title)
 
         client = self._client

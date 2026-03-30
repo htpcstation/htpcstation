@@ -432,7 +432,18 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 steamGameGrid._currentSort = newSort
                 steam.sortGames(newSort)
+                if (settings) settings.setSortSteamGames(newSort)
                 sortOverlay.close()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var saved = settings.sortSteamGames
+            if (saved) {
+                _currentSort = saved
+                if (steam) steam.sortGames(saved)
             }
         }
     }

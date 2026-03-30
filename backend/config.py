@@ -88,6 +88,14 @@ class Config:
         self.button_layout: str = "standard"  # "standard" or "alternate"
         # Music library selection
         self._music_library_key: str = ""
+        # Sort preferences
+        self._sort_retro_games: str = "az"
+        self._sort_steam_games: str = "az"
+        self._sort_moonlight_apps: str = "az"
+        self._sort_plex_movies: str = ""
+        self._sort_plex_shows: str = ""
+        self._filter_plex_movie_genre: str = ""
+        self._filter_plex_show_genre: str = ""
 
         if CONFIG_FILE.exists():
             self._load()
@@ -156,6 +164,41 @@ class Config:
         """Plex section key of the selected music library. Empty string if not configured."""
         return self._music_library_key
 
+    @property
+    def sort_retro_games(self) -> str:
+        """Persisted sort key for the retro games grid. Defaults to 'az'."""
+        return self._sort_retro_games
+
+    @property
+    def sort_steam_games(self) -> str:
+        """Persisted sort key for the Steam games grid. Defaults to 'az'."""
+        return self._sort_steam_games
+
+    @property
+    def sort_moonlight_apps(self) -> str:
+        """Persisted sort key for the Moonlight apps grid. Defaults to 'az'."""
+        return self._sort_moonlight_apps
+
+    @property
+    def sort_plex_movies(self) -> str:
+        """Persisted sort key for the Plex movies grid. Empty string means default order."""
+        return self._sort_plex_movies
+
+    @property
+    def sort_plex_shows(self) -> str:
+        """Persisted sort key for the Plex shows grid. Empty string means default order."""
+        return self._sort_plex_shows
+
+    @property
+    def filter_plex_movie_genre(self) -> str:
+        """Persisted genre filter key for Plex movies. Empty string means no filter."""
+        return self._filter_plex_movie_genre
+
+    @property
+    def filter_plex_show_genre(self) -> str:
+        """Persisted genre filter key for Plex shows. Empty string means no filter."""
+        return self._filter_plex_show_genre
+
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
@@ -194,6 +237,41 @@ class Config:
     def set_music_library_key(self, key: str) -> None:
         """Set the selected Plex music library section key and persist the config."""
         self._music_library_key = key
+        self.save()
+
+    def set_sort_retro_games(self, key: str) -> None:
+        """Set the sort preference for the retro games grid and persist the config."""
+        self._sort_retro_games = key
+        self.save()
+
+    def set_sort_steam_games(self, key: str) -> None:
+        """Set the sort preference for the Steam games grid and persist the config."""
+        self._sort_steam_games = key
+        self.save()
+
+    def set_sort_moonlight_apps(self, key: str) -> None:
+        """Set the sort preference for the Moonlight apps grid and persist the config."""
+        self._sort_moonlight_apps = key
+        self.save()
+
+    def set_sort_plex_movies(self, key: str) -> None:
+        """Set the sort preference for the Plex movies grid and persist the config."""
+        self._sort_plex_movies = key
+        self.save()
+
+    def set_sort_plex_shows(self, key: str) -> None:
+        """Set the sort preference for the Plex shows grid and persist the config."""
+        self._sort_plex_shows = key
+        self.save()
+
+    def set_filter_plex_movie_genre(self, key: str) -> None:
+        """Set the genre filter for Plex movies and persist the config."""
+        self._filter_plex_movie_genre = key
+        self.save()
+
+    def set_filter_plex_show_genre(self, key: str) -> None:
+        """Set the genre filter for Plex shows and persist the config."""
+        self._filter_plex_show_genre = key
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -272,6 +350,15 @@ class Config:
                 "video_snap_delay_ms": self.video_snap_delay_ms,
                 "show_network_indicator": self.show_network_indicator,
                 "button_layout": self.button_layout,
+            },
+            "sort_preferences": {
+                "retro_games": self._sort_retro_games,
+                "steam_games": self._sort_steam_games,
+                "moonlight_apps": self._sort_moonlight_apps,
+                "plex_movies": self._sort_plex_movies,
+                "plex_shows": self._sort_plex_shows,
+                "plex_movie_genre": self._filter_plex_movie_genre,
+                "plex_show_genre": self._filter_plex_show_genre,
             },
         }
         CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -366,6 +453,17 @@ class Config:
                 self.show_network_indicator = bool(ui["show_network_indicator"])
             if "button_layout" in ui and ui["button_layout"] in ("standard", "alternate"):
                 self.button_layout = ui["button_layout"]
+
+        # sort_preferences section
+        sort_prefs = raw.get("sort_preferences", {})
+        if isinstance(sort_prefs, dict):
+            self._sort_retro_games = sort_prefs.get("retro_games", "az")
+            self._sort_steam_games = sort_prefs.get("steam_games", "az")
+            self._sort_moonlight_apps = sort_prefs.get("moonlight_apps", "az")
+            self._sort_plex_movies = sort_prefs.get("plex_movies", "")
+            self._sort_plex_shows = sort_prefs.get("plex_shows", "")
+            self._filter_plex_movie_genre = sort_prefs.get("plex_movie_genre", "")
+            self._filter_plex_show_genre = sort_prefs.get("plex_show_genre", "")
 
 
 def ensure_config_dir() -> None:

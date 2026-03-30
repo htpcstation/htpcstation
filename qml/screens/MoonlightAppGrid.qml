@@ -439,7 +439,18 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 moonlightAppGrid._currentSort = newSort
                 moonlight.sortApps(newSort)
+                if (settings) settings.setSortMoonlightApps(newSort)
                 sortOverlay.close()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var saved = settings.sortMoonlightApps
+            if (saved) {
+                _currentSort = saved
+                if (moonlight) moonlight.sortApps(saved)
             }
         }
     }

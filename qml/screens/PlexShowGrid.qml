@@ -685,6 +685,7 @@ FocusScope {
                     showGridView._currentSort = newSort
                     showGridView._loading = true
                     plex.sortShows(newSort)
+                    if (settings) settings.setSortPlexShows(newSort)
                 } else {
                     // Apply genre filter
                     if (sortFilterOverlay._genreIndex === 0) {
@@ -693,6 +694,7 @@ FocusScope {
                         showGridView._currentGenreTitle = ""
                         showGridView._loading = true
                         plex.filterShowsByGenre("")
+                        if (settings) settings.setFilterPlexShowGenre("")
                     } else {
                         var gi = sortFilterOverlay._genreIndex - 1
                         var genre = sortFilterOverlay._genres[gi]
@@ -700,8 +702,26 @@ FocusScope {
                         showGridView._currentGenreTitle = genre.title
                         showGridView._loading = true
                         plex.filterShowsByGenre(genre.key)
+                        if (settings) settings.setFilterPlexShowGenre(genre.key)
                     }
                 }
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var savedSort = settings.sortPlexShows
+            var savedGenre = settings.filterPlexShowGenre
+            if (savedSort) {
+                _currentSort = savedSort
+                _loading = true
+                plex.sortShows(savedSort)
+            }
+            if (savedGenre) {
+                _currentGenreKey = savedGenre
+                _loading = true
+                plex.filterShowsByGenre(savedGenre)
             }
         }
     }

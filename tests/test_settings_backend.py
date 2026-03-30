@@ -1486,3 +1486,234 @@ class TestSettingsManagerResetControllerMapping:
         # Existing call signature without gamepad_manager — must not break
         manager = SettingsManager(config, MagicMock(), MagicMock())
         assert manager._gamepad_manager is None
+
+
+# ---------------------------------------------------------------------------
+# Config — sort_preferences section
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSortPreferences:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_sort_retro_games_default_is_az(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.sort_retro_games == "az"
+
+    def test_sort_steam_games_default_is_az(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.sort_steam_games == "az"
+
+    def test_sort_moonlight_apps_default_is_az(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.sort_moonlight_apps == "az"
+
+    def test_sort_plex_movies_default_is_empty(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.sort_plex_movies == ""
+
+    def test_sort_plex_shows_default_is_empty(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.sort_plex_shows == ""
+
+    def test_filter_plex_movie_genre_default_is_empty(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.filter_plex_movie_genre == ""
+
+    def test_filter_plex_show_genre_default_is_empty(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path)
+        assert config.filter_plex_show_genre == ""
+
+    def test_sort_preferences_loaded_from_json(self, tmp_path: Path) -> None:
+        config = self._make_config(tmp_path, {
+            "sort_preferences": {
+                "retro_games": "za",
+                "steam_games": "recent",
+                "moonlight_apps": "za",
+                "plex_movies": "rating",
+                "plex_shows": "year_desc",
+                "plex_movie_genre": "28",
+                "plex_show_genre": "10759",
+            }
+        })
+        assert config.sort_retro_games == "za"
+        assert config.sort_steam_games == "recent"
+        assert config.sort_moonlight_apps == "za"
+        assert config.sort_plex_movies == "rating"
+        assert config.sort_plex_shows == "year_desc"
+        assert config.filter_plex_movie_genre == "28"
+        assert config.filter_plex_show_genre == "10759"
+
+    def test_sort_preferences_saved_to_json(self, tmp_path: Path) -> None:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_sort_retro_games("za")
+            config.set_sort_steam_games("recent")
+            config.set_sort_moonlight_apps("za")
+            config.set_sort_plex_movies("rating")
+            config.set_sort_plex_shows("year_desc")
+            config.set_filter_plex_movie_genre("28")
+            config.set_filter_plex_show_genre("10759")
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert "sort_preferences" in saved
+        sp = saved["sort_preferences"]
+        assert sp["retro_games"] == "za"
+        assert sp["steam_games"] == "recent"
+        assert sp["moonlight_apps"] == "za"
+        assert sp["plex_movies"] == "rating"
+        assert sp["plex_shows"] == "year_desc"
+        assert sp["plex_movie_genre"] == "28"
+        assert sp["plex_show_genre"] == "10759"
+
+    def test_sort_preferences_missing_section_uses_defaults(self, tmp_path: Path) -> None:
+        """Config without sort_preferences section uses defaults."""
+        config = self._make_config(tmp_path, {"ui": {}})
+        assert config.sort_retro_games == "az"
+        assert config.sort_plex_movies == ""
+        assert config.filter_plex_movie_genre == ""
+
+    def test_sort_preferences_round_trip(self, tmp_path: Path) -> None:
+        """Sort preferences survive a save/load round-trip."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_sort_retro_games("recent")
+            config.set_filter_plex_movie_genre("28")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.sort_retro_games == "recent"
+        assert config2.filter_plex_movie_genre == "28"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — sort preference properties and slots
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerSortPreferences:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_sort_retro_games_property_default(self, tmp_path: Path) -> None:
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.sortRetroGames == "az"
+
+    def test_sort_plex_movies_property_default(self, tmp_path: Path) -> None:
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.sortPlexMovies == ""
+
+    def test_filter_plex_movie_genre_property_default(self, tmp_path: Path) -> None:
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.filterPlexMovieGenre == ""
+
+    def test_sort_retro_games_property_reflects_config(self, tmp_path: Path) -> None:
+        manager, _ = self._make_manager(tmp_path, {
+            "sort_preferences": {"retro_games": "recent"}
+        })
+        assert manager.sortRetroGames == "recent"
+
+    def test_set_sort_retro_games_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortRetroGamesChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortRetroGames("za")
+
+        assert config.sort_retro_games == "za"
+        assert len(emitted) == 1
+
+    def test_set_sort_steam_games_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortSteamGamesChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortSteamGames("recent")
+
+        assert config.sort_steam_games == "recent"
+        assert len(emitted) == 1
+
+    def test_set_sort_moonlight_apps_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortMoonlightAppsChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortMoonlightApps("za")
+
+        assert config.sort_moonlight_apps == "za"
+        assert len(emitted) == 1
+
+    def test_set_sort_plex_movies_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortPlexMoviesChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortPlexMovies("rating")
+
+        assert config.sort_plex_movies == "rating"
+        assert len(emitted) == 1
+
+    def test_set_sort_plex_shows_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortPlexShowsChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortPlexShows("year_desc")
+
+        assert config.sort_plex_shows == "year_desc"
+        assert len(emitted) == 1
+
+    def test_set_filter_plex_movie_genre_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.filterPlexMovieGenreChanged.connect(lambda: emitted.append(True))
+
+        manager.setFilterPlexMovieGenre("28")
+
+        assert config.filter_plex_movie_genre == "28"
+        assert len(emitted) == 1
+
+    def test_set_filter_plex_show_genre_updates_config_and_emits_signal(self, tmp_path: Path) -> None:
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.filterPlexShowGenreChanged.connect(lambda: emitted.append(True))
+
+        manager.setFilterPlexShowGenre("10759")
+
+        assert config.filter_plex_show_genre == "10759"
+        assert len(emitted) == 1
+
+    def test_set_filter_plex_movie_genre_empty_clears_filter(self, tmp_path: Path) -> None:
+        """Setting genre to empty string clears the filter."""
+        manager, config = self._make_manager(tmp_path, {
+            "sort_preferences": {"plex_movie_genre": "28"}
+        })
+
+        manager.setFilterPlexMovieGenre("")
+
+        assert config.filter_plex_movie_genre == ""

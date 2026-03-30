@@ -64,6 +64,13 @@ class SettingsManager(QObject):
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
     showNetworkIndicatorChanged = Signal()
+    sortRetroGamesChanged = Signal()
+    sortSteamGamesChanged = Signal()
+    sortMoonlightAppsChanged = Signal()
+    sortPlexMoviesChanged = Signal()
+    sortPlexShowsChanged = Signal()
+    filterPlexMovieGenreChanged = Signal()
+    filterPlexShowGenreChanged = Signal()
 
     def __init__(
         self,
@@ -134,6 +141,27 @@ class SettingsManager(QObject):
 
     def _get_show_network_indicator(self) -> bool:
         return self._config.show_network_indicator
+
+    def _get_sort_retro_games(self) -> str:
+        return self._config.sort_retro_games
+
+    def _get_sort_steam_games(self) -> str:
+        return self._config.sort_steam_games
+
+    def _get_sort_moonlight_apps(self) -> str:
+        return self._config.sort_moonlight_apps
+
+    def _get_sort_plex_movies(self) -> str:
+        return self._config.sort_plex_movies
+
+    def _get_sort_plex_shows(self) -> str:
+        return self._config.sort_plex_shows
+
+    def _get_filter_plex_movie_genre(self) -> str:
+        return self._config.filter_plex_movie_genre
+
+    def _get_filter_plex_show_genre(self) -> str:
+        return self._config.filter_plex_show_genre
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -208,6 +236,41 @@ class SettingsManager(QObject):
         bool,
         fget=_get_show_network_indicator,
         notify=showNetworkIndicatorChanged,
+    )
+    sortRetroGames = Property(
+        str,
+        fget=_get_sort_retro_games,
+        notify=sortRetroGamesChanged,
+    )
+    sortSteamGames = Property(
+        str,
+        fget=_get_sort_steam_games,
+        notify=sortSteamGamesChanged,
+    )
+    sortMoonlightApps = Property(
+        str,
+        fget=_get_sort_moonlight_apps,
+        notify=sortMoonlightAppsChanged,
+    )
+    sortPlexMovies = Property(
+        str,
+        fget=_get_sort_plex_movies,
+        notify=sortPlexMoviesChanged,
+    )
+    sortPlexShows = Property(
+        str,
+        fget=_get_sort_plex_shows,
+        notify=sortPlexShowsChanged,
+    )
+    filterPlexMovieGenre = Property(
+        str,
+        fget=_get_filter_plex_movie_genre,
+        notify=filterPlexMovieGenreChanged,
+    )
+    filterPlexShowGenre = Property(
+        str,
+        fget=_get_filter_plex_show_genre,
+        notify=filterPlexShowGenreChanged,
     )
 
     # ------------------------------------------------------------------
@@ -303,6 +366,48 @@ class SettingsManager(QObject):
         """Enable or disable the network status indicator."""
         self._config.set_show_network_indicator(enabled)
         self.showNetworkIndicatorChanged.emit()
+
+    @Slot(str)
+    def setSortRetroGames(self, key: str) -> None:
+        """Persist the sort preference for the retro games grid."""
+        self._config.set_sort_retro_games(key)
+        self.sortRetroGamesChanged.emit()
+
+    @Slot(str)
+    def setSortSteamGames(self, key: str) -> None:
+        """Persist the sort preference for the Steam games grid."""
+        self._config.set_sort_steam_games(key)
+        self.sortSteamGamesChanged.emit()
+
+    @Slot(str)
+    def setSortMoonlightApps(self, key: str) -> None:
+        """Persist the sort preference for the Moonlight apps grid."""
+        self._config.set_sort_moonlight_apps(key)
+        self.sortMoonlightAppsChanged.emit()
+
+    @Slot(str)
+    def setSortPlexMovies(self, key: str) -> None:
+        """Persist the sort preference for the Plex movies grid."""
+        self._config.set_sort_plex_movies(key)
+        self.sortPlexMoviesChanged.emit()
+
+    @Slot(str)
+    def setSortPlexShows(self, key: str) -> None:
+        """Persist the sort preference for the Plex shows grid."""
+        self._config.set_sort_plex_shows(key)
+        self.sortPlexShowsChanged.emit()
+
+    @Slot(str)
+    def setFilterPlexMovieGenre(self, key: str) -> None:
+        """Persist the genre filter for Plex movies."""
+        self._config.set_filter_plex_movie_genre(key)
+        self.filterPlexMovieGenreChanged.emit()
+
+    @Slot(str)
+    def setFilterPlexShowGenre(self, key: str) -> None:
+        """Persist the genre filter for Plex shows."""
+        self._config.set_filter_plex_show_genre(key)
+        self.filterPlexShowGenreChanged.emit()
 
     # -- Button layout ----------------------------------------------------
 

@@ -669,6 +669,7 @@ FocusScope {
                     movieGridView._currentSort = newSort
                     movieGridView._loading = true
                     plex.sortMovies(newSort)
+                    if (settings) settings.setSortPlexMovies(newSort)
                 } else {
                     // Apply genre filter
                     if (sortFilterOverlay._genreIndex === 0) {
@@ -677,6 +678,7 @@ FocusScope {
                         movieGridView._currentGenreTitle = ""
                         movieGridView._loading = true
                         plex.filterByGenre("")
+                        if (settings) settings.setFilterPlexMovieGenre("")
                     } else {
                         var gi = sortFilterOverlay._genreIndex - 1
                         var genre = sortFilterOverlay._genres[gi]
@@ -684,8 +686,26 @@ FocusScope {
                         movieGridView._currentGenreTitle = genre.title
                         movieGridView._loading = true
                         plex.filterByGenre(genre.key)
+                        if (settings) settings.setFilterPlexMovieGenre(genre.key)
                     }
                 }
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var savedSort = settings.sortPlexMovies
+            var savedGenre = settings.filterPlexMovieGenre
+            if (savedSort) {
+                _currentSort = savedSort
+                _loading = true
+                plex.sortMovies(savedSort)
+            }
+            if (savedGenre) {
+                _currentGenreKey = savedGenre
+                _loading = true
+                plex.filterByGenre(savedGenre)
             }
         }
     }

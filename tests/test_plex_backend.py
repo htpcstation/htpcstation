@@ -2214,7 +2214,7 @@ class TestGetGenres:
 
 
 class TestSelectLibraryResetsSortFilter:
-    """selectLibrary resets _current_sort and _current_genre."""
+    """selectLibrary preserves _current_sort and _current_genre (sort persists across library switches)."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -2231,7 +2231,8 @@ class TestSelectLibraryResetsSortFilter:
             lib = PlexLibrary(config)
         return lib
 
-    def test_select_library_resets_sort(self) -> None:
+    def test_select_library_preserves_sort(self) -> None:
+        """selectLibrary no longer resets sort/filter — sort persists across library switches."""
         lib = self._make_lib()
         lib._current_sort = "titleSort:asc"
         lib._current_genre = "42"
@@ -2243,8 +2244,8 @@ class TestSelectLibraryResetsSortFilter:
 
         lib.selectLibrary("4")
 
-        assert lib._current_sort == ""
-        assert lib._current_genre == ""
+        assert lib._current_sort == "titleSort:asc"
+        assert lib._current_genre == "42"
 
     def test_select_library_ondeck_does_not_reset_sort(self) -> None:
         """selectLibrary('_ondeck') must not reset sort/filter state."""

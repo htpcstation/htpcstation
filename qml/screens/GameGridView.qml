@@ -431,7 +431,18 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 gameGridView._currentSort = newSort
                 library.sortGames(newSort)
+                if (settings) settings.setSortRetroGames(newSort)
                 sortOverlay.close()
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var saved = settings.sortRetroGames
+            if (saved) {
+                _currentSort = saved
+                library.sortGames(saved)
             }
         }
     }

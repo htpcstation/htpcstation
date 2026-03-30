@@ -82,7 +82,6 @@ FocusScope {
                 if (currentItem) {
                     library.selectSystem(currentItem.folderNameValue)
                     retroGamesScreen.selectedSystemName = currentItem.displayNameValue
-                    gameGridView._currentSort = "az"
                     retroGamesScreen.currentView = "games"
                 }
             } else if (keys.isCancel(event)) {
@@ -156,7 +155,6 @@ FocusScope {
                     systemList.currentIndex = index
                     library.selectSystem(model.folderName)
                     retroGamesScreen.selectedSystemName = model.displayName
-                    gameGridView._currentSort = "az"
                     retroGamesScreen.currentView = "games"
                 }
             }
