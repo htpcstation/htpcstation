@@ -558,18 +558,17 @@ FocusScope {
                             }
                         }
 
-                        // ── Right: metadata fields ───────────────────────────
+                        // ── Middle: metadata fields ───────────────────────────
                         Column {
                             id: albumMetadataColumn
 
                             anchors {
                                 top: parent.top
                                 left: albumArtArea.right
-                                right: parent.right
                                 topMargin: root.vpx(16)
                                 leftMargin: root.vpx(16)
-                                rightMargin: root.vpx(16)
                             }
+                            width: root.vpx(220)
                             spacing: root.vpx(4)
 
                             Repeater {
@@ -631,20 +630,35 @@ FocusScope {
                                 }
                             }
                         }
-                    }
 
-                    // ── Summary ──────────────────────────────────────────────
-                    Text {
-                        width: parent.width - root.vpx(32)
-                        x: root.vpx(16)
-                        topPadding: root.vpx(8)
-                        bottomPadding: root.vpx(8)
-                        text: listenScreen._albumData.summary || ""
-                        color: Theme.colorText
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        wrapMode: Text.Wrap
-                        visible: text !== ""
+                        // ── Right: summary ───────────────────────────────────
+                        Flickable {
+                            anchors {
+                                top: parent.top
+                                left: albumMetadataColumn.right
+                                right: parent.right
+                                bottom: parent.bottom
+                                topMargin: root.vpx(16)
+                                leftMargin: root.vpx(16)
+                                rightMargin: root.vpx(16)
+                                bottomMargin: root.vpx(16)
+                            }
+                            contentHeight: summaryText.implicitHeight
+                            clip: true
+                            interactive: false
+                            visible: !!(listenScreen._albumData.summary)
+
+                            Text {
+                                id: summaryText
+                                width: parent.width
+                                text: listenScreen._albumData.summary || ""
+                                color: Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                wrapMode: Text.Wrap
+                                lineHeight: 1.3
+                            }
+                        }
                     }
 
                     // ── Separator ────────────────────────────────────────────
