@@ -35,8 +35,16 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
-    // Current view: "artists", "detail", "album", or "nowplaying"
-    property string currentView: "artists"
+    // Current view: "menu", "artists", "detail", "album", or "nowplaying"
+    property string currentView: "menu"
+
+    // Previous view — used by Now Playing's B button to return to the right place
+    property string _previousView: "menu"
+
+    function _goToNowPlaying() {
+        _previousView = currentView
+        currentView = "nowplaying"
+    }
 
     // Section key of the music library (set on first load).
     property string _musicSectionKey: ""
@@ -136,7 +144,9 @@ FocusScope {
 
     // ── Focus routing ─────────────────────────────────────────────────────────
     function _routeFocus() {
-        if (currentView === "artists") {
+        if (currentView === "menu") {
+            listenMenu.forceActiveFocus()
+        } else if (currentView === "artists") {
             artistGrid.forceActiveFocus()
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
@@ -186,7 +196,7 @@ FocusScope {
         _routeFocus()
     }
 
-    // ── Header bar ────────────────────────────────────────────────────────────
+    // ── Header bar (shared by menu and artists views) ──────────────────────────
     Rectangle {
         id: headerBar
 
@@ -197,6 +207,7 @@ FocusScope {
         }
         height: root.vpx(56)
         color: Theme.colorSecondary
+        visible: listenScreen.currentView === "menu" || listenScreen.currentView === "artists"
 
         Text {
             anchors {
@@ -204,10 +215,113 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  Music"
+            text: listenScreen.currentView === "artists" ? "◀  Artists" : "Listen"
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
+    }
+
+    // ── Menu list ─────────────────────────────────────────────────────────────
+    ListView {
+        id: listenMenu
+
+        anchors {
+            top: headerBar.bottom
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+            margins: root.vpx(16)
+        }
+
+        visible: listenScreen.currentView === "menu"
+        clip: true
+        focus: false
+        keyNavigationEnabled: true
+        highlightMoveDuration: Theme.animDurationFast
+
+        model: {
+            var items = []
+            // Now Playing — only show when music is loaded
+            if (homeScreen._playbackTracks.length > 0) {
+                items.push({ label: "Now Playing", action: "nowplaying" })
+            }
+            items.push({ label: "Artists", action: "artists" })
+            return items
+        }
+
+        delegate: Item {
+            id: menuDelegate
+
+            width: listenMenu.width
+            height: root.vpx(56)
+
+            readonly property string menuAction: modelData.action
+
+            // Subtle highlight for current item
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorPrimary
+                opacity: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus ? 0.12 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: modelData.label
+                color: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
+                    ? Theme.colorText : Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                font.bold: menuDelegate.ListView.isCurrentItem
+            }
+
+            // Now Playing subtitle — show current track
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    top: parent.verticalCenter
+                    topMargin: root.vpx(2)
+                }
+                visible: modelData.action === "nowplaying" && homeScreen.nowPlayingTrack !== ""
+                text: "♫ " + homeScreen.nowPlayingTrack
+                color: Theme.colorPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                elide: Text.ElideRight
+                width: parent.width - root.vpx(32)
+            }
+
+            // Focus ring
+            FocusRing {
+                visible: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
+            }
+        }
+
+        Keys.onPressed: (event) => {
+            if (keys.isAccept(event)) {
+                event.accepted = true
+                var item = listenMenu.currentItem
+                if (item) {
+                    if (item.menuAction === "nowplaying") {
+                        listenScreen._goToNowPlaying()
+                    } else if (item.menuAction === "artists") {
+                        listenScreen.currentView = "artists"
+                    }
+                }
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                listenScreen.back()
+            } else if (event.key === Qt.Key_Up && listenMenu.currentIndex === 0) {
+                event.accepted = true
+                listenScreen.back()
+            }
         }
     }
 
@@ -251,10 +365,10 @@ FocusScope {
                 }
             } else if (keys.isCancel(event)) {
                 event.accepted = true
-                listenScreen.back()
+                listenScreen.currentView = "menu"
             } else if (event.key === Qt.Key_Up && artistGrid.currentIndex < artistGrid._columns) {
                 event.accepted = true
-                listenScreen.back()
+                listenScreen.currentView = "menu"
             }
         }
 
@@ -498,7 +612,7 @@ FocusScope {
                     if (keys.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
-                        listenScreen.currentView = "nowplaying"
+                        listenScreen._goToNowPlaying()
                     } else if (event.key === Qt.Key_Down) {
                         event.accepted = true
                         trackList._playAllFocused = false
@@ -527,14 +641,14 @@ FocusScope {
                     } else if (keys.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, trackList.currentIndex)
-                        listenScreen.currentView = "nowplaying"
+                        listenScreen._goToNowPlaying()
                     } else if (keys.isContext1(event)) {
                         // X button — Play All (from track 1)
                         // Note: HomeScreen's global X handler will catch this if music is already playing.
                         // If no music is loaded yet, start playback here.
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
-                        listenScreen.currentView = "nowplaying"
+                        listenScreen._goToNowPlaying()
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
                         listenScreen.currentView = "detail"
@@ -768,7 +882,7 @@ FocusScope {
                                 hoverEnabled: true
                                 onClicked: {
                                     homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
-                                    listenScreen.currentView = "nowplaying"
+                                    listenScreen._goToNowPlaying()
                                 }
                             }
                         }
@@ -870,7 +984,7 @@ FocusScope {
                         trackList.currentIndex = index
                         trackList.forceActiveFocus()
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, index)
-                        listenScreen.currentView = "nowplaying"
+                        listenScreen._goToNowPlaying()
                     }
                 }
             }
@@ -912,7 +1026,7 @@ FocusScope {
         Keys.onPressed: (event) => {
             if (keys.isCancel(event)) {
                 event.accepted = true
-                listenScreen.currentView = "album"
+                listenScreen.currentView = listenScreen._previousView || "menu"
             } else if (keys.isAccept(event)) {
                 // A button — play/pause
                 event.accepted = true
