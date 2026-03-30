@@ -558,7 +558,7 @@ These are intentional shortcuts that should be revisited:
 | Synchronous OAuth polling | `settings_manager.py` | `check_pin()` called synchronously in QTimer callback | Move to thread if UI lag is noticeable |
 | Steam games not fullscreen | `steam_library.py` | Game fullscreen is controlled by each game's own settings | Investigate Steam Big Picture mode or per-game launch options |
 | Moonlight artwork: Steam search only | `moonlight_artwork.py` | Non-game apps (Desktop, Playnite) get wrong or no artwork | Add IGDB/RAWG fallback, or manual metadata entry |
-| Moonlight/Steam detail views lack metadata | `MoonlightAppDetail.qml`, `SteamGameDetail.qml` | Only show name, host, install dir — no description/genre/etc. | Scrape from Steam Store API (`appdetails`) and cache locally |
+| Moonlight detail view lacks metadata | `MoonlightAppDetail.qml` | Only shows name and host — no description/genre/etc. | Wire up gamelist.xml read side + Steam API fetch via cached steam_app_id (Steam detail view is done) |
 
 ---
 
@@ -599,7 +599,7 @@ These are intentional shortcuts that should be revisited:
 - **Fixed — Minimized player on relaunch:** When re-launching a title from "Continue Watching" after killing the browser mid-playback, Plex opened with the player minimized. Fixed by extending `tryAutoPlay()` to: (1) detect and click `[data-testid="expandPlayerButton"]` to expand the mini player, (2) wait for the `<video>` element to appear in paused state, (3) call `video.play()` to resume playback. Required `--autoplay-policy=no-user-gesture-required` browser flag because `video.play()` from a content script is an untrusted context. Synthetic keyboard events (`sendKey`) and `simulateClick` on the resume button both failed due to the autoplay policy — only the direct `video.play()` API with the policy flag works.
 
 ### Deferred Items (no milestone assigned)
-- **Game metadata scraping for Steam and Moonlight detail views:** Automatically fetch description, publisher, developer, players, release year, genre, etc. from Steam Store API (or IGDB/RAWG as fallback). Retro games already have this from gamelist.xml; Steam and Moonlight detail views currently show minimal metadata (name, install dir, host). The Steam Store API (`store.steampowered.com/api/appdetails/?appids=<id>`) returns rich metadata for Steam games. For Moonlight apps, cross-reference the app name against Steam search (same pattern as artwork lookup) to get the Steam AppID, then fetch details. Cache metadata locally (similar to artwork cache). Non-game apps (Desktop, Playnite, etc.) would show no metadata — graceful fallback.
+- **Moonlight rich metadata:** Wire up gamelist.xml read side for Moonlight (load on refresh, merge into getApp()). Add fetchMetadata slot that reuses Steam API fetcher via cached `steam_app_id` from `artwork_index.json`. Update `MoonlightAppDetail.qml` with rich metadata fields. Non-game apps (Desktop, Playnite) would show no metadata — graceful fallback. *(Steam metadata is complete — see M5 architecture above.)*
 - Detail list view toggle (alternative to grid for games)
 - Custom user-defined game collections
 - Standalone emulator support (Dolphin, PCSX2)

@@ -322,7 +322,8 @@ class MoonlightLibrary(QObject):
         """Sort the apps model.
 
         sort_key: 'az' (A-Z), 'za' (Z-A).
-        No 'recent' sort for Moonlight (no play timestamps).
+        Note: 'recent' sort is not yet implemented but play timestamps
+        are available via play_history.json (MoonlightApp.last_played).
         """
         self._current_sort = sort_key
         self._apply_filter_and_sort()

@@ -5,6 +5,8 @@ import "../components"
 // Recently Played detail panel — simplified detail view for a recently played game.
 //
 // Shows: game name, source badge, poster image, and a launch button.
+// For Steam entries, also shows rich metadata (developer, publisher, genre, etc.)
+// fetched asynchronously via the Steam metadata pipeline.
 //
 // Focus flow:
 //   Gains focus when PcGamesScreen switches to "detail" view for the "recent" source.
@@ -17,6 +19,9 @@ FocusScope {
     // The dict from the recently played entries array.
     // Keys: name, source, imagePath, lastPlayed, appId, hostAddress
     property var gameData: ({})
+
+    // Async metadata dict populated by steam.metadataChanged signal (Steam only).
+    property var _metadata: ({})
 
     // Emitted when the user presses B / Escape to return to the grid.
     signal back()
@@ -31,6 +36,24 @@ FocusScope {
     // Only process input when this view is active.
     enabled: focus
 
+    // ── Trigger metadata fetch when gameData changes ──────────────────────────
+    onGameDataChanged: {
+        recentlyPlayedDetail._metadata = ({})
+        if (gameData.source === "steam" && gameData.appId && steam) {
+            steam.fetchMetadata(gameData.appId)
+        }
+    }
+
+    // ── Listen for metadataChanged to refresh displayed data ──────────────────
+    Connections {
+        target: steam
+        function onMetadataChanged(appId, metadata) {
+            if (appId === recentlyPlayedDetail.gameData.appId) {
+                recentlyPlayedDetail._metadata = metadata
+            }
+        }
+    }
+
     // ── Helper: format last played timestamp ──────────────────────────────────
     // Input: Unix timestamp (int) → "YYYY-MM-DD" or "Never"
     function _formatLastPlayed(timestamp) {
@@ -40,6 +63,22 @@ FocusScope {
         var month = String(d.getMonth() + 1).padStart(2, "0")
         var day = String(d.getDate()).padStart(2, "0")
         return year + "-" + month + "-" + day
+    }
+
+    // ── Helper: format rating as stars ────────────────────────────────────────
+    // Input: float 0.0–1.0 → "★★★★☆" (5-star scale)
+    // Returns "" for unrated games (rating <= 0) so the row is hidden.
+    function _formatRating(rating) {
+        if (rating === undefined || rating === null || rating === "") return ""
+        if (rating <= 0) return ""
+        var stars = Math.round(rating * 5)
+        var filled = ""
+        var empty = ""
+        for (var i = 0; i < 5; i++) {
+            if (i < stars) filled += "★"
+            else empty += "☆"
+        }
+        return filled + empty
     }
 
     // ── Key handling ─────────────────────────────────────────────────────────
@@ -233,6 +272,70 @@ FocusScope {
                 }
                 spacing: root.vpx(8)
 
+                // ── Loading indicator (Steam only) ────────────────────────────
+                Text {
+                    visible: recentlyPlayedDetail.gameData.source === "steam"
+                             && Object.keys(recentlyPlayedDetail._metadata).length === 0
+                    text: "Loading..."
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    font.italic: true
+                }
+
+                // ── Rich metadata rows (Steam only) ───────────────────────────
+                Repeater {
+                    model: recentlyPlayedDetail.gameData.source === "steam"
+                           ? [
+                               {
+                                   label: "Developer",
+                                   value: recentlyPlayedDetail._metadata.developer || ""
+                               },
+                               {
+                                   label: "Publisher",
+                                   value: recentlyPlayedDetail._metadata.publisher || ""
+                               },
+                               {
+                                   label: "Genre",
+                                   value: recentlyPlayedDetail._metadata.genre || ""
+                               },
+                               {
+                                   label: "Players",
+                                   value: recentlyPlayedDetail._metadata.players || ""
+                               },
+                               {
+                                   label: "Released",
+                                   value: recentlyPlayedDetail._metadata.releaseDate || ""
+                               },
+                               {
+                                   label: "Rating",
+                                   value: recentlyPlayedDetail._formatRating(
+                                              recentlyPlayedDetail._metadata.rating)
+                               },
+                           ]
+                           : []
+
+                    Row {
+                        spacing: root.vpx(8)
+                        visible: modelData.value !== ""
+
+                        Text {
+                            text: modelData.label + ":"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            width: root.vpx(100)
+                        }
+
+                        Text {
+                            text: modelData.value
+                            color: Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        }
+                    }
+                }
+
                 Row {
                     spacing: root.vpx(8)
 
@@ -253,6 +356,26 @@ FocusScope {
                         font.pixelSize: root.vpx(Theme.fontSizeBody)
                     }
                 }
+            }
+
+            // ── Description (Steam only) ──────────────────────────────────────
+            Text {
+                id: descriptionText
+
+                anchors {
+                    top: metadataColumn.bottom
+                    topMargin: root.vpx(8)
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                text: recentlyPlayedDetail._metadata.description || ""
+                visible: (recentlyPlayedDetail._metadata.description || "") !== ""
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                wrapMode: Text.Wrap
+                clip: true
             }
         }
     }
