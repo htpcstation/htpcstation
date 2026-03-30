@@ -1054,6 +1054,45 @@ class PlexLibrary(QObject):
                 })
         return albums
 
+    @Slot(result="QVariant")
+    def getPlaylists(self) -> list:
+        """Return audio playlists as a list of dicts."""
+        if self._client is None:
+            return []
+        raw = self._client.get_playlists()
+        result = []
+        for p in raw:
+            if p.get("playlistType") != "audio":
+                continue
+            result.append({
+                "ratingKey": str(p.get("ratingKey", "")),
+                "title": p.get("title", ""),
+                "leafCount": int(p.get("leafCount", 0) or 0),
+                "duration": int(p.get("duration", 0) or 0),
+                "smart": bool(p.get("smart", False)),
+            })
+        return result
+
+    @Slot(str, result="QVariant")
+    def getPlaylistTracks(self, rating_key: str) -> list:
+        """Return tracks for a playlist as a list of dicts."""
+        if self._client is None:
+            return []
+        raw = self._client.get_playlist_items(rating_key)
+        result = []
+        for item in raw:
+            track = parse_track(item)
+            result.append({
+                "ratingKey": track.rating_key,
+                "title": track.title,
+                "index": track.index,
+                "durationMs": track.duration_ms,
+                "parentTitle": track.parent_title,
+                "grandparentTitle": track.grandparent_title,
+                "mediaKey": track.media_key,
+            })
+        return result
+
     @Slot(str, result="QVariant")
     def getRecentlyAddedAlbums(self, section_key: str) -> list:
         """Return recently added albums for a music library section."""

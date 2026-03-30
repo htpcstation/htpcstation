@@ -145,6 +145,20 @@ class PlexClient:
         container = data.get("MediaContainer", {})
         return container.get("Metadata", [])
 
+    def get_playlists(self) -> list[dict]:
+        """GET /playlists — returns all playlists."""
+        data = self._get("/playlists")
+        if data is None:
+            return []
+        return data.get("MediaContainer", {}).get("Metadata", [])
+
+    def get_playlist_items(self, rating_key: str) -> list[dict]:
+        """GET /playlists/{ratingKey}/items — returns playlist tracks."""
+        data = self._get(f"/playlists/{rating_key}/items")
+        if data is None:
+            return []
+        return data.get("MediaContainer", {}).get("Metadata", [])
+
     def get_poster_url(self, thumb_path: str) -> str:
         """Build full authenticated poster URL from a thumb path.
 

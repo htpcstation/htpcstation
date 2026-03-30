@@ -1756,6 +1756,263 @@ class TestGetRecentlyAddedAlbums:
         mock_client._get.assert_called_once_with("/library/sections/42/recentlyAdded")
 
 
+# ---------------------------------------------------------------------------
+# PlexClient.get_playlists — Task 012
+# ---------------------------------------------------------------------------
+
+
+class TestGetPlaylists:
+    def test_returns_playlist_list_from_api(self) -> None:
+        """get_playlists returns the Metadata list from the /playlists endpoint."""
+        from backend.plex_client import PlexClient
+
+        playlists = [
+            {"ratingKey": "1", "title": "My Playlist", "playlistType": "audio", "leafCount": 10, "duration": 3600000},
+            {"ratingKey": "2", "title": "Video Playlist", "playlistType": "video", "leafCount": 5, "duration": 0},
+        ]
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "MediaContainer": {"Metadata": playlists}
+            }
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_playlists()
+
+        assert result == playlists
+        assert len(result) == 2
+
+    def test_returns_empty_list_on_error(self) -> None:
+        """get_playlists returns [] on connection error."""
+        from backend.plex_client import PlexClient
+        import requests as req
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.get.side_effect = req.exceptions.ConnectionError("refused")
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_playlists()
+
+        assert result == []
+
+    def test_returns_empty_list_when_no_metadata_key(self) -> None:
+        """get_playlists returns [] when MediaContainer has no Metadata key."""
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {"MediaContainer": {}}
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_playlists()
+
+        assert result == []
+
+    def test_calls_correct_endpoint(self) -> None:
+        """get_playlists calls /playlists."""
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {"MediaContainer": {"Metadata": []}}
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            client.get_playlists()
+
+        call_url = mock_session.get.call_args[0][0]
+        assert call_url == "http://server:32400/playlists"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getPlaylists — Task 012
+# ---------------------------------------------------------------------------
+
+
+class TestGetPlaylists:
+    def test_filters_to_audio_only_playlists(self) -> None:
+        """getPlaylists returns only playlists with playlistType == 'audio'."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {"ratingKey": "1", "title": "My Music", "playlistType": "audio", "leafCount": 10, "duration": 3600000, "smart": False},
+            {"ratingKey": "2", "title": "My Videos", "playlistType": "video", "leafCount": 5, "duration": 0, "smart": False},
+            {"ratingKey": "3", "title": "Smart Music", "playlistType": "audio", "leafCount": 20, "duration": 7200000, "smart": True},
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylists()
+
+        assert len(result) == 2
+        assert all(p["ratingKey"] in ("1", "3") for p in result)
+
+    def test_returns_correct_fields(self) -> None:
+        """getPlaylists returns dicts with ratingKey, title, leafCount, duration, smart."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {"ratingKey": "42", "title": "Chill Vibes", "playlistType": "audio",
+             "leafCount": 15, "duration": 5400000, "smart": False},
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylists()
+
+        assert len(result) == 1
+        pl = result[0]
+        assert pl["ratingKey"] == "42"
+        assert pl["title"] == "Chill Vibes"
+        assert pl["leafCount"] == 15
+        assert pl["duration"] == 5400000
+        assert pl["smart"] is False
+
+    def test_returns_empty_list_when_no_client(self) -> None:
+        """getPlaylists returns [] when no Plex client is configured."""
+        lib = _make_lib()
+        lib._client = None
+
+        result = lib.getPlaylists()
+
+        assert result == []
+
+    def test_returns_empty_list_when_no_audio_playlists(self) -> None:
+        """getPlaylists returns [] when there are no audio playlists."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {"ratingKey": "1", "title": "Videos", "playlistType": "video", "leafCount": 3, "duration": 0},
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylists()
+
+        assert result == []
+
+    def test_handles_none_duration_and_leaf_count(self) -> None:
+        """getPlaylists coerces None duration and leafCount to 0."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {"ratingKey": "1", "title": "Playlist", "playlistType": "audio",
+             "leafCount": None, "duration": None, "smart": False},
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylists()
+
+        assert result[0]["leafCount"] == 0
+        assert result[0]["duration"] == 0
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getPlaylistTracks — Task 012
+# ---------------------------------------------------------------------------
+
+
+class TestGetPlaylistTracks:
+    def test_returns_track_dicts_with_correct_fields(self) -> None:
+        """getPlaylistTracks returns track dicts with all expected fields."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = [
+            {
+                "ratingKey": "700",
+                "title": "Come Together",
+                "index": 1,
+                "duration": 259000,
+                "parentTitle": "Abbey Road",
+                "grandparentTitle": "The Beatles",
+                "Media": [{"Part": [{"key": "/library/parts/12345/file.flac"}]}],
+            },
+            {
+                "ratingKey": "800",
+                "title": "Bohemian Rhapsody",
+                "index": 1,
+                "duration": 354000,
+                "parentTitle": "A Night at the Opera",
+                "grandparentTitle": "Queen",
+                "Media": [{"Part": [{"key": "/library/parts/99999/file.flac"}]}],
+            },
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylistTracks("42")
+
+        assert len(result) == 2
+        assert result[0]["ratingKey"] == "700"
+        assert result[0]["title"] == "Come Together"
+        assert result[0]["index"] == 1
+        assert result[0]["durationMs"] == 259000
+        assert result[0]["parentTitle"] == "Abbey Road"
+        assert result[0]["grandparentTitle"] == "The Beatles"
+        assert result[0]["mediaKey"] == "/library/parts/12345/file.flac"
+        assert result[1]["ratingKey"] == "800"
+        assert result[1]["grandparentTitle"] == "Queen"
+
+    def test_returns_empty_list_when_no_client(self) -> None:
+        """getPlaylistTracks returns [] when no Plex client is configured."""
+        lib = _make_lib()
+        lib._client = None
+
+        result = lib.getPlaylistTracks("42")
+
+        assert result == []
+
+    def test_returns_empty_list_on_api_error(self) -> None:
+        """getPlaylistTracks returns [] when the API returns an empty list."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = []
+        lib._client = mock_client
+
+        result = lib.getPlaylistTracks("42")
+
+        assert result == []
+
+    def test_all_expected_keys_present(self) -> None:
+        """getPlaylistTracks track dicts have all required keys."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = [
+            {"ratingKey": "700", "title": "Track"},
+        ]
+        lib._client = mock_client
+
+        result = lib.getPlaylistTracks("42")
+
+        assert len(result) == 1
+        track = result[0]
+        assert "ratingKey" in track
+        assert "title" in track
+        assert "index" in track
+        assert "durationMs" in track
+        assert "parentTitle" in track
+        assert "grandparentTitle" in track
+        assert "mediaKey" in track
+
+    def test_calls_correct_rating_key(self) -> None:
+        """getPlaylistTracks passes the rating_key to get_playlist_items."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = []
+        lib._client = mock_client
+
+        lib.getPlaylistTracks("99")
+
+        mock_client.get_playlist_items.assert_called_once_with("99")
+
+
 class TestWorkerLoadSectionArtistCache:
     """Tests for the cache-aware _worker_load_section behaviour for artist sections."""
 

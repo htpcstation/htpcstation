@@ -79,6 +79,15 @@ FocusScope {
     // "detail" when entering from artist detail, "recentlyadded" when entering from Recently Added.
     property string _albumReturnView: "detail"
 
+    // Playlists list (populated when entering playlists view).
+    property var _playlists: []
+
+    // Selected playlist data (set when user selects a playlist).
+    property var _selectedPlaylist: ({})  // {ratingKey, title, leafCount, duration}
+
+    // Playlist tracks (populated when entering playlistdetail view).
+    property var _playlistTracks: []
+
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
         if (_musicSectionKey) return  // already selected
@@ -149,6 +158,14 @@ FocusScope {
         return _formatDuration(total)
     }
 
+    function _formatPlaylistDuration(ms) {
+        var totalMin = Math.floor(ms / 60000)
+        var h = Math.floor(totalMin / 60)
+        var m = totalMin % 60
+        if (h > 0) return h + "h " + m + "m"
+        return m + "m"
+    }
+
     // ── Focus routing ─────────────────────────────────────────────────────────
     function _routeFocus() {
         if (currentView === "menu") {
@@ -166,6 +183,13 @@ FocusScope {
             trackList.positionViewAtBeginning()
         } else if (currentView === "nowplaying") {
             nowPlayingView.forceActiveFocus()
+        } else if (currentView === "playlists") {
+            playlistsList.forceActiveFocus()
+        } else if (currentView === "playlistdetail") {
+            playlistTrackList._playAllFocused = true
+            playlistTrackList.forceActiveFocus()
+            playlistTrackList.currentIndex = 0
+            playlistTrackList.positionViewAtBeginning()
         }
     }
 
@@ -204,6 +228,12 @@ FocusScope {
             _albumData = plex.getAlbum(_selectedAlbumKey)
             _tracks = plex.getTracks(_selectedAlbumKey)
             trackList.currentIndex = 0
+        } else if (currentView === "playlists") {
+            _playlists = plex.getPlaylists()
+            playlistsList.currentIndex = 0
+        } else if (currentView === "playlistdetail" && _selectedPlaylist.ratingKey) {
+            _playlistTracks = plex.getPlaylistTracks(_selectedPlaylist.ratingKey)
+            playlistTrackList.currentIndex = 0
         }
         _routeFocus()
     }
@@ -259,6 +289,7 @@ FocusScope {
                 items.push({ label: "Now Playing", action: "nowplaying" })
             }
             items.push({ label: "Recently Added", action: "recentlyadded" })
+            items.push({ label: "Playlists", action: "playlists" })
             items.push({ label: "Artists", action: "artists" })
             return items
         }
@@ -328,6 +359,8 @@ FocusScope {
                         listenScreen._goToNowPlaying()
                     } else if (item.menuAction === "recentlyadded") {
                         listenScreen.currentView = "recentlyadded"
+                    } else if (item.menuAction === "playlists") {
+                        listenScreen.currentView = "playlists"
                     } else if (item.menuAction === "artists") {
                         listenScreen.currentView = "artists"
                     }
@@ -1519,6 +1552,504 @@ FocusScope {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // ── Playlists view ────────────────────────────────────────────────────────
+    Item {
+        id: playlistsView
+
+        anchors.fill: parent
+        visible: listenScreen.currentView === "playlists"
+
+        // ── Playlists header bar ─────────────────────────────────────────────
+        Rectangle {
+            id: playlistsHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "◀  Playlists"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+        }
+
+        // ── Playlists list ───────────────────────────────────────────────────
+        ListView {
+            id: playlistsList
+
+            anchors {
+                top: playlistsHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                margins: root.vpx(8)
+            }
+
+            model: listenScreen._playlists
+            clip: true
+            focus: false
+            keyNavigationEnabled: false
+            highlightMoveDuration: Theme.animDurationFast
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    if (playlistsList.currentIndex < listenScreen._playlists.length - 1) {
+                        playlistsList.currentIndex++
+                    }
+                } else if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    if (playlistsList.currentIndex > 0) {
+                        playlistsList.currentIndex--
+                    }
+                } else if (keys.isAccept(event)) {
+                    event.accepted = true
+                    var pl = listenScreen._playlists[playlistsList.currentIndex]
+                    if (pl) {
+                        listenScreen._selectedPlaylist = pl
+                        listenScreen.currentView = "playlistdetail"
+                    }
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    listenScreen.currentView = "menu"
+                }
+            }
+
+            // ── Empty state ──────────────────────────────────────────────────
+            Text {
+                anchors.centerIn: parent
+                visible: listenScreen.currentView === "playlists" && listenScreen._playlists.length === 0
+                text: "No playlists found"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            // ── Playlist row delegate ────────────────────────────────────────
+            delegate: Item {
+                id: playlistDelegate
+
+                width: playlistsList.width
+                height: root.vpx(64)
+
+                // Highlight background for focused item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: playlistDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+
+                Column {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        leftMargin: root.vpx(16)
+                        rightMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    spacing: root.vpx(4)
+
+                    Text {
+                        width: parent.width
+                        text: modelData.title || ""
+                        color: playlistDelegate.ListView.isCurrentItem
+                            ? Theme.colorText
+                            : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: {
+                            var cnt = modelData.leafCount || 0
+                            var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
+                            var dur = modelData.duration || 0
+                            if (dur > 0) {
+                                return trackStr + " · " + listenScreen._formatPlaylistDuration(dur)
+                            }
+                            return trackStr
+                        }
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        elide: Text.ElideRight
+                        wrapMode: Text.NoWrap
+                    }
+                }
+
+                // Focus ring
+                FocusRing {
+                    visible: playlistDelegate.ListView.isCurrentItem && playlistsList.activeFocus
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        playlistsList.currentIndex = index
+                        playlistsList.forceActiveFocus()
+                    }
+                    onDoubleClicked: {
+                        playlistsList.currentIndex = index
+                        var pl = listenScreen._playlists[index]
+                        if (pl) {
+                            listenScreen._selectedPlaylist = pl
+                            listenScreen.currentView = "playlistdetail"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Playlist detail view ──────────────────────────────────────────────────
+    Item {
+        id: playlistDetailView
+
+        anchors.fill: parent
+        visible: listenScreen.currentView === "playlistdetail"
+
+        // ── Playlist detail header bar ───────────────────────────────────────
+        Rectangle {
+            id: playlistDetailHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    right: parent.right
+                    rightMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "◀  " + (listenScreen._selectedPlaylist.title || "")
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                elide: Text.ElideRight
+            }
+        }
+
+        // ── Playlist track list ──────────────────────────────────────────────
+        ListView {
+            id: playlistTrackList
+
+            anchors {
+                top: playlistDetailHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: playlistDetailActionBar.top
+            }
+
+            model: listenScreen._playlistTracks
+            clip: true
+            focus: false
+            keyNavigationEnabled: false
+            highlightMoveDuration: Theme.animDurationFast
+
+            // When true, the Play All button in the header is focused
+            // instead of a track row.
+            property bool _playAllFocused: true
+
+            Keys.onPressed: (event) => {
+                if (playlistTrackList._playAllFocused) {
+                    // Play All button is focused
+                    if (keys.isAccept(event)) {
+                        event.accepted = true
+                        var playlistAlbumData = {
+                            ratingKey: listenScreen._selectedPlaylist.ratingKey,
+                            title: listenScreen._selectedPlaylist.title,
+                            year: 0,
+                            parentTitle: "Playlist",
+                            posterLocal: "",
+                        }
+                        homeScreen._playAlbum(listenScreen._playlistTracks, playlistAlbumData, 0)
+                        listenScreen._goToNowPlaying()
+                    } else if (event.key === Qt.Key_Down) {
+                        event.accepted = true
+                        playlistTrackList._playAllFocused = false
+                        playlistTrackList.currentIndex = 0
+                    } else if (keys.isCancel(event)) {
+                        event.accepted = true
+                        listenScreen.currentView = "playlists"
+                    }
+                } else {
+                    // Track list is focused
+                    if (event.key === Qt.Key_Down) {
+                        event.accepted = true
+                        if (playlistTrackList.currentIndex < listenScreen._playlistTracks.length - 1) {
+                            playlistTrackList.currentIndex++
+                        }
+                    } else if (event.key === Qt.Key_Up) {
+                        event.accepted = true
+                        if (playlistTrackList.currentIndex > 0) {
+                            playlistTrackList.currentIndex--
+                        } else {
+                            // At first track — move focus to Play All button
+                            playlistTrackList._playAllFocused = true
+                            playlistTrackList.positionViewAtBeginning()
+                        }
+                    } else if (keys.isAccept(event)) {
+                        event.accepted = true
+                        var albumData = {
+                            ratingKey: listenScreen._selectedPlaylist.ratingKey,
+                            title: listenScreen._selectedPlaylist.title,
+                            year: 0,
+                            parentTitle: "Playlist",
+                            posterLocal: "",
+                        }
+                        homeScreen._playAlbum(listenScreen._playlistTracks, albumData, playlistTrackList.currentIndex)
+                        listenScreen._goToNowPlaying()
+                    } else if (keys.isContext1(event)) {
+                        // X button — Play All (from track 1)
+                        event.accepted = true
+                        var albumDataX = {
+                            ratingKey: listenScreen._selectedPlaylist.ratingKey,
+                            title: listenScreen._selectedPlaylist.title,
+                            year: 0,
+                            parentTitle: "Playlist",
+                            posterLocal: "",
+                        }
+                        homeScreen._playAlbum(listenScreen._playlistTracks, albumDataX, 0)
+                        listenScreen._goToNowPlaying()
+                    } else if (keys.isCancel(event)) {
+                        event.accepted = true
+                        listenScreen.currentView = "playlists"
+                    }
+                }
+            }
+
+            // ── Tracks header with Play All button ───────────────────────────
+            header: Item {
+                id: playlistTracksHeader
+
+                width: playlistTrackList.width
+                height: root.vpx(36)
+
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: "Tracks"
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    font.bold: true
+                }
+
+                // Play All button (centered, focusable via D-pad)
+                Rectangle {
+                    id: playlistPlayAllBtn
+                    anchors {
+                        horizontalCenter: parent.horizontalCenter
+                        verticalCenter: parent.verticalCenter
+                    }
+                    width: playlistPlayAllLabel.implicitWidth + root.vpx(16)
+                    height: root.vpx(26)
+                    color: playlistTrackList._playAllFocused && playlistTrackList.activeFocus
+                        ? Theme.colorPrimary : "transparent"
+                    border.color: Theme.colorPrimary
+                    border.width: root.vpx(1)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    opacity: (playlistTrackList._playAllFocused && playlistTrackList.activeFocus)
+                        || playlistPlayAllMouse.containsMouse ? 1.0 : 0.7
+
+                    Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+
+                    Text {
+                        id: playlistPlayAllLabel
+                        anchors.centerIn: parent
+                        text: "▶ Play All"
+                        color: playlistTrackList._playAllFocused && playlistTrackList.activeFocus
+                            ? Theme.colorBackground : Theme.colorPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                    }
+
+                    MouseArea {
+                        id: playlistPlayAllMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            var albumData = {
+                                ratingKey: listenScreen._selectedPlaylist.ratingKey,
+                                title: listenScreen._selectedPlaylist.title,
+                                year: 0,
+                                parentTitle: "Playlist",
+                                posterLocal: "",
+                            }
+                            homeScreen._playAlbum(listenScreen._playlistTracks, albumData, 0)
+                            listenScreen._goToNowPlaying()
+                        }
+                    }
+                }
+            }
+
+            // ── Empty state ──────────────────────────────────────────────────
+            Text {
+                anchors.centerIn: parent
+                visible: listenScreen.currentView === "playlistdetail" && listenScreen._playlistTracks.length === 0
+                text: "No tracks found"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            // ── Playlist track row delegate ──────────────────────────────────
+            delegate: Item {
+                id: playlistTrackDelegate
+
+                width: playlistTrackList.width
+                height: root.vpx(48)
+
+                // Highlight background for focused item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: playlistTrackDelegate.ListView.isCurrentItem && !playlistTrackList._playAllFocused ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+
+                Row {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        leftMargin: root.vpx(16)
+                        rightMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    spacing: root.vpx(8)
+
+                    // Track title
+                    Column {
+                        width: parent.width - root.vpx(48) - root.vpx(8)
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: root.vpx(2)
+
+                        Text {
+                            width: parent.width
+                            text: modelData.title || ""
+                            color: playlistTrackDelegate.ListView.isCurrentItem && !playlistTrackList._playAllFocused
+                                ? Theme.colorText : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        // Artist name (dim) — important for playlists since tracks come from different artists
+                        Text {
+                            width: parent.width
+                            text: modelData.grandparentTitle || ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                            visible: (modelData.grandparentTitle || "") !== ""
+                        }
+                    }
+
+                    // Duration (right-aligned, dim, M:SS format)
+                    Text {
+                        text: listenScreen._formatDuration(modelData.durationMs)
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        width: root.vpx(48)
+                        horizontalAlignment: Text.AlignRight
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                // Focus ring
+                FocusRing {
+                    visible: playlistTrackDelegate.ListView.isCurrentItem && playlistTrackList.activeFocus && !playlistTrackList._playAllFocused
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        playlistTrackList.currentIndex = index
+                        playlistTrackList.forceActiveFocus()
+                    }
+                    onDoubleClicked: {
+                        playlistTrackList.currentIndex = index
+                        playlistTrackList.forceActiveFocus()
+                        var albumData = {
+                            ratingKey: listenScreen._selectedPlaylist.ratingKey,
+                            title: listenScreen._selectedPlaylist.title,
+                            year: 0,
+                            parentTitle: "Playlist",
+                            posterLocal: "",
+                        }
+                        homeScreen._playAlbum(listenScreen._playlistTracks, albumData, index)
+                        listenScreen._goToNowPlaying()
+                    }
+                }
+            }
+        }
+
+        // ── Action bar ───────────────────────────────────────────────────────
+        Rectangle {
+            id: playlistDetailActionBar
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: root.vpx(40)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors.centerIn: parent
+                text: keys.useGamepadLabels
+                    ? "[" + keys.acceptLabel + "] Play from track    ["
+                      + keys.context1Label + "] Play All    ["
+                      + keys.cancelLabel + "] Back"
+                    : "[Enter] Play from track    [Esc] Back"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
         }
     }
