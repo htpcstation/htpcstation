@@ -43,11 +43,35 @@ FocusScope {
     // Prevent redundant library lookups when re-entering the tab.
     property bool _initialized: false
 
+    // ── Try to find and select the music library ────────────────────────────
+    function _trySelectMusicLibrary() {
+        if (_musicSectionKey) return  // already found
+        if (!plex) return
+        var libs = plex.getLibraryList()
+        for (var i = 0; i < libs.length; i++) {
+            if (libs[i].type === "artist") {
+                _musicSectionKey = libs[i].sectionKey
+                _noLibrary = false
+                plex.selectLibrary(libs[i].sectionKey)
+                return
+            }
+        }
+        // Libraries loaded but no music library found
+        if (libs.length > 0) {
+            _loading = false
+            _noLibrary = true
+        }
+        // If libs is empty, libraries haven't loaded yet — wait for signal
+    }
+
     // ── Connections ───────────────────────────────────────────────────────────
     Connections {
         target: plex
         function onArtistsModelChanged() {
             listenScreen._loading = false
+        }
+        function onLibrariesModelChanged() {
+            listenScreen._trySelectMusicLibrary()
         }
     }
 
@@ -67,23 +91,8 @@ FocusScope {
                 _loading = true
                 _noLibrary = false
                 if (plex) {
-                    var libs = plex.getLibraryList()
-                    var found = false
-                    for (var i = 0; i < libs.length; i++) {
-                        if (libs[i].type === "artist") {
-                            _musicSectionKey = libs[i].sectionKey
-                            plex.selectLibrary(libs[i].sectionKey)
-                            found = true
-                            break
-                        }
-                    }
-                    if (!found) {
-                        _loading = false
-                        _noLibrary = true
-                    }
-                } else {
-                    _loading = false
-                    _noLibrary = true
+                    plex.refresh()
+                    _trySelectMusicLibrary()
                 }
             }
             _routeFocus()
