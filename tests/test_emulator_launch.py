@@ -102,8 +102,24 @@ class TestWriteGameStats:
         assert elem is not None
         assert elem.find("favorite") is None
 
-    def test_creates_lastplayed_when_empty(self, tmp_path: Path) -> None:
-        """When game.last_played is empty, a timestamp is generated automatically."""
+    def test_removes_lastplayed_when_empty(self, tmp_path: Path) -> None:
+        """When game.last_played is empty, any existing <lastplayed> element is removed."""
+        _write_gamelist(
+            tmp_path,
+            "<game><path>./game.rom</path><name>Test Game</name>"
+            "<lastplayed>20260101T000000</lastplayed></game>",
+        )
+        game = _make_game(tmp_path, last_played="")
+
+        write_game_stats(tmp_path, game)
+
+        root = ET.parse(tmp_path / "gamelist.xml").getroot()
+        elem = root.find("game")
+        assert elem is not None
+        assert elem.find("lastplayed") is None
+
+    def test_no_lastplayed_element_when_empty_and_absent(self, tmp_path: Path) -> None:
+        """When game.last_played is empty and no <lastplayed> exists, none is created."""
         _write_gamelist(
             tmp_path,
             "<game><path>./game.rom</path><name>Test Game</name></game>",
@@ -115,8 +131,7 @@ class TestWriteGameStats:
         root = ET.parse(tmp_path / "gamelist.xml").getroot()
         elem = root.find("game")
         assert elem is not None
-        lp = elem.findtext("lastplayed")
-        assert lp is not None and len(lp) == 15  # YYYYMMDDTHHMMSS
+        assert elem.find("lastplayed") is None
 
     def test_missing_gamelist_logs_warning(self, tmp_path: Path, caplog) -> None:
         """Missing gamelist.xml is handled gracefully (no exception, warning logged)."""

@@ -417,6 +417,25 @@ class GameLibrary(QObject):
         """Re-scan the ROM directory and rebuild all models."""
         self._scan()
 
+    @Slot()
+    def clearRecentlyPlayed(self) -> None:
+        """Reset play_count and last_played for all games in all real systems.
+
+        Iterates over every real system (non-collection) and resets play_count
+        to 0 and last_played to "" for any game that has play history, then
+        persists the change to gamelist.xml.  Rebuilds collections afterwards
+        so the UI reflects the cleared state.
+        """
+        real_systems = [s for s in self._systems if not s.folder_name.startswith("_")]
+        for system in real_systems:
+            for game in system.games:
+                if game.play_count > 0 or game.last_played:
+                    game.play_count = 0
+                    game.last_played = ""
+                    write_game_stats(system.path, game)
+        self._rebuild_collections()
+        logger.info("clearRecentlyPlayed: cleared play history for all retro games")
+
     @Slot(int)
     def toggleFavorite(self, index: int) -> None:
         """Toggle the favorite status of the game at *index* and persist to gamelist.xml."""

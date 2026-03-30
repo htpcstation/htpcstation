@@ -1570,3 +1570,81 @@ class TestSteamLibraryLaunchRecentGame:
         mock_moonlight = MagicMock()
         lib.setMoonlightLibrary(mock_moonlight)
         assert lib._moonlight_library is mock_moonlight
+
+
+# ---------------------------------------------------------------------------
+# SteamLibrary — clearRecentlyPlayed
+# ---------------------------------------------------------------------------
+
+
+class TestSteamLibraryClearRecentlyPlayed:
+    def _make_lib(self, games: list | None = None):
+        from backend.steam_library import SteamLibrary
+
+        with patch("backend.steam_library.discover_steam_games",
+                   return_value=games or []):
+            return SteamLibrary()
+
+    def test_clears_moonlight_recent(self) -> None:
+        """clearRecentlyPlayed empties the in-memory Moonlight recently played list."""
+        lib = self._make_lib()
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Game", "source": "moonlight", "imagePath": "",
+            "lastPlayed": 1000, "appId": "", "hostAddress": "10.0.0.1",
+        }])
+        assert len(lib._moonlight_recent) == 1
+
+        with patch("backend.steam_library.clear_history"):
+            lib.clearRecentlyPlayed()
+
+        assert lib._moonlight_recent == []
+
+    def test_calls_clear_history(self) -> None:
+        """clearRecentlyPlayed calls moonlight_play_history.clear_history()."""
+        lib = self._make_lib()
+
+        with patch("backend.steam_library.clear_history") as mock_clear:
+            lib.clearRecentlyPlayed()
+            mock_clear.assert_called_once()
+
+    def test_rebuilds_sources_model(self) -> None:
+        """clearRecentlyPlayed rebuilds the sources model (Recently Played entry removed)."""
+        from backend.steam_library import SteamSourceListModel
+
+        lib = self._make_lib()
+        lib.setMoonlightRecentlyPlayed([{
+            "name": "Game", "source": "moonlight", "imagePath": "",
+            "lastPlayed": 1000, "appId": "", "hostAddress": "10.0.0.1",
+        }])
+
+        # Before clear: "Recently Played" entry is present
+        sources_before = [
+            lib._sources_model.data(
+                lib._sources_model.index(i, 0), SteamSourceListModel.SourceRole
+            )
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" in sources_before
+
+        with patch("backend.steam_library.clear_history"):
+            lib.clearRecentlyPlayed()
+
+        # After clear: "Recently Played" entry is gone
+        sources_after = [
+            lib._sources_model.data(
+                lib._sources_model.index(i, 0), SteamSourceListModel.SourceRole
+            )
+            for i in range(lib._sources_model.rowCount())
+        ]
+        assert "recent" not in sources_after
+
+    def test_emits_sources_model_changed(self) -> None:
+        """clearRecentlyPlayed emits sourcesModelChanged."""
+        lib = self._make_lib()
+        signals: list[bool] = []
+        lib.sourcesModelChanged.connect(lambda: signals.append(True))
+
+        with patch("backend.steam_library.clear_history"):
+            lib.clearRecentlyPlayed()
+
+        assert len(signals) >= 1

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import xml.etree.ElementTree as ET
-from datetime import datetime
 from pathlib import Path
 
 from backend.models import Game
@@ -195,10 +194,13 @@ def write_game_stats(system_path: Path, game: Game) -> None:
         return
 
     # lastplayed — format: YYYYMMDDTHHMMSS
-    last_played_str = game.last_played
-    if not last_played_str:
-        last_played_str = datetime.now().strftime("%Y%m%dT%H%M%S")
-    _set_or_create_text(target, "lastplayed", last_played_str)
+    # When last_played is empty, remove the element so the game appears unplayed.
+    lp_elem = target.find("lastplayed")
+    if game.last_played:
+        _set_or_create_text(target, "lastplayed", game.last_played)
+    else:
+        if lp_elem is not None:
+            target.remove(lp_elem)
 
     # playcount
     _set_or_create_text(target, "playcount", str(game.play_count))

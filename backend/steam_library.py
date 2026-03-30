@@ -23,6 +23,7 @@ from PySide6.QtCore import (
 )
 
 from backend.metadata_gamelist import read_gamelist, write_game_metadata
+from backend.moonlight_play_history import clear_history
 from backend.steam_config import get_steam_dir
 from backend.steam_metadata import fetch_steam_metadata
 from backend.steam_models import SteamGame
@@ -452,6 +453,19 @@ class SteamLibrary(QObject):
                 "SteamLibrary.launchRecentGame: unknown source '%s' — ignoring",
                 source,
             )
+
+    @Slot()
+    def clearRecentlyPlayed(self) -> None:
+        """Clear Moonlight play history.
+
+        Steam play history is managed by Steam itself and cannot be modified.
+        Only Moonlight history (stored in play_history.json) is cleared.
+        Rebuilds the sources model so the "Recently Played" entry disappears.
+        """
+        clear_history()
+        self._moonlight_recent = []
+        self._rebuild_sources_model()
+        logger.info("SteamLibrary.clearRecentlyPlayed: cleared Moonlight play history")
 
     @Slot(str)
     def selectSource(self, source: str) -> None:

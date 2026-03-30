@@ -458,3 +458,112 @@ class TestSelectSystemRebuildsCollections:
         systems_model: SystemListModel = library._systems_model
         fav_idx = [s.folder_name for s in systems_model._systems].index("_favorites")
         assert systems_model._systems[fav_idx].game_count == 2
+
+
+# ---------------------------------------------------------------------------
+# GameLibrary.clearRecentlyPlayed
+# ---------------------------------------------------------------------------
+
+
+class TestClearRecentlyPlayed:
+    def test_resets_play_count_and_last_played(self, tmp_path: Path) -> None:
+        """clearRecentlyPlayed resets play_count and last_played for all games."""
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name>"
+                    "<playcount>3</playcount><lastplayed>20260101T000000</lastplayed></game>"
+                    "<game><path>./b.rom</path><name>Beta</name>"
+                    "<playcount>1</playcount><lastplayed>20260102T000000</lastplayed></game>"
+                ),
+            },
+        )
+
+        library.clearRecentlyPlayed()
+
+        snes = library._systems_by_folder["snes"]
+        for game in snes.games:
+            assert game.play_count == 0
+            assert game.last_played == ""
+
+    def test_persists_cleared_stats_to_gamelist_xml(self, tmp_path: Path) -> None:
+        """clearRecentlyPlayed writes the cleared stats back to gamelist.xml."""
+        import xml.etree.ElementTree as ET
+
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name>"
+                    "<playcount>5</playcount><lastplayed>20260101T000000</lastplayed></game>"
+                ),
+            },
+        )
+
+        library.clearRecentlyPlayed()
+
+        root = ET.parse(tmp_path / "snes" / "gamelist.xml").getroot()
+        elem = root.find("game")
+        assert elem is not None
+        assert elem.findtext("playcount") == "0"
+        assert elem.find("lastplayed") is None
+
+    def test_skips_games_with_no_history(self, tmp_path: Path) -> None:
+        """clearRecentlyPlayed does not write games that have no play history."""
+        import xml.etree.ElementTree as ET
+
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name></game>"
+                ),
+            },
+        )
+
+        # Capture write calls — no writes should happen for unplayed games
+        from unittest.mock import patch
+        with patch("backend.library.write_game_stats") as mock_write:
+            library.clearRecentlyPlayed()
+            mock_write.assert_not_called()
+
+    def test_rebuilds_collections_after_clear(self, tmp_path: Path) -> None:
+        """clearRecentlyPlayed rebuilds collections so Last Played becomes empty."""
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name>"
+                    "<playcount>1</playcount><lastplayed>20260101T000000</lastplayed></game>"
+                ),
+            },
+        )
+
+        # Before clear: Last Played collection has 1 game
+        last_played_system = library._systems_by_folder["_lastplayed"]
+        assert len(last_played_system.games) == 1
+
+        library.clearRecentlyPlayed()
+
+        # After clear: Last Played collection is empty
+        last_played_system = library._systems_by_folder["_lastplayed"]
+        assert len(last_played_system.games) == 0
+
+    def test_does_not_affect_favorites(self, tmp_path: Path) -> None:
+        """clearRecentlyPlayed does not change the favorite flag."""
+        library = _make_library(
+            tmp_path,
+            {
+                "snes": (
+                    "<game><path>./a.rom</path><name>Alpha</name>"
+                    "<playcount>2</playcount><lastplayed>20260101T000000</lastplayed>"
+                    "<favorite>true</favorite></game>"
+                ),
+            },
+        )
+
+        library.clearRecentlyPlayed()
+
+        snes = library._systems_by_folder["snes"]
+        assert snes.games[0].favorite is True

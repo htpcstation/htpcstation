@@ -20,6 +20,7 @@ import pytest
 import backend.moonlight_config as moonlight_config_module
 import backend.moonlight_play_history as play_history_module
 from backend.moonlight_play_history import (
+    clear_history,
     get_all_history,
     get_last_played,
     record_play,
@@ -276,3 +277,51 @@ class TestAtomicWrite:
         assert isinstance(data, dict)
         # At least one app should be recorded
         assert len(data) >= 1
+
+
+# ---------------------------------------------------------------------------
+# clear_history
+# ---------------------------------------------------------------------------
+
+
+class TestClearHistory:
+    def test_clears_all_entries(self, tmp_path: Path) -> None:
+        """clear_history removes all recorded entries."""
+        record_play("Desktop")
+        record_play("Slime Rancher")
+
+        clear_history()
+
+        result = get_all_history()
+        assert result == {}
+
+    def test_noop_when_no_history_file(self, tmp_path: Path) -> None:
+        """clear_history does nothing when no history file exists (no error)."""
+        moonlight_dir = tmp_path / "moonlight"
+        assert not (moonlight_dir / "play_history.json").exists()
+
+        clear_history()  # should not raise
+
+        assert not (moonlight_dir / "play_history.json").exists()
+
+    def test_file_contains_empty_object_after_clear(self, tmp_path: Path) -> None:
+        """After clear_history, the file contains a valid empty JSON object."""
+        record_play("Desktop")
+
+        clear_history()
+
+        moonlight_dir = tmp_path / "moonlight"
+        path = moonlight_dir / "play_history.json"
+        assert path.exists()
+        data = json.loads(path.read_text())
+        assert data == {}
+
+    def test_record_play_works_after_clear(self, tmp_path: Path) -> None:
+        """New plays can be recorded after clear_history."""
+        record_play("Desktop")
+        clear_history()
+        record_play("New Game")
+
+        result = get_all_history()
+        assert "New Game" in result
+        assert "Desktop" not in result

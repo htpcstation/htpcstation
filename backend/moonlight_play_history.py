@@ -92,3 +92,11 @@ def get_last_played(app_name: str) -> Optional[str]:
 def get_all_history() -> dict[str, str]:
     """Return the full play history as ``{app_name: iso_timestamp}``."""
     return _load_history()
+
+
+def clear_history() -> None:
+    """Delete all play history entries by overwriting the file with an empty object."""
+    path = _get_history_path()
+    if path.exists():
+        path.write_text("{}", encoding="utf-8")
+        logger.debug("moonlight_play_history: cleared all play history")

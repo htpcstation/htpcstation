@@ -34,6 +34,7 @@ FocusScope {
         { type: "text",    label: "Cores Directory",   settingKey: "coresDirectory" },
         { type: "button",  label: "System Cores...",   action: "systemCores" },
         { type: "button",  label: "Rescan Library",    action: "rescan" },
+        { type: "button",  label: "Clear Retro Games History", action: "clearRetroRecent" },
         { type: "header",  label: "Plex" },
         { type: "button",  label: "Sign in with Plex", action: "plexSignIn" },
         { type: "button",  label: "Test Connection",   action: "testPlex" },
@@ -46,6 +47,7 @@ FocusScope {
         { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
         { type: "select",  label: "Host",              settingKey: "moonlightHost" },
         { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
+        { type: "button",  label: "Clear PC Games History", action: "clearPcRecent" },
         { type: "header",  label: "Controller" },
         { type: "select",  label: "Button Layout",    settingKey: "buttonLayout" },
         { type: "button",  label: "Map Controller",   action: "mapController" },
@@ -380,6 +382,12 @@ FocusScope {
                         } else if (action === "resetController") {
                             if (settings) settings.resetControllerMapping()
                             settingsScreen._showToast("Controller mapping reset")
+                        } else if (action === "clearRetroRecent") {
+                            if (library) library.clearRecentlyPlayed()
+                            settingsScreen._showToast("Retro game history cleared")
+                        } else if (action === "clearPcRecent") {
+                            if (steam) steam.clearRecentlyPlayed()
+                            settingsScreen._showToast("PC game history cleared")
                         }
                     }
                 }
