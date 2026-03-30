@@ -1083,8 +1083,9 @@ class PlexLibrary(QObject):
     def getPlaylists(self) -> list:
         """Return audio playlists as a list of dicts.
 
-        Filters out non-audio playlists and playlists with more than
-        _MAX_PLAYLIST_TRACKS tracks (to avoid UI freezes).
+        Filters out non-audio playlists, playlists with more than
+        _MAX_PLAYLIST_TRACKS tracks (to avoid UI freezes), and smart
+        playlists that return zero items from the API.
         """
         if self._client is None:
             return []
@@ -1096,8 +1097,15 @@ class PlexLibrary(QObject):
             leaf_count = int(p.get("leafCount", 0) or 0)
             if leaf_count > self._MAX_PLAYLIST_TRACKS:
                 continue
+            # Smart playlists may report a leafCount but return 0 items
+            # from the API.  Probe with a single-item fetch to check.
+            rk = str(p.get("ratingKey", ""))
+            if p.get("smart") and rk:
+                probe = self._client.get_playlist_items(rk, limit=1)
+                if not probe:
+                    continue
             result.append({
-                "ratingKey": str(p.get("ratingKey", "")),
+                "ratingKey": rk,
                 "title": self._replace_emoji(p.get("title", "")),
                 "leafCount": leaf_count,
                 "duration": int(p.get("duration", 0) or 0),

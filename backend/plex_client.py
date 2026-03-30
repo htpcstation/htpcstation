@@ -152,9 +152,16 @@ class PlexClient:
             return []
         return data.get("MediaContainer", {}).get("Metadata", [])
 
-    def get_playlist_items(self, rating_key: str) -> list[dict]:
-        """GET /playlists/{ratingKey}/items — returns playlist tracks."""
-        data = self._get(f"/playlists/{rating_key}/items")
+    def get_playlist_items(self, rating_key: str, limit: int = 0) -> list[dict]:
+        """GET /playlists/{ratingKey}/items — returns playlist tracks.
+
+        If *limit* > 0, only fetch that many items (useful for probing
+        whether a smart playlist actually returns tracks).
+        """
+        url = f"/playlists/{rating_key}/items"
+        if limit > 0:
+            url += f"?X-Plex-Container-Size={limit}"
+        data = self._get(url)
         if data is None:
             return []
         return data.get("MediaContainer", {}).get("Metadata", [])
