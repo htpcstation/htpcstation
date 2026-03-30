@@ -108,7 +108,8 @@ htpcstation/
       index.js                         # Site matcher: selects mapping based on URL path
       plex.js                          # Plex Web mapping: player controls, virtual focus cursor,
                                         # popup/dropdown navigation, focus stack, stale focus recovery,
-                                        # auto-user-select, auto-play (~867 lines, includes TEMP debug overlay)
+                                        # auto-user-select, auto-play, auto-expand mini player
+                                        # (~900 lines, debug overlay controlled by __htpcDebugEnabled flag)
   qml/
     main.qml                           # ApplicationWindow, vpx(), QuitDialog
     Theme.qml                          # Singleton: colors, fonts, animation durations
@@ -271,7 +272,7 @@ htpcstation/
   - Navigation mode: virtual focus cursor with spatial navigation, accept=click, cancel=escape, Start=exit
   - **Modal support:** When a modal dialog is open (e.g., "Resume Playback"), input routes to navigation mode regardless of player state. D-pad navigates modal options, accept selects, cancel closes.
   - **Player popup/dropdown navigation:** Popup panels (Playback Settings, Chapter Select, Play Queue) and Popper.js dropdown menus are fully navigable with the gamepad. D-pad navigates within the topmost overlay layer; accept clicks; cancel closes the layer and restores focus to the element that opened it. Focus stack tracks layer transitions. Stale focus recovery handles React button swaps (e.g. Repeat/RepeatOne, Play/Pause).
-  - **TEMP debug overlay:** An on-screen debug overlay (`__htpc-debug` div, green text on black background) and `dbg()` calls are present in `plex.js` for kiosk-mode debugging. These should be removed when debugging is complete.
+  - **Debug overlay:** An on-screen debug overlay (`__htpc-debug` div, green text on black background) is available in `plex.js`, controlled by the `__htpcDebugEnabled` flag at the top of the file. Set to `true` to enable; `false` (default) disables the overlay and all `dbg()` calls become no-ops. The `dbg()` calls remain in the code permanently for future debugging.
 - **Auto-user-select:** Reads `htpc_user` from URL, polls for `.user-select-modal`, clicks matching user tile, re-navigates to original deep link after 1.5s
 - **Auto-play:** Polls for `[data-testid="preplay-play"]` button, clicks it. Triggers on both page load and `hashchange` events (SPA navigation).
 - **Extension deployment:** Copied to `***REMOVED***.var/app/com.brave.Browser/config/htpcstation-extension/` before each launch (flatpak sandbox access)
@@ -526,7 +527,7 @@ Without scoping, `getInteractiveElements()` finds elements in the seek bar, volu
 The `showPlayerControls()` function dispatches a synthetic `mousemove` event to reveal the hidden player control bar. This mouse-move can cause Plex to dismiss an open dropdown or popup panel. **Fix:** Only call `showPlayerControls()` when no popup panel or dropdown is currently open.
 
 ### Kiosk Mode Blocks All DevTools Access
-In Brave's `--kiosk` mode, Ctrl+Shift+I, Ctrl+Shift+J, F12, and `--auto-open-devtools-for-tabs` are all blocked. `console.log()` output goes to the inaccessible JS console. **Workaround:** Inject a TEMP on-screen debug overlay (`__htpc-debug` div, green text on black background, top-left corner) at the top of `plex.js`. Use `dbg('message')` to write to it. This overlay and all `dbg()` calls should be removed when debugging is complete.
+In Brave's `--kiosk` mode, Ctrl+Shift+I, Ctrl+Shift+J, F12, and `--auto-open-devtools-for-tabs` are all blocked. `console.log()` output goes to the inaccessible JS console. **Workaround:** On-screen debug overlay in `plex.js` controlled by `var __htpcDebugEnabled = false;` at the top of the file. Set to `true` to enable a green-on-black log overlay (top-left corner). Use `dbg('message')` to write to it. All `dbg()` calls remain in the code permanently as no-ops when disabled.
 
 ### Browser Autoplay Policy Blocks video.play() from Content Scripts
 Chromium's autoplay policy requires a trusted user gesture (physical click/keypress with `isTrusted: true`) before `video.play()` can be called. Content script events are synthetic (`isTrusted: false`) and don't satisfy this requirement — `video.play()` throws `NotAllowedError`. Synthetic keyboard events (`sendKey` dispatching `KeyboardEvent`) and `simulateClick` on play/resume buttons also fail for the same reason. Gamepad API button presses don't count as user gestures either. **Fix:** Add `--autoplay-policy=no-user-gesture-required` to the browser launch flags. This is appropriate for a kiosk/HTPC setup where autoplay restrictions serve no purpose.
@@ -576,9 +577,7 @@ These are intentional shortcuts that should be revisited:
 - **Status:** Full player gamepad navigation working — control bar, popup panels, dropdown menus, modals. L2/R2 seek, Start+Select close.
 - **Player mode mapping:** D-pad → navigate (scoped to topmost layer), A → click focused element (with focus stack push for layer-opening clicks), B → close topmost layer (dropdown → popup → modal → player → nav), X → play/pause, L2/R2 → seek back/forward, Y → fullscreen, Start+Select → kill browser
 - **What works:** Control bar button navigation (play, skip, repeat, shuffle, etc.), Playback Settings panel, Chapter Select panel, Play Queue panel, Popper.js dropdown menus (quality, audio track, subtitle track), Resume Playback modal, L2/R2 seek, Start+Select close, React button swap recovery (Repeat/RepeatOne, Play/Pause)
-- **Cleanup needed:**
-  - Remove TEMP debug overlay (`__htpc-debug` div injection) and all `dbg()` calls from `plex.js`
-  - The debug overlay was necessary because DevTools cannot be opened in kiosk mode (Ctrl+Shift+I, F12 all blocked, `--auto-open-devtools-for-tabs` flag doesn't work in kiosk)
+- **Debug overlay:** Controlled by `var __htpcDebugEnabled = false;` at the top of `plex.js`. Set to `true` to enable on-screen logging for kiosk-mode debugging. All `dbg()` calls remain in the code as permanent instrumentation — they are no-ops when disabled.
 - **Fixed — Minimized player on relaunch:** When re-launching a title from "Continue Watching" after killing the browser mid-playback, Plex opened with the player minimized. Fixed by extending `tryAutoPlay()` to: (1) detect and click `[data-testid="expandPlayerButton"]` to expand the mini player, (2) wait for the `<video>` element to appear in paused state, (3) call `video.play()` to resume playback. Required `--autoplay-policy=no-user-gesture-required` browser flag because `video.play()` from a content script is an untrusted context. Synthetic keyboard events (`sendKey`) and `simulateClick` on the resume button both failed due to the autoplay policy — only the direct `video.play()` API with the policy flag works.
 
 ### Deferred Items (no milestone assigned)

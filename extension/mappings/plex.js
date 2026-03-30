@@ -1,7 +1,17 @@
 window.__htpcGamepadMappings = window.__htpcGamepadMappings || {};
 
-// TEMP DEBUG: on-screen log overlay
+// On-screen debug overlay.  Set to true to enable a green-on-black log
+// overlay in the top-left corner of the page.  Useful for debugging in
+// kiosk mode where DevTools and the JS console are inaccessible.
+// All dbg() calls throughout this file remain in place — they become
+// no-ops when debugging is disabled.
+var __htpcDebugEnabled = false;
+
 (function () {
+  if (!__htpcDebugEnabled) {
+    window.__htpcDebug = function () {};
+    return;
+  }
   var el = document.getElementById('__htpc-debug');
   if (!el) {
     el = document.createElement('div');
