@@ -585,11 +585,13 @@ These are intentional shortcuts that should be revisited:
   - `backend/plex_client.py` — get_hubs() for artist hubs, "artist" type in library filter
   - `backend/config.py` + `backend/settings_manager.py` — music_library_key setting
   - `qml/screens/SettingsScreen.qml` — Music Library dropdown
-- **v1 non-goals (future milestones):** Background playback across tabs, playlist/queue management, local file playback, shuffle/repeat, search, on-screen keyboard, play/pause toggle, progress bar/seek, volume control.
-- **Task briefs:** `***REMOVED***opencode/misc/coding-team/listen-tab/` (tasks 001–009)
+- **Next task (010):** Now Playing view + lift MediaPlayer to HomeScreen for persistent background playback + global X-button play/pause + persistent "♫ track name" indicator in top-right status bar. Task brief at `***REMOVED***opencode/misc/coding-team/listen-tab/010-now-playing-view.md`. **Key requirement: playback persists until manually stopped** — user can start music then navigate to Retro Games, PC Games, etc. with music still playing.
+- **Future milestones:** Playlist/queue management, local file playback, shuffle/repeat, search, on-screen keyboard, seekable progress bar, volume control, lyrics display, library list entry point (Now Playing/Artists/Playlists/Favorites).
+- **Task briefs:** `***REMOVED***opencode/misc/coding-team/listen-tab/` (tasks 001–009 complete, 010 pending)
 
 #### Listen Tab Gotchas
-- **Plex hubs endpoint path:** `/hubs/metadata/{ratingKey}` (NOT `/library/metadata/{ratingKey}/hubs` — the latter returns 404). Hub identifiers use `"artist.albums"` prefix (not `"hub.artist.albums"`).
+- **Plex hubs endpoint path:** `/hubs/metadata/{ratingKey}` (NOT `/library/metadata/{ratingKey}/hubs` — the latter returns 404). Hub identifiers use `"artist.albums"` prefix (not `"hub.artist.albums"`). **Must pass `count=999`** — the default limit is 6 items per hub.
+- **Plex hubs default limit is 6:** Without `count=999`, the hubs API only returns 6 albums per category. This caused artists with many albums to show only the most recent 6.
 - **`leafCount` is None** from hubs and children endpoints. Only the direct metadata endpoint (`/library/metadata/{ratingKey}`) returns `leafCount`. Album detail fetches it via `getAlbum()`.
 - **`subformat` is not available** on this Plex server version. Album categorization (Albums vs Singles & EPs vs Demos vs Compilations) comes from the hubs API, not from a `subformat` field on individual albums.
 - **Artist cache timing:** `selectLibrary()` must be called AFTER libraries model is populated (it needs the model to resolve section type to `"artist"`). If called before, `section_type` is empty and the artist cache/API branch never runs. `_trySelectMusicLibrary()` waits for `getLibraryList()` to be non-empty.
