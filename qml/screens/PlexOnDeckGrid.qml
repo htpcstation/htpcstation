@@ -21,6 +21,14 @@ FocusScope {
     // ratingKey is the Plex ratingKey for the selected item.
     signal itemSelected(string ratingKey)
 
+    // Reset to the first item whenever this grid gains focus so the
+    // top-left (most recently watched) item is always highlighted on entry.
+    onActiveFocusChanged: {
+        if (activeFocus && onDeckGrid.count > 0) {
+            onDeckGrid.currentIndex = 0
+        }
+    }
+
     // ── Cell dimensions (same as PlexMovieGrid for visual consistency) ────────
     readonly property int _cellW: 160
     readonly property int _cellH: 280
