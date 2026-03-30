@@ -548,6 +548,10 @@ FocusScope {
                 } else if (keys.isAccept(event)) {
                     event.accepted = true
                     listenScreen._playAlbum(trackList.currentIndex)
+                } else if (keys.isContext2(event)) {
+                    // X button — Play All (from track 1)
+                    event.accepted = true
+                    listenScreen._playAlbum(0)
                 } else if (keys.isCancel(event)) {
                     event.accepted = true
                     listenScreen.currentView = "detail"
@@ -742,12 +746,11 @@ FocusScope {
                             font.bold: true
                         }
 
-                        // Play All button (subtle, right-aligned)
+                        // Play All button (subtle, centered)
                         Rectangle {
                             id: playAllBtn
                             anchors {
-                                right: parent.right
-                                rightMargin: root.vpx(16)
+                                horizontalCenter: parent.horizontalCenter
                                 verticalCenter: parent.verticalCenter
                             }
                             width: playAllLabel.implicitWidth + root.vpx(16)
