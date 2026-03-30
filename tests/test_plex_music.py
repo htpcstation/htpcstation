@@ -7,6 +7,7 @@ Covers:
   - parse_track: missing Media → empty media_key
   - get_libraries: now includes artist-type libraries
   - PlexLibrary.getArtist: returns correct dict
+  - PlexLibrary.getAlbum: returns album dict with summary/studio/genre/rating fields
   - PlexLibrary.getAlbums: returns list of album dicts, filters non-album children
   - PlexLibrary.getTracks: returns list of track dicts with media_key
   - PlexLibrary.getTrackStreamUrl: returns correct URL with token
@@ -194,6 +195,74 @@ class TestParseAlbum:
         album = parse_album(data)
         assert isinstance(album.parent_rating_key, str)
         assert album.parent_rating_key == "500"
+
+    def test_summary_parsed(self) -> None:
+        data = {"ratingKey": "606", "title": "Album", "summary": "A great album."}
+        album = parse_album(data)
+        assert album.summary == "A great album."
+
+    def test_summary_defaults_to_empty(self) -> None:
+        data = {"ratingKey": "607", "title": "Album"}
+        album = parse_album(data)
+        assert album.summary == ""
+
+    def test_studio_parsed(self) -> None:
+        data = {"ratingKey": "608", "title": "Album", "studio": "Apple Records"}
+        album = parse_album(data)
+        assert album.studio == "Apple Records"
+
+    def test_studio_defaults_to_empty(self) -> None:
+        data = {"ratingKey": "609", "title": "Album"}
+        album = parse_album(data)
+        assert album.studio == ""
+
+    def test_genre_parsed_from_genre_list(self) -> None:
+        data = {
+            "ratingKey": "610",
+            "title": "Album",
+            "Genre": [{"tag": "Rock"}, {"tag": "Pop"}],
+        }
+        album = parse_album(data)
+        assert album.genre == "Rock, Pop"
+
+    def test_genre_defaults_to_empty_when_no_genre_key(self) -> None:
+        data = {"ratingKey": "611", "title": "Album"}
+        album = parse_album(data)
+        assert album.genre == ""
+
+    def test_genre_handles_none_genre_key(self) -> None:
+        data = {"ratingKey": "612", "title": "Album", "Genre": None}
+        album = parse_album(data)
+        assert album.genre == ""
+
+    def test_genre_skips_entries_without_tag(self) -> None:
+        data = {
+            "ratingKey": "613",
+            "title": "Album",
+            "Genre": [{"tag": "Rock"}, {"notag": "ignored"}, {"tag": "Jazz"}],
+        }
+        album = parse_album(data)
+        assert album.genre == "Rock, Jazz"
+
+    def test_rating_normalized_from_plex_0_10_scale(self) -> None:
+        data = {"ratingKey": "614", "title": "Album", "rating": 8.5}
+        album = parse_album(data)
+        assert abs(album.rating - 0.85) < 1e-9
+
+    def test_rating_defaults_to_zero(self) -> None:
+        data = {"ratingKey": "615", "title": "Album"}
+        album = parse_album(data)
+        assert album.rating == 0.0
+
+    def test_rating_handles_none(self) -> None:
+        data = {"ratingKey": "616", "title": "Album", "rating": None}
+        album = parse_album(data)
+        assert album.rating == 0.0
+
+    def test_rating_handles_zero(self) -> None:
+        data = {"ratingKey": "617", "title": "Album", "rating": 0}
+        album = parse_album(data)
+        assert album.rating == 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +484,121 @@ class TestGetArtist:
 
         mock_cache.get_poster.assert_not_called()
         assert result["posterLocal"] == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getAlbum
+# ---------------------------------------------------------------------------
+
+
+class TestGetAlbum:
+    def test_returns_album_dict_with_all_expected_keys(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "600",
+            "title": "Abbey Road",
+            "year": 1969,
+            "thumb": "/library/metadata/600/thumb/1",
+            "leafCount": 17,
+            "parentTitle": "The Beatles",
+            "summary": "Classic album.",
+            "studio": "Apple Records",
+            "Genre": [{"tag": "Rock"}, {"tag": "Pop"}],
+            "rating": 9.0,
+        }
+        lib._client = mock_client
+
+        result = lib.getAlbum("600")
+
+        assert result["ratingKey"] == "600"
+        assert result["title"] == "Abbey Road"
+        assert result["year"] == 1969
+        assert result["leafCount"] == 17
+        assert result["parentTitle"] == "The Beatles"
+        assert result["summary"] == "Classic album."
+        assert result["studio"] == "Apple Records"
+        assert result["genre"] == "Rock, Pop"
+        assert abs(result["rating"] - 0.9) < 1e-9
+        assert "posterLocal" in result
+
+    def test_returns_empty_dict_when_no_client(self) -> None:
+        lib = _make_lib()
+        lib._client = None
+        result = lib.getAlbum("600")
+        assert result == {}
+
+    def test_returns_empty_dict_when_metadata_not_found(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {}
+        lib._client = mock_client
+        result = lib.getAlbum("999")
+        assert result == {}
+
+    def test_poster_local_populated_when_thumb_path_present(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "600",
+            "title": "Abbey Road",
+            "thumb": "/library/metadata/600/thumb/1",
+        }
+        lib._client = mock_client
+
+        mock_cache = MagicMock()
+        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        lib._poster_cache = mock_cache
+
+        result = lib.getAlbum("600")
+
+        mock_cache.get_poster.assert_called_once_with(
+            mock_client, "/library/metadata/600/thumb/1"
+        )
+        assert result["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
+
+    def test_poster_local_empty_when_no_thumb_path(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "601",
+            "title": "No Thumb Album",
+        }
+        lib._client = mock_client
+
+        mock_cache = MagicMock()
+        lib._poster_cache = mock_cache
+
+        result = lib.getAlbum("601")
+
+        mock_cache.get_poster.assert_not_called()
+        assert result["posterLocal"] == ""
+
+    def test_genre_empty_when_no_genres(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "602",
+            "title": "Album Without Genre",
+        }
+        lib._client = mock_client
+
+        result = lib.getAlbum("602")
+
+        assert result["genre"] == ""
+
+    def test_rating_zero_when_not_rated(self) -> None:
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "603",
+            "title": "Unrated Album",
+        }
+        lib._client = mock_client
+
+        result = lib.getAlbum("603")
+
+        assert result["rating"] == 0.0
 
 
 # ---------------------------------------------------------------------------

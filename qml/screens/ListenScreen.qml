@@ -4,17 +4,19 @@ import "../components"
 
 // Listen section screen — Plex music library browser.
 //
-// Two views:
+// Three views:
 //   "artists"  — grid of artists from the Plex music library
 //   "detail"   — artist detail view showing album list
+//   "album"    — album detail view showing track listing
 //
 // Focus flow:
 //   Enter ListenScreen → artistGrid gets focus (after library is selected)
-//   D-pad               — navigate artist grid / album list
+//   D-pad               — navigate artist grid / album list / track list
 //   A (Return)          — select artist → show album list
-//                         select album → store ratingKey (track list: next task)
+//                         select album → show track listing
 //   B (Escape)          — from "artists": emit back() to return to tab bar
 //                         from "detail":  return to "artists" view
+//                         from "album":   return to "detail" view
 FocusScope {
     id: listenScreen
 
@@ -28,7 +30,7 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
-    // Current view: "artists" or "detail"
+    // Current view: "artists", "detail", or "album"
     property string currentView: "artists"
 
     // Section key of the music library (set on first load).
@@ -50,8 +52,12 @@ FocusScope {
     property var _artistData: ({})
     property var _albums: []
 
-    // Selected album ratingKey (stored for the next task — track list).
+    // Selected album ratingKey (set when user selects an album).
     property string _selectedAlbumKey: ""
+
+    // Album detail data and track list (populated when entering album view).
+    property var _albumData: ({})
+    property var _tracks: []
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
@@ -106,12 +112,31 @@ FocusScope {
         }
     }
 
+    // ── Duration formatting helpers ───────────────────────────────────────────
+    function _formatDuration(ms) {
+        if (!ms || ms <= 0) return ""
+        var totalSec = Math.floor(ms / 1000)
+        var min = Math.floor(totalSec / 60)
+        var sec = totalSec % 60
+        return min + ":" + (sec < 10 ? "0" : "") + sec
+    }
+
+    function _formatTotalDuration(tracks) {
+        var total = 0
+        for (var i = 0; i < tracks.length; i++) {
+            total += (tracks[i].durationMs || 0)
+        }
+        return _formatDuration(total)
+    }
+
     // ── Focus routing ─────────────────────────────────────────────────────────
     function _routeFocus() {
         if (currentView === "artists") {
             artistGrid.forceActiveFocus()
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
+        } else if (currentView === "album") {
+            trackList.forceActiveFocus()
         }
     }
 
@@ -143,6 +168,10 @@ FocusScope {
                 }
             }
             albumList.currentIndex = firstAlbum
+        } else if (currentView === "album" && _selectedAlbumKey) {
+            _albumData = plex.getAlbum(_selectedAlbumKey)
+            _tracks = plex.getTracks(_selectedAlbumKey)
+            trackList.currentIndex = 0
         }
         _routeFocus()
     }
@@ -393,6 +422,352 @@ FocusScope {
         }
     }
 
+    // ── Album detail view ─────────────────────────────────────────────────────
+    Item {
+        id: albumDetailView
+
+        anchors.fill: parent
+        visible: listenScreen.currentView === "album"
+
+        // ── Album detail header bar ──────────────────────────────────────────
+        Rectangle {
+            id: albumDetailHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    right: parent.right
+                    rightMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: {
+                    var title = listenScreen._albumData.title || ""
+                    var year = listenScreen._albumData.year
+                    return "◀  " + title + (year > 0 ? " (" + year + ")" : "")
+                }
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                elide: Text.ElideRight
+            }
+        }
+
+        // ── Track list with album info header ────────────────────────────────
+        ListView {
+            id: trackList
+
+            anchors {
+                top: albumDetailHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+
+            model: listenScreen._tracks
+            clip: true
+            focus: false
+            keyNavigationEnabled: false
+            highlightMoveDuration: Theme.animDurationFast
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    if (trackList.currentIndex < listenScreen._tracks.length - 1) {
+                        trackList.currentIndex++
+                    }
+                } else if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    if (trackList.currentIndex > 0) {
+                        trackList.currentIndex--
+                    }
+                } else if (keys.isAccept(event)) {
+                    event.accepted = true
+                    // Store selected track ratingKey (playback is next task)
+                    var track = listenScreen._tracks[trackList.currentIndex]
+                    // No-op for now — playback in next task
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    listenScreen.currentView = "detail"
+                }
+            }
+
+            // ── Album info header component ──────────────────────────────────
+            header: Item {
+                id: albumInfoHeader
+
+                width: trackList.width
+
+                Column {
+                    width: parent.width
+                    spacing: 0
+
+                    // ── Top section: art + metadata ──────────────────────────
+                    Item {
+                        width: parent.width
+                        height: root.vpx(220)
+
+                        // ── Left: album art ──────────────────────────────────
+                        Item {
+                            id: albumArtArea
+
+                            anchors {
+                                top: parent.top
+                                left: parent.left
+                                bottom: parent.bottom
+                                margins: root.vpx(16)
+                            }
+                            width: root.vpx(200)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: Qt.darker(Theme.colorSecondary, 1.4)
+                                radius: root.vpx(Theme.focusRingRadius)
+                                visible: albumDetailArt.status !== Image.Ready
+                                         || !listenScreen._albumData.posterLocal
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    width: parent.width - root.vpx(8)
+                                    text: listenScreen._albumData.title || ""
+                                    color: Theme.colorTextDim
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                    wrapMode: Text.Wrap
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+                            }
+
+                            Image {
+                                id: albumDetailArt
+
+                                anchors.fill: parent
+                                source: listenScreen._albumData.posterLocal || ""
+                                fillMode: Image.PreserveAspectFit
+                                asynchronous: true
+                                visible: status === Image.Ready
+                                         && !!listenScreen._albumData.posterLocal
+                            }
+                        }
+
+                        // ── Right: metadata fields ───────────────────────────
+                        Column {
+                            id: albumMetadataColumn
+
+                            anchors {
+                                top: parent.top
+                                left: albumArtArea.right
+                                right: parent.right
+                                topMargin: root.vpx(16)
+                                leftMargin: root.vpx(16)
+                                rightMargin: root.vpx(16)
+                            }
+                            spacing: root.vpx(4)
+
+                            Repeater {
+                                model: [
+                                    {
+                                        label: "Artist",
+                                        value: listenScreen._albumData.parentTitle || ""
+                                    },
+                                    {
+                                        label: "Genre",
+                                        value: listenScreen._albumData.genre || ""
+                                    },
+                                    {
+                                        label: "Label",
+                                        value: listenScreen._albumData.studio || ""
+                                    },
+                                    {
+                                        label: "Year",
+                                        value: listenScreen._albumData.year > 0
+                                            ? "" + listenScreen._albumData.year
+                                            : ""
+                                    },
+                                    {
+                                        label: "Tracks",
+                                        value: listenScreen._tracks.length > 0
+                                            ? listenScreen._tracks.length + " tracks · "
+                                              + listenScreen._formatTotalDuration(listenScreen._tracks)
+                                            : ""
+                                    },
+                                    {
+                                        label: "Rating",
+                                        value: listenScreen._albumData.rating > 0
+                                            ? (listenScreen._albumData.rating * 10).toFixed(1) + "/10"
+                                            : ""
+                                    },
+                                ]
+
+                                Row {
+                                    spacing: root.vpx(8)
+                                    visible: modelData.value !== ""
+
+                                    Text {
+                                        text: modelData.label + ":"
+                                        color: Theme.colorTextDim
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                                        width: root.vpx(56)
+                                    }
+
+                                    Text {
+                                        text: modelData.value
+                                        color: Theme.colorText
+                                        font.family: Theme.fontFamily
+                                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                                        width: albumMetadataColumn.width - root.vpx(56) - root.vpx(8)
+                                        wrapMode: Text.NoWrap
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Summary ──────────────────────────────────────────────
+                    Text {
+                        width: parent.width - root.vpx(32)
+                        x: root.vpx(16)
+                        topPadding: root.vpx(8)
+                        bottomPadding: root.vpx(8)
+                        text: listenScreen._albumData.summary || ""
+                        color: Theme.colorText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        wrapMode: Text.Wrap
+                        visible: text !== ""
+                    }
+
+                    // ── Separator ────────────────────────────────────────────
+                    Rectangle {
+                        width: parent.width - root.vpx(32)
+                        x: root.vpx(16)
+                        height: root.vpx(1)
+                        color: Theme.colorTextDim
+                        opacity: 0.4
+                    }
+
+                    // ── Tracks section label ─────────────────────────────────
+                    Item {
+                        width: parent.width
+                        height: root.vpx(32)
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: root.vpx(16)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: "Tracks"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            font.bold: true
+                        }
+                    }
+                }
+
+                // Bind height to the Column's implicit height
+                implicitHeight: children[0].implicitHeight
+            }
+
+            // ── Empty state ──────────────────────────────────────────────────
+            Text {
+                anchors.centerIn: parent
+                visible: listenScreen.currentView === "album" && listenScreen._tracks.length === 0
+                text: "No tracks found"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            // ── Track row delegate ───────────────────────────────────────────
+            delegate: Item {
+                id: trackDelegate
+
+                width: trackList.width
+                height: root.vpx(48)
+
+                // Highlight background for focused item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: trackDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+
+                Row {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        leftMargin: root.vpx(16)
+                        rightMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    spacing: root.vpx(8)
+
+                    // Track number (right-aligned, dim)
+                    Text {
+                        text: modelData.index > 0 ? "" + modelData.index : "" + (index + 1)
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        width: root.vpx(32)
+                        horizontalAlignment: Text.AlignRight
+                    }
+
+                    // Track title
+                    Text {
+                        text: modelData.title || ""
+                        color: trackDelegate.ListView.isCurrentItem
+                            ? Theme.colorText
+                            : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        elide: Text.ElideRight
+                        width: parent.width - root.vpx(32) - root.vpx(8) - root.vpx(48) - root.vpx(8)
+                    }
+
+                    // Duration (right-aligned, dim, M:SS format)
+                    Text {
+                        text: listenScreen._formatDuration(modelData.durationMs)
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        width: root.vpx(48)
+                        horizontalAlignment: Text.AlignRight
+                    }
+                }
+
+                // Focus ring
+                FocusRing {
+                    visible: trackDelegate.ListView.isCurrentItem && trackList.activeFocus
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        trackList.currentIndex = index
+                        trackList.forceActiveFocus()
+                    }
+                }
+            }
+        }
+    }
+
     // ── Artist detail view ────────────────────────────────────────────────────
     Item {
         id: artistDetailView
@@ -460,6 +835,7 @@ FocusScope {
                     var album = listenScreen._albums[albumList.currentIndex]
                     if (album && album.type === "album") {
                         listenScreen._selectedAlbumKey = album.ratingKey
+                        listenScreen.currentView = "album"
                     }
                 } else if (keys.isCancel(event)) {
                     event.accepted = true
@@ -609,8 +985,11 @@ FocusScope {
                                 text: {
                                     var yr = modelData.year || ""
                                     var cnt = modelData.leafCount || 0
-                                    var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
-                                    return yr ? (yr + " · " + trackStr) : trackStr
+                                    if (cnt > 0) {
+                                        var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
+                                        return yr ? (yr + " · " + trackStr) : trackStr
+                                    }
+                                    return yr ? "" + yr : ""
                                 }
                                 color: Theme.colorTextDim
                                 font.family: Theme.fontFamily
@@ -637,6 +1016,7 @@ FocusScope {
                             var album = listenScreen._albums[index]
                             if (album && album.type === "album") {
                                 listenScreen._selectedAlbumKey = album.ratingKey
+                                listenScreen.currentView = "album"
                             }
                         }
                     }

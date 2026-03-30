@@ -197,6 +197,10 @@ class PlexAlbum:
     parent_rating_key: str = ""  # artist's ratingKey
     parent_title: str = ""       # artist name
     poster_local: str = ""
+    summary: str = ""
+    studio: str = ""
+    genre: str = ""     # comma-joined genres
+    rating: float = 0.0
 
 
 @dataclass
@@ -232,6 +236,8 @@ def parse_artist(data: dict) -> PlexArtist:
 
 def parse_album(data: dict) -> PlexAlbum:
     """Parse a Plex API JSON dict into a PlexAlbum dataclass."""
+    raw_genres = data.get("Genre") or []
+    genres = [g["tag"] for g in raw_genres if isinstance(g, dict) and "tag" in g]
     return PlexAlbum(
         rating_key=str(data.get("ratingKey", "")),
         title=data.get("title", ""),
@@ -240,6 +246,10 @@ def parse_album(data: dict) -> PlexAlbum:
         leaf_count=int(data.get("leafCount", 0) or 0),
         parent_rating_key=str(data.get("parentRatingKey", "")),
         parent_title=data.get("parentTitle", ""),
+        summary=data.get("summary", ""),
+        studio=data.get("studio", ""),
+        genre=", ".join(genres),
+        rating=float(data.get("rating", 0) or 0) / 10.0,
     )
 
 

@@ -957,6 +957,32 @@ class PlexLibrary(QObject):
         }
 
     @Slot(str, result="QVariant")
+    def getAlbum(self, rating_key: str) -> dict:
+        """Return album metadata as a dict (synchronous, blocks briefly)."""
+        if self._client is None:
+            return {}
+        data = self._client.get_metadata(rating_key)
+        if not data:
+            return {}
+        album = parse_album(data)
+        if album.thumb_path and self._poster_cache:
+            album.poster_local = self._poster_cache.get_poster(
+                self._client, album.thumb_path
+            )
+        return {
+            "ratingKey": album.rating_key,
+            "title": album.title,
+            "year": album.year,
+            "leafCount": album.leaf_count,
+            "parentTitle": album.parent_title,
+            "posterLocal": album.poster_local,
+            "summary": album.summary,
+            "studio": album.studio,
+            "genre": album.genre,
+            "rating": album.rating,
+        }
+
+    @Slot(str, result="QVariant")
     def getArtistAlbums(self, artist_rating_key: str) -> list:
         """Return all album categories for an artist as a grouped list.
 
