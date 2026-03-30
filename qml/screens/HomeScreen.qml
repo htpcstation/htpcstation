@@ -36,57 +36,28 @@ FocusScope {
         { name: "Listen",      source: "ListenScreen.qml",     setting: "showListenTab" },
     ]
 
-    // Reactive tab visibility — re-evaluated whenever any setting changes.
-    // We read each setting individually so QML tracks the property bindings.
-    property bool _showRetro:  settings ? settings.showRetroGamesTab : true
-    property bool _showPc:     settings ? settings.showPcGamesTab    : true
-    property bool _showWatch:  settings ? settings.showWatchTab      : true
-    property bool _showListen: settings ? settings.showListenTab     : true
-
-    // Rebuild tab arrays whenever any visibility flag changes.
+    // Tab visibility — built once on startup from saved settings.
+    // Changes take effect on next launch (toggling in Settings saves
+    // the preference and shows a toast).
     property var tabNames:   _buildTabNames()
     property var tabSources: _buildTabSources()
 
-    // Defer tab rebuild to avoid cascading property changes during toggle.
-    // Qt.callLater ensures all property updates settle before we rebuild.
-    on_ShowRetroChanged:  Qt.callLater(_rebuildTabs)
-    on_ShowPcChanged:     Qt.callLater(_rebuildTabs)
-    on_ShowWatchChanged:  Qt.callLater(_rebuildTabs)
-    on_ShowListenChanged: Qt.callLater(_rebuildTabs)
-
-    function _rebuildTabs() {
-        var oldSource = tabSources[currentTab] || ""
-        tabNames = _buildTabNames()
-        tabSources = _buildTabSources()
-        // Try to stay on the same screen after rebuild
-        var newIndex = tabSources.indexOf(oldSource)
-        if (newIndex >= 0) {
-            currentTab = newIndex
-        } else {
-            _clampTab()
-        }
-    }
-
-    function _clampTab() {
-        if (currentTab >= tabNames.length) currentTab = tabNames.length - 1
-    }
-
     function _buildTabNames() {
         var names = []
-        if (_showRetro)  names.push("Retro Games")
-        if (_showPc)     names.push("PC Games")
-        if (_showWatch)  names.push("Watch")
-        if (_showListen) names.push("Listen")
+        if (!settings || settings.showRetroGamesTab) names.push("Retro Games")
+        if (!settings || settings.showPcGamesTab)    names.push("PC Games")
+        if (!settings || settings.showWatchTab)      names.push("Watch")
+        if (!settings || settings.showListenTab)     names.push("Listen")
         names.push("Settings")
         return names
     }
 
     function _buildTabSources() {
         var sources = []
-        if (_showRetro)  sources.push("RetroGamesScreen.qml")
-        if (_showPc)     sources.push("PcGamesScreen.qml")
-        if (_showWatch)  sources.push("WatchScreen.qml")
-        if (_showListen) sources.push("ListenScreen.qml")
+        if (!settings || settings.showRetroGamesTab) sources.push("RetroGamesScreen.qml")
+        if (!settings || settings.showPcGamesTab)    sources.push("PcGamesScreen.qml")
+        if (!settings || settings.showWatchTab)      sources.push("WatchScreen.qml")
+        if (!settings || settings.showListenTab)     sources.push("ListenScreen.qml")
         sources.push("SettingsScreen.qml")
         return sources
     }
@@ -384,9 +355,7 @@ FocusScope {
             width: parent.width
             height: parent.height
             asynchronous: false
-            source: homeScreen.currentTab < homeScreen.tabSources.length
-                ? homeScreen.tabSources[homeScreen.currentTab]
-                : ""
+            source: homeScreen.tabSources[homeScreen.currentTab]
 
             // When the loaded item changes, wire up its back() signal and
             // give focus to the new content if LB/RB was pressed from content.

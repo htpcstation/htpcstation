@@ -154,10 +154,22 @@ FocusScope {
         else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
         else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
         else if (key === "buttonLayout")           settings.setButtonLayout(value)
-        else if (key === "showRetroGamesTab")      settings.setShowRetroGamesTab(value)
-        else if (key === "showPcGamesTab")         settings.setShowPcGamesTab(value)
-        else if (key === "showWatchTab")           settings.setShowWatchTab(value)
-        else if (key === "showListenTab")          settings.setShowListenTab(value)
+        else if (key === "showRetroGamesTab") {
+            settings.setShowRetroGamesTab(value)
+            settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "showPcGamesTab") {
+            settings.setShowPcGamesTab(value)
+            settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "showWatchTab") {
+            settings.setShowWatchTab(value)
+            settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "showListenTab") {
+            settings.setShowListenTab(value)
+            settingsScreen._showToast("Restart to apply")
+        }
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────
