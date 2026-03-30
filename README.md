@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-HTPC Station turns an old mini PC into a couch-friendly entertainment center. It presents a single fullscreen interface — fully navigable with a gamepad — that brings together retro game emulation, PC gaming via Steam, game streaming via Moonlight, Plex video browsing, and Plex music playback in one place. Rather than playing media or running emulators itself, HTPC Station acts as a launcher and library browser: it handles browsing, artwork, and metadata, then hands off to RetroArch, Steam, Moonlight, and Plex Web when you press Play. The interface is designed for 1080p TVs and runs well on low-power hardware such as Intel J5005-class mini PCs (for example, the Dell Wyse 5070).
+HTPC Station turns an old mini PC into a couch-friendly entertainment center. It presents a single fullscreen interface — fully navigable with a gamepad — that brings together retro game emulation, PC gaming via Steam, game streaming via Moonlight, Plex video browsing, and Plex music playback in one place. Rather than playing media or running emulators itself, HTPC Station acts as a launcher and library browser: it handles browsing, artwork, and metadata, then hands off to RetroArch, Steam, Moonlight, and Plex Web when you press Play. The interface is designed for 1080p output and runs well on low-power hardware such as Intel J5005-class mini PCs (for example, the Dell Wyse 5070).
 
 ---
 
@@ -81,12 +81,12 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 ### What You Need
 
 - A Linux PC (x86_64). Works well on low-power hardware like the Dell Wyse 5070 or any Intel J5005-class machine. Also runs fine on regular desktops and laptops.
-- A gamepad (Xbox-style recommended) or a keyboard.
+- A gamepad or a keyboard.
 - Python 3.10 or newer.
-- **For retro games:** RetroArch installed (Flatpak recommended), plus ROMs with ES-DE scraped metadata (`gamelist.xml` and artwork). HTPC Station does not scrape ROMs — use ES-DE to prepare your library first.
+- **For retro games:** RetroArch installed (Flatpak recommended), plus ROMs with Batocera/Knulli/EmulationStation scraped metadata (`gamelist.xml` and artwork). HTPC Station does not scrape ROMs — prepare your library first.
 - **For Steam games:** Steam installed (Flatpak or native).
-- **For game streaming:** Moonlight installed (Flatpak recommended) and already paired with a Sunshine or Apollo host.
-- **For Plex:** A Plex Media Server running on your network.
+- **For game streaming:** Moonlight installed (Flatpak recommended) and a Sunshine or Apollo host.
+- **For Plex:** A Plex account with access to a Plex Media Server. Local network direct-play is preferred. 
 - **For Plex playback:** Brave browser (Flatpak recommended). Other Chromium-based browsers may work.
 
 ### Installation
@@ -104,14 +104,6 @@ python3 main.py
 ```
 
 The app launches fullscreen. All configuration is done from the Settings tab inside the app.
-
-### Running Tests (optional)
-
-```bash
-python3 -m pytest tests/ -q
-```
-
-There are over 1,000 tests covering the backend.
 
 ---
 
@@ -151,15 +143,15 @@ Custom images always override auto-downloaded artwork.
 | LB / RB (PageUp/PageDown) | Switch tabs |
 | LT / RT (Home/End) | Page scroll |
 | Start / F10 | Quit dialog |
-| Start + Select | Close Plex browser |
+| Start + Select / Alt + F4 | Close Plex browser |
 
 ---
 
 ## Current Limitations
 
 - Changing which tabs are visible requires restarting the app.
-- HTPC Station does not scrape ROM metadata. You need ES-DE or another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library.
-- Plex playback happens in a browser window. To exit back to HTPC Station, press Start+Select on your gamepad (or Alt+F4 on a keyboard).
+- HTPC Station does not scrape ROM metadata. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library.
+- Plex playback happens in a browser kiosk window. To exit back to HTPC Station, press Start+Select on your gamepad (or Alt+F4 on a keyboard).
 - Continue Watching is hidden for managed and kids Plex profiles. This is a Plex platform limitation with no known workaround.
 - Moonlight host pairing must be done through Moonlight's own interface. You can open it from Settings by pressing "Open Moonlight."
 - Large Plex music playlists (over 1,000 tracks) are hidden to avoid performance issues.
