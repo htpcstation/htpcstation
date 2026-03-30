@@ -2,11 +2,13 @@
 
 Exposes Steam game data to QML via models and slots.
 Game discovery is synchronous (ACF files are small local reads).
+Metadata fetching is asynchronous (HTTP calls via ThreadPoolExecutor).
 """
 
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import (
@@ -20,6 +22,9 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from backend.metadata_gamelist import read_gamelist, write_game_metadata
+from backend.steam_config import get_steam_dir
+from backend.steam_metadata import fetch_steam_metadata
 from backend.steam_models import SteamGame
 from backend.steam_parser import discover_steam_games
 
@@ -181,6 +186,15 @@ class SteamLibrary(QObject):
     gameRunning = Signal()
     gameStopped = Signal()
 
+    # Public signal: emitted when metadata is available for a game.
+    # QML connects to this to update the detail view.
+    # Signature: (appId: str, metadata: QVariant dict)
+    metadataChanged = Signal(str, "QVariant")
+
+    # Internal signal: marshals metadata fetch results from worker thread to main thread.
+    # Signature: (appId: str, metadata: object — GameMetadata dict or None)
+    _metadataReady = Signal(str, object)
+
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._game_running = False
@@ -201,8 +215,17 @@ class SteamLibrary(QObject):
         # Reference to MoonlightLibrary for dispatching Moonlight launches
         self._moonlight_library: Optional["MoonlightLibrary"] = None
 
+        # Metadata cache: keyed by app_id, populated from gamelist.xml during refresh()
+        self._metadata_cache: dict = {}
+
         self._sources_model = SteamSourceListModel(self)
         self._games_model = SteamGameListModel(self)
+
+        # Thread pool for metadata HTTP fetches (sequential — one detail view at a time)
+        self._executor = ThreadPoolExecutor(max_workers=1)
+
+        # Connect internal signal (worker thread → main thread)
+        self._metadataReady.connect(self._on_metadata_ready)
 
         # Perform initial scan
         self.refresh()
@@ -228,9 +251,20 @@ class SteamLibrary(QObject):
 
     @Slot()
     def refresh(self) -> None:
-        """Re-scan ACF files and rebuild both models."""
+        """Re-scan ACF files and rebuild both models.
+
+        Also reloads the metadata cache from gamelist.xml so that getGame()
+        can return rich metadata without a network call.
+        """
         self._all_games = discover_steam_games()
         logger.info("SteamLibrary.refresh: found %d games", len(self._all_games))
+
+        # Load metadata cache from gamelist.xml
+        try:
+            self._metadata_cache = read_gamelist(get_steam_dir())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SteamLibrary.refresh: failed to load metadata cache: %s", exc)
+            self._metadata_cache = {}
 
         # Rebuild sources model with updated game count
         self._rebuild_sources_model()
@@ -243,12 +277,13 @@ class SteamLibrary(QObject):
     def getGame(self, index: int) -> dict:
         """Return a dict of all fields for the game at *index*.
 
+        Merges any cached metadata from gamelist.xml into the returned dict.
         Returns an empty dict if the index is out of range.
         """
         if not (0 <= index < len(self._current_games)):
             return {}
         game = self._current_games[index]
-        return {
+        result = {
             "appId": game.app_id,
             "name": game.name,
             "installDir": game.install_dir,
@@ -256,6 +291,19 @@ class SteamLibrary(QObject):
             "sizeOnDisk": game.size_on_disk,
             "imagePath": game.image_path,
         }
+
+        # Merge cached metadata if available
+        cached = self._metadata_cache.get(game.app_id)
+        if cached is not None:
+            result["description"] = cached.description
+            result["developer"] = cached.developer
+            result["publisher"] = cached.publisher
+            result["genre"] = cached.genre
+            result["players"] = cached.players
+            result["releaseDate"] = cached.release_date
+            result["rating"] = cached.rating
+
+        return result
 
     @Slot(str)
     def launchGame(self, app_id: str) -> None:
@@ -280,6 +328,40 @@ class SteamLibrary(QObject):
         if self._game_running:
             self._game_running = False
             self.gameStopped.emit()
+
+    @Slot(str)
+    def fetchMetadata(self, app_id: str) -> None:
+        """Fetch rich metadata for the game with *app_id*.
+
+        1. Checks gamelist.xml first — if the entry has a non-empty description,
+           emits ``metadataChanged`` immediately (cache hit, no API call).
+        2. Otherwise, dispatches a background fetch via the thread pool.
+           The worker writes the result to gamelist.xml and emits
+           ``_metadataReady``, which is handled on the main thread by
+           ``_on_metadata_ready``.
+
+        Args:
+            app_id: The Steam application ID as a string (e.g. "440").
+        """
+        if not app_id:
+            logger.warning("SteamLibrary.fetchMetadata: empty app_id — ignoring")
+            return
+
+        # Check cache first
+        cached = self._metadata_cache.get(app_id)
+        if cached is not None and cached.description.strip():
+            logger.debug(
+                "SteamLibrary.fetchMetadata: cache hit for app_id=%s", app_id
+            )
+            self.metadataChanged.emit(app_id, _metadata_to_dict(cached))
+            return
+
+        # No cache — fetch from API on background thread
+        logger.debug(
+            "SteamLibrary.fetchMetadata: dispatching background fetch for app_id=%s",
+            app_id,
+        )
+        self._executor.submit(self._worker_fetch_metadata, app_id)
 
     @Slot("QVariant")
     def setMoonlightSources(self, sources: list) -> None:
@@ -393,6 +475,57 @@ class SteamLibrary(QObject):
         self._apply_sort()
 
     # ------------------------------------------------------------------
+    # Internal: worker thread function (metadata fetch)
+    # ------------------------------------------------------------------
+
+    def _worker_fetch_metadata(self, app_id: str) -> None:
+        """Worker: fetch metadata from Steam Store API and write to gamelist.xml.
+
+        Runs on the thread pool.  Emits ``_metadataReady`` with the result
+        (a dict or None) so the main thread can update the UI.
+        """
+        result = fetch_steam_metadata(app_id)
+        if result is not None:
+            try:
+                write_game_metadata(get_steam_dir(), app_id, result)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "SteamLibrary._worker_fetch_metadata: failed to write metadata "
+                    "for app_id=%s: %s",
+                    app_id,
+                    exc,
+                )
+        result_dict = _metadata_to_dict(result) if result is not None else None
+        self._metadataReady.emit(app_id, result_dict)
+
+    # ------------------------------------------------------------------
+    # Internal: main-thread result handler
+    # ------------------------------------------------------------------
+
+    def _on_metadata_ready(self, app_id: str, metadata: object) -> None:
+        """Handle metadata fetch result on the main thread.
+
+        Connected to ``_metadataReady`` in ``__init__``.  Updates the in-memory
+        cache and emits ``metadataChanged`` so QML can update the detail view.
+
+        Args:
+            app_id: The Steam application ID.
+            metadata: A dict with camelCase keys (from ``_metadata_to_dict``),
+                      or ``None`` if the fetch failed.
+        """
+        if metadata is not None:
+            # Update the in-memory cache so subsequent getGame() calls are fast.
+            # Re-read from disk to get the freshly written entry.
+            try:
+                self._metadata_cache = read_gamelist(get_steam_dir())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "SteamLibrary._on_metadata_ready: failed to reload metadata cache: %s",
+                    exc,
+                )
+            self.metadataChanged.emit(app_id, metadata)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -454,3 +587,33 @@ class SteamLibrary(QObject):
         self._current_games = games
         self._games_model.set_games(games)
         self.gamesModelChanged.emit()
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def _metadata_to_dict(metadata: object) -> dict:
+    """Convert a :class:`GameMetadata` instance to a camelCase dict for QML.
+
+    Keys: ``name``, ``appId``, ``description``, ``developer``, ``publisher``,
+    ``genre``, ``players``, ``releaseDate``, ``rating``.
+
+    Args:
+        metadata: A :class:`~backend.metadata_gamelist.GameMetadata` instance.
+
+    Returns:
+        A dict with camelCase keys suitable for QML consumption.
+    """
+    return {
+        "name": metadata.name,
+        "appId": metadata.app_id,
+        "description": metadata.description,
+        "developer": metadata.developer,
+        "publisher": metadata.publisher,
+        "genre": metadata.genre,
+        "players": metadata.players,
+        "releaseDate": metadata.release_date,
+        "rating": metadata.rating,
+    }

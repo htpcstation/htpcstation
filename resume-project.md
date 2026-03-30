@@ -1,7 +1,7 @@
-# HTPC Station — Project Resume Document (Checkpoint 10)
+# HTPC Station — Project Resume Document (Checkpoint 11)
 
 > Hand this file to a fresh agent context to resume development without losing progress.
-> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons). This checkpoint covers auto-expand minimized player, auto-resume playback via video.play(), and autoplay policy browser flag.
+> Previous checkpoints: Checkpoint 1 (M0+M1), Checkpoint 2 (Settings UI), Checkpoint 3 (Plex server discovery, browser extension, M6 hardening), Checkpoint 4 (Plex polish), Checkpoint 5 (M3 Steam), Checkpoint 6 (M4 Moonlight), Checkpoint 7 (M5 Home Screen), Checkpoint 8 (controller mapping, Flatpak gamepad access, Plex modal navigation, button layout), Checkpoint 9 (Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery, DOM architecture lessons), Checkpoint 10 (auto-expand minimized player, auto-resume playback, autoplay policy flag). This checkpoint covers M5 rich metadata for Steam games (gamelist.xml, Steam Store API fetcher, detail view), plus Plex mini player fix and UI navigation improvements.
 
 ---
 
@@ -96,7 +96,9 @@ htpcstation/
     network_monitor.py                 # NetworkMonitor QObject: periodic connectivity check, online property
     settings_manager.py                # SettingsManager QObject: wraps Config for QML access, OAuth
     steam_config.py                    # Shared Steam directory helper (***REMOVED***.config/htpcstation/steam/)
-    steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played
+    metadata_gamelist.py               # GameMetadata dataclass, gamelist.xml reader/writer (Steam + Moonlight)
+    steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played, metadata fetch
+    steam_metadata.py                  # Steam Store API metadata fetcher (appdetails endpoint)
     steam_models.py                    # SteamGame dataclass
     steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution + caching
   extension/                           # Chromium browser extension (Manifest V3)
@@ -225,7 +227,7 @@ htpcstation/
 - **ACF/VDF parser** (`backend/steam_parser.py`): Recursive descent parser for Valve Data Format. `discover_steam_games()` scans Flatpak (`***REMOVED***.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/`) and native (`***REMOVED***.steam/steam/steamapps/`, `***REMOVED***.local/share/Steam/steamapps/`) paths.
 - **Game filtering:** Excludes non-game entries (Proton, Steam Linux Runtime, Steamworks Redistributables, incomplete installs with StateFlags ≠ 4).
 - **Artwork resolution:** Custom override (`***REMOVED***.config/htpcstation/steam/artwork_custom/<appid>.<ext>`) → HTPC cache (`artwork_scraped/<appid>.jpg`) → local Steam cache (`appcache/librarycache/{appid}/`) → Steam CDN download (saved to `artwork_scraped/`). Always returns a local file path, never a URL. Works offline after first download.
-- **SteamLibrary QObject** (`backend/steam_library.py`): `SteamSourceListModel` (source list, extensible for GOG/Epic) and `SteamGameListModel` (game grid). Slots: `refresh()`, `getGame(index)`, `launchGame(appId)`, `selectSource(source)`, `sortGames(sortKey)`.
+- **SteamLibrary QObject** (`backend/steam_library.py`): `SteamSourceListModel` (source list, extensible for GOG/Epic) and `SteamGameListModel` (game grid). Slots: `refresh()`, `getGame(index)`, `launchGame(appId)`, `selectSource(source)`, `sortGames(sortKey)`, `fetchMetadata(appId)`. Metadata fetched lazily from Steam Store API on detail view open, cached in `gamelist.xml`, merged into `getGame()` dict. `ThreadPoolExecutor(max_workers=1)` for async API calls. `metadataChanged(appId, metadata)` signal for QML.
 - **Launch:** `xdg-open steam://rungameid/{appId}` via `QProcess.startDetached()` (fire-and-forget). HTPC Station does not hide/minimize — the game takes focus and HTPC Station sits behind it. When the game exits, the window manager returns focus automatically.
 - **PC Games tab:** "PC Games" tab at index 1 (between "Retro Games" and "Watch"). `PcGamesScreen.qml` with 3-state view (sources → games → detail), following the same pattern as `RetroGamesScreen.qml`.
 - **SteamGameGrid.qml:** Portrait poster grid (160×240), text-only fallback for missing artwork, sort overlay (A-Z, Z-A, Recent).
@@ -563,7 +565,23 @@ These are intentional shortcuts that should be revisited:
 ## 10. Remaining Milestones
 
 ### M5 — Home Screen (remaining items)
-- Rich metadata for Moonlight/Steam apps (description, publisher, players, release year) — see deferred items
+- ✅ **Steam rich metadata** — gamelist.xml reader/writer, Steam Store API fetcher, SteamGameDetail.qml updated with developer, publisher, genre, players, release date, rating, description. Lazy fetch on detail view open, writes back to `***REMOVED***.config/htpcstation/steam/gamelist.xml`. User-editable.
+- **Moonlight rich metadata** — Same architecture needed for Moonlight apps. Backend: reuse Steam metadata fetcher via cached `steam_app_id` from `artwork_index.json`. QML: update `MoonlightAppDetail.qml` and `RecentlyPlayedDetail.qml`. Not yet started (Sunshine PC was offline for testing).
+
+#### M5 Rich Metadata Architecture
+- **Single source of truth:** `gamelist.xml` in `***REMOVED***.config/htpcstation/steam/` and `***REMOVED***.config/htpcstation/moonlight/` — EmulationStation-compatible XML format, user-editable
+- **Merge priority:** gamelist.xml (user edits) → Steam API (auto-fetch) → empty defaults
+- **If gamelist.xml has an `<image>` path, skip artwork auto-fetch from Steam**
+- **Lazy fetch:** metadata fetched on detail view open, not at startup. If cached in gamelist.xml (non-empty description), no API call.
+- **Auto-writeback:** fetched metadata is written back to gamelist.xml so it persists and is user-editable
+- **Matching:** Steam entries by `<appid>`, Moonlight entries by `<name>`
+- **Key files:**
+  - `backend/metadata_gamelist.py` — `GameMetadata` dataclass, `read_gamelist()`, `write_game_metadata()` (non-clobber merge semantics)
+  - `backend/steam_metadata.py` — `fetch_steam_metadata(app_id)` pure function (Steam Store API `appdetails` endpoint)
+  - `backend/steam_library.py` — `fetchMetadata(appId)` slot, `metadataChanged` signal, `ThreadPoolExecutor(max_workers=1)`, metadata cache loaded in `refresh()`, merged in `getGame()`
+  - `qml/screens/SteamGameDetail.qml` — `_metadata` property, `Connections` for `metadataChanged`, rich metadata Repeater + description Text
+- **Steam Store API field mapping:** `short_description` → description, `developers` → developer (joined), `publishers` → publisher (joined), `genres[*].description` → genre (joined), `categories[*].description` → players (filtered for known player types), `release_date.date` → release date, `metacritic.score / 100` → rating (0.0-1.0)
+- **Task briefs:** `***REMOVED***opencode/misc/coding-team/m5-rich-metadata/` (tasks 001–003)
 
 ### M6 — Hardening (remaining items)
 - Performance profiling on J5005 reference hardware (60fps, <200MB idle RAM)
@@ -729,6 +747,8 @@ All task briefs from the implementation are at:
 - `***REMOVED***opencode/misc/coding-team/controller-mapping/` (tasks 001–003)
 - `***REMOVED***opencode/misc/coding-team/plex-player-popups/` (tasks 001–005)
 - `***REMOVED***opencode/misc/coding-team/plex-mini-player-expand/` (tasks 001–004)
+- `***REMOVED***opencode/misc/coding-team/dpad-up-to-tabbar/` (task 001)
+- `***REMOVED***opencode/misc/coding-team/m5-rich-metadata/` (tasks 001–003, Steam complete, Moonlight pending)
 
 ---
 

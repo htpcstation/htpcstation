@@ -15,6 +15,9 @@ FocusScope {
     // The dict returned by steam.getGame(index). Set by PcGamesScreen.
     property var gameData: ({})
 
+    // Async metadata dict populated by steam.metadataChanged signal.
+    property var _metadata: ({})
+
     // Emitted when the user presses B / Escape to return to the game grid.
     signal back()
 
@@ -27,6 +30,24 @@ FocusScope {
 
     // Only process input when this view is active.
     enabled: focus
+
+    // ── Trigger metadata fetch when gameData changes ──────────────────────────
+    onGameDataChanged: {
+        steamGameDetail._metadata = ({})
+        if (gameData.appId && steam) {
+            steam.fetchMetadata(gameData.appId)
+        }
+    }
+
+    // ── Listen for metadataChanged to refresh displayed data ──────────────────
+    Connections {
+        target: steam
+        function onMetadataChanged(appId, metadata) {
+            if (appId === steamGameDetail.gameData.appId) {
+                steamGameDetail._metadata = metadata
+            }
+        }
+    }
 
     // ── Helper: format size on disk ───────────────────────────────────────────
     // Input: bytes (int) → "X.X GB" or "X MB"
@@ -49,6 +70,22 @@ FocusScope {
         var month = String(d.getMonth() + 1).padStart(2, "0")
         var day = String(d.getDate()).padStart(2, "0")
         return year + "-" + month + "-" + day
+    }
+
+    // ── Helper: format rating as stars ────────────────────────────────────────
+    // Input: float 0.0–1.0 → "★★★★☆" (5-star scale)
+    // Returns "" for unrated games (rating <= 0) so the row is hidden.
+    function _formatRating(rating) {
+        if (rating === undefined || rating === null || rating === "") return ""
+        if (rating <= 0) return ""
+        var stars = Math.round(rating * 5)
+        var filled = ""
+        var empty = ""
+        for (var i = 0; i < 5; i++) {
+            if (i < stars) filled += "★"
+            else empty += "☆"
+        }
+        return filled + empty
     }
 
     // ── Key handling ─────────────────────────────────────────────────────────
@@ -197,6 +234,87 @@ FocusScope {
                 }
                 spacing: root.vpx(8)
 
+                // ── Loading indicator ─────────────────────────────────────────
+                Text {
+                    visible: Object.keys(steamGameDetail._metadata).length === 0
+                             && !(steamGameDetail.gameData.description)
+                             && !(steamGameDetail.gameData.developer)
+                             && !(steamGameDetail.gameData.publisher)
+                             && !(steamGameDetail.gameData.genre)
+                             && !(steamGameDetail.gameData.players)
+                             && !(steamGameDetail.gameData.releaseDate)
+                    text: "Loading..."
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    font.italic: true
+                }
+
+                Repeater {
+                    model: [
+                        {
+                            label: "Developer",
+                            value: steamGameDetail._metadata.developer
+                                   || steamGameDetail.gameData.developer || ""
+                        },
+                        {
+                            label: "Publisher",
+                            value: steamGameDetail._metadata.publisher
+                                   || steamGameDetail.gameData.publisher || ""
+                        },
+                        {
+                            label: "Genre",
+                            value: steamGameDetail._metadata.genre
+                                   || steamGameDetail.gameData.genre || ""
+                        },
+                        {
+                            label: "Players",
+                            value: steamGameDetail._metadata.players
+                                   || steamGameDetail.gameData.players || ""
+                        },
+                        {
+                            label: "Released",
+                            value: steamGameDetail._metadata.releaseDate
+                                   || steamGameDetail.gameData.releaseDate || ""
+                        },
+                        {
+                            label: "Rating",
+                            value: steamGameDetail._formatRating(
+                                       steamGameDetail._metadata.rating !== undefined
+                                       ? steamGameDetail._metadata.rating
+                                       : steamGameDetail.gameData.rating)
+                        },
+                    ]
+
+                    Row {
+                        spacing: root.vpx(8)
+                        visible: modelData.value !== ""
+
+                        Text {
+                            text: modelData.label + ":"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            width: root.vpx(100)
+                        }
+
+                        Text {
+                            text: modelData.value
+                            color: Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        }
+                    }
+                }
+
+                // ── Separator ─────────────────────────────────────────────────
+                Rectangle {
+                    width: metadataColumn.width
+                    height: root.vpx(1)
+                    color: Theme.colorTextDim
+                    opacity: 0.3
+                }
+
                 Repeater {
                     model: [
                         {
@@ -233,6 +351,27 @@ FocusScope {
                         }
                     }
                 }
+            }
+
+            // ── Description ───────────────────────────────────────────────────
+            Text {
+                id: descriptionText
+
+                anchors {
+                    top: metadataColumn.bottom
+                    topMargin: root.vpx(8)
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                }
+                text: steamGameDetail._metadata.description
+                      || steamGameDetail.gameData.description || ""
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                wrapMode: Text.Wrap
+                elide: Text.ElideRight
+                clip: true
             }
         }
     }
