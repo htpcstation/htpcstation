@@ -47,7 +47,7 @@ FocusScope {
         { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
         { type: "select",  label: "Host",              settingKey: "moonlightHost" },
         { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
-        { type: "button",  label: "Clear PC Games History", action: "clearPcRecent" },
+
         { type: "header",  label: "Controller" },
         { type: "select",  label: "Button Layout",    settingKey: "buttonLayout" },
         { type: "button",  label: "Map Controller",   action: "mapController" },
@@ -385,10 +385,7 @@ FocusScope {
                         } else if (action === "clearRetroRecent") {
                             if (library) library.clearRecentlyPlayed()
                             settingsScreen._showToast("Retro game history cleared")
-                        } else if (action === "clearPcRecent") {
-                            if (steam) steam.clearRecentlyPlayed()
-                            settingsScreen._showToast("PC game history cleared")
-                        }
+
                     }
                 }
             }

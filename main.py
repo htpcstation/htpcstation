@@ -5,9 +5,20 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Suppress harmless VAAPI hardware decoding errors in ffmpeg logs.
-# The system falls back to software decoding automatically.
+# Suppress harmless multimedia console noise:
+# - VAAPI hardware decoding errors (falls back to software decoding)
+# - FFmpeg verbose file/stream info, codec warnings, stream details
+# - Qt multimedia info messages
+# - ALSA/PulseAudio sample format warnings
 os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
+os.environ.setdefault("QT_LOGGING_RULES",
+                       "qt.multimedia.ffmpeg=false;"
+                       "qt.multimedia.player=false")
+# Suppress FFmpeg's internal logging (stream info, codec warnings).
+# Qt Multimedia's FFmpeg backend respects this via av_log_set_level().
+os.environ.setdefault("QT_FFMPEG_LOG_LEVEL", "0")
+# Suppress PulseAudio "No sample format supported" warnings.
+os.environ.setdefault("PULSE_LOG", "0")
 
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QKeyEvent
