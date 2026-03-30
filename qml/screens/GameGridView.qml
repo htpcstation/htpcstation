@@ -99,8 +99,9 @@ FocusScope {
     }
 
     // ── Game grid ────────────────────────────────────────────────────────────
-    // Cell dimensions (design-grid px, scaled via vpx)
-    readonly property int _cellW: 200
+    // Target cell dimensions (design-grid px, scaled via vpx).
+    // Actual cellWidth is computed dynamically to fill the grid evenly.
+    readonly property int _targetCellW: 200
     readonly property int _cellH: 240
     readonly property int _cellSpacing: 12
 
@@ -119,7 +120,10 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(gameGridView._cellW + gameGridView._cellSpacing)
+        // Compute columns from available width and target cell size, then
+        // distribute the full width evenly so there is no dead space.
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(gameGridView._targetCellW + gameGridView._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(gameGridView._targetCellW + gameGridView._cellSpacing)
         cellHeight: root.vpx(gameGridView._cellH + gameGridView._cellSpacing)
 
         // Smooth highlight movement
@@ -220,7 +224,7 @@ FocusScope {
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(gameGridView._cellW)
+                        sourceSize.width: root.vpx(gameGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(gameGridView._cellH) * 0.75)
                         visible: status === Image.Ready && model.imagePath !== ""
                     }

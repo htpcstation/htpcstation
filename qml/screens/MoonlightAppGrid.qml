@@ -103,7 +103,7 @@ FocusScope {
 
     // ── App grid ─────────────────────────────────────────────────────────────
     // Cell dimensions: portrait poster (160w × 240h) matching Steam card size
-    readonly property int _cellW: 160
+    readonly property int _targetCellW: 160
     readonly property int _cellH: 240
     readonly property int _cellSpacing: 12
 
@@ -122,7 +122,8 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(moonlightAppGrid._cellW + moonlightAppGrid._cellSpacing)
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(moonlightAppGrid._targetCellW + moonlightAppGrid._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(moonlightAppGrid._targetCellW + moonlightAppGrid._cellSpacing)
         cellHeight: root.vpx(moonlightAppGrid._cellH + moonlightAppGrid._cellSpacing)
 
         // Smooth highlight movement
@@ -230,7 +231,7 @@ FocusScope {
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(moonlightAppGrid._cellW)
+                        sourceSize.width: root.vpx(moonlightAppGrid._targetCellW)
                         sourceSize.height: root.vpx(moonlightAppGrid._cellH)
                         visible: status === Image.Ready && model.imagePath !== ""
                     }

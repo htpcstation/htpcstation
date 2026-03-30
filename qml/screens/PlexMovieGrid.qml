@@ -55,15 +55,9 @@ FocusScope {
     }
 
     // ── Cell dimensions (design-grid px, scaled via vpx) ─────────────────────
-    readonly property int _cellW: 160
+    readonly property int _targetCellW: 160
     readonly property int _cellH: 280
     readonly property int _cellSpacing: 12
-
-    // Approximate number of columns — used for infinite-scroll threshold.
-    // Computed from the grid width divided by cell width.
-    readonly property int _columns: Math.max(1, Math.floor(
-        (movieGrid.width) / root.vpx(movieGridView._cellW + movieGridView._cellSpacing)
-    ))
 
     // ── Header bar ───────────────────────────────────────────────────────────
     Rectangle {
@@ -151,7 +145,8 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(movieGridView._cellW + movieGridView._cellSpacing)
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)
         cellHeight: root.vpx(movieGridView._cellH + movieGridView._cellSpacing)
 
         // Smooth highlight movement
@@ -159,7 +154,7 @@ FocusScope {
 
         // ── Infinite scroll ──────────────────────────────────────────────────
         onCurrentIndexChanged: {
-            var threshold = movieGrid.count - movieGridView._columns * 2
+            var threshold = movieGrid.count - movieGrid._columns * 2
             if (movieGrid.count > 0 && movieGrid.currentIndex >= threshold) {
                 plex.loadMoreMovies()
             }
@@ -276,7 +271,7 @@ FocusScope {
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(movieGridView._cellW)
+                        sourceSize.width: root.vpx(movieGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(movieGridView._cellH) * 0.80)
                         visible: status === Image.Ready && model.posterLocal !== ""
                         clip: true

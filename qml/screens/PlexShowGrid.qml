@@ -51,13 +51,9 @@ FocusScope {
     }
 
     // ── Cell dimensions (design-grid px, scaled via vpx) ─────────────────────
-    readonly property int _cellW: 160
+    readonly property int _targetCellW: 160
     readonly property int _cellH: 280
     readonly property int _cellSpacing: 12
-
-    // Approximate number of columns — used for infinite-scroll threshold.
-    // Computed from the grid width divided by cell width.
-    readonly property int _columns: Math.max(1, Math.floor(showGrid.width / (root.vpx(160) + root.vpx(12))))
 
     // ── Header bar ───────────────────────────────────────────────────────────
     Rectangle {
@@ -145,7 +141,8 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(showGridView._cellW + showGridView._cellSpacing)
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(showGridView._targetCellW + showGridView._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(showGridView._targetCellW + showGridView._cellSpacing)
         cellHeight: root.vpx(showGridView._cellH + showGridView._cellSpacing)
 
         // Smooth highlight movement
@@ -153,7 +150,7 @@ FocusScope {
 
         // ── Infinite scroll ──────────────────────────────────────────────────
         onCurrentIndexChanged: {
-            var threshold = showGrid.count - showGridView._columns * 2
+            var threshold = showGrid.count - showGrid._columns * 2
             if (showGrid.count > 0 && showGrid.currentIndex >= threshold) {
                 plex.loadMoreShows()
             }
@@ -269,7 +266,7 @@ FocusScope {
                         source: model.posterLocal || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
-                        sourceSize.width: root.vpx(showGridView._cellW)
+                        sourceSize.width: root.vpx(showGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(showGridView._cellH) * 0.75)
                         visible: status === Image.Ready && model.posterLocal !== ""
                         clip: true

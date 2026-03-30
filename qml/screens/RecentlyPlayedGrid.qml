@@ -78,7 +78,7 @@ FocusScope {
 
     // ── Game grid ────────────────────────────────────────────────────────────
     // Cell dimensions: portrait poster (160w × 240h) matching Steam/Moonlight
-    readonly property int _cellW: 160
+    readonly property int _targetCellW: 160
     readonly property int _cellH: 240
     readonly property int _cellSpacing: 12
 
@@ -97,7 +97,8 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(recentlyPlayedGrid._cellW + recentlyPlayedGrid._cellSpacing)
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(recentlyPlayedGrid._targetCellW + recentlyPlayedGrid._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(recentlyPlayedGrid._targetCellW + recentlyPlayedGrid._cellSpacing)
         cellHeight: root.vpx(recentlyPlayedGrid._cellH + recentlyPlayedGrid._cellSpacing)
 
         // Smooth highlight movement
@@ -199,7 +200,7 @@ FocusScope {
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(recentlyPlayedGrid._cellW)
+                        sourceSize.width: root.vpx(recentlyPlayedGrid._targetCellW)
                         sourceSize.height: root.vpx(recentlyPlayedGrid._cellH)
                         visible: status === Image.Ready && !!modelData.imagePath
                     }

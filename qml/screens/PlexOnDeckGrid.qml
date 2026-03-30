@@ -30,7 +30,7 @@ FocusScope {
     }
 
     // ── Cell dimensions (same as PlexMovieGrid for visual consistency) ────────
-    readonly property int _cellW: 160
+    readonly property int _targetCellW: 160
     readonly property int _cellH: 280
     readonly property int _cellSpacing: 12
 
@@ -88,7 +88,8 @@ FocusScope {
         clip: true
         focus: true
 
-        cellWidth: root.vpx(onDeckGridView._cellW + onDeckGridView._cellSpacing)
+        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(onDeckGridView._targetCellW + onDeckGridView._cellSpacing)))
+        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(onDeckGridView._targetCellW + onDeckGridView._cellSpacing)
         cellHeight: root.vpx(onDeckGridView._cellH + onDeckGridView._cellSpacing)
 
         // Smooth highlight movement
@@ -194,7 +195,7 @@ FocusScope {
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
                         // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(onDeckGridView._cellW)
+                        sourceSize.width: root.vpx(onDeckGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(onDeckGridView._cellH) * 0.75)
                         visible: status === Image.Ready && model.posterLocal !== ""
                         clip: true
