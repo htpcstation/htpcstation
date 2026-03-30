@@ -1055,6 +1055,33 @@ class PlexLibrary(QObject):
         return albums
 
     @Slot(str, result="QVariant")
+    def getRecentlyAddedAlbums(self, section_key: str) -> list:
+        """Return recently added albums for a music library section."""
+        if self._client is None:
+            return []
+        data = self._client._get(f"/library/sections/{section_key}/recentlyAdded")
+        if data is None:
+            return []
+        items = data.get("MediaContainer", {}).get("Metadata", [])
+        result = []
+        for item in items:
+            if item.get("type") != "album":
+                continue
+            album = parse_album(item)
+            if album.thumb_path and self._poster_cache:
+                album.poster_local = self._poster_cache.get_poster(
+                    self._client, album.thumb_path
+                )
+            result.append({
+                "ratingKey": album.rating_key,
+                "title": album.title,
+                "year": album.year,
+                "parentTitle": album.parent_title,
+                "posterLocal": album.poster_local,
+            })
+        return result
+
+    @Slot(str, result="QVariant")
     def getTracks(self, album_rating_key: str) -> list:
         """Return tracks list as a list of dicts (synchronous, blocks briefly)."""
         if self._client is None:

@@ -1605,6 +1605,157 @@ class TestLoadArtistsCache:
         assert artist.poster_local == ""
 
 
+# ---------------------------------------------------------------------------
+# PlexLibrary.getRecentlyAddedAlbums — Task 011
+# ---------------------------------------------------------------------------
+
+
+class TestGetRecentlyAddedAlbums:
+    def test_returns_album_dicts_with_correct_fields(self) -> None:
+        """getRecentlyAddedAlbums returns album dicts with ratingKey, title, year, parentTitle, posterLocal."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "600",
+                        "title": "Abbey Road",
+                        "year": 1969,
+                        "parentTitle": "The Beatles",
+                        "thumb": "/library/metadata/600/thumb/1",
+                    },
+                    {
+                        "type": "album",
+                        "ratingKey": "601",
+                        "title": "Let It Be",
+                        "year": 1970,
+                        "parentTitle": "The Beatles",
+                        "thumb": "",
+                    },
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        assert len(result) == 2
+        assert result[0]["ratingKey"] == "600"
+        assert result[0]["title"] == "Abbey Road"
+        assert result[0]["year"] == 1969
+        assert result[0]["parentTitle"] == "The Beatles"
+        assert "posterLocal" in result[0]
+        assert result[1]["ratingKey"] == "601"
+        assert result[1]["title"] == "Let It Be"
+
+    def test_filters_non_album_items(self) -> None:
+        """getRecentlyAddedAlbums skips items whose type is not 'album'."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "600",
+                        "title": "Abbey Road",
+                        "year": 1969,
+                        "parentTitle": "The Beatles",
+                    },
+                    {
+                        "type": "track",
+                        "ratingKey": "700",
+                        "title": "Come Together",
+                    },
+                    {
+                        "type": "artist",
+                        "ratingKey": "500",
+                        "title": "The Beatles",
+                    },
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        assert len(result) == 1
+        assert result[0]["ratingKey"] == "600"
+
+    def test_returns_empty_list_when_no_client(self) -> None:
+        """getRecentlyAddedAlbums returns [] when no Plex client is configured."""
+        lib = _make_lib()
+        lib._client = None
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        assert result == []
+
+    def test_returns_empty_list_when_api_returns_none(self) -> None:
+        """getRecentlyAddedAlbums returns [] when the API call returns None."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = None
+        lib._client = mock_client
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        assert result == []
+
+    def test_returns_empty_list_when_metadata_missing(self) -> None:
+        """getRecentlyAddedAlbums returns [] when MediaContainer has no Metadata key."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"MediaContainer": {}}
+        lib._client = mock_client
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        assert result == []
+
+    def test_poster_local_populated_when_thumb_present(self) -> None:
+        """getRecentlyAddedAlbums resolves poster via poster_cache when thumb is present."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "600",
+                        "title": "Abbey Road",
+                        "thumb": "/library/metadata/600/thumb/1",
+                    },
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        mock_cache = MagicMock()
+        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        lib._poster_cache = mock_cache
+
+        result = lib.getRecentlyAddedAlbums("3")
+
+        mock_cache.get_poster.assert_called_once_with(
+            mock_client, "/library/metadata/600/thumb/1"
+        )
+        assert result[0]["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
+
+    def test_calls_correct_api_endpoint(self) -> None:
+        """getRecentlyAddedAlbums calls /library/sections/{key}/recentlyAdded."""
+        lib = _make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {"MediaContainer": {"Metadata": []}}
+        lib._client = mock_client
+
+        lib.getRecentlyAddedAlbums("42")
+
+        mock_client._get.assert_called_once_with("/library/sections/42/recentlyAdded")
+
+
 class TestWorkerLoadSectionArtistCache:
     """Tests for the cache-aware _worker_load_section behaviour for artist sections."""
 

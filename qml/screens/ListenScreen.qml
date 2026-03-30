@@ -72,6 +72,13 @@ FocusScope {
     property var _albumData: ({})
     property var _tracks: []
 
+    // Recently added albums list (populated when entering recentlyadded view).
+    property var _recentAlbums: []
+
+    // Which view to return to when pressing B from album detail.
+    // "detail" when entering from artist detail, "recentlyadded" when entering from Recently Added.
+    property string _albumReturnView: "detail"
+
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
         if (_musicSectionKey) return  // already selected
@@ -150,6 +157,8 @@ FocusScope {
             artistGrid.forceActiveFocus()
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
+        } else if (currentView === "recentlyadded") {
+            recentAlbumsList.forceActiveFocus()
         } else if (currentView === "album") {
             trackList._playAllFocused = true
             trackList.forceActiveFocus()
@@ -188,6 +197,9 @@ FocusScope {
                 }
             }
             albumList.currentIndex = firstAlbum
+        } else if (currentView === "recentlyadded" && _musicSectionKey) {
+            _recentAlbums = plex.getRecentlyAddedAlbums(_musicSectionKey)
+            recentAlbumsList.currentIndex = 0
         } else if (currentView === "album" && _selectedAlbumKey) {
             _albumData = plex.getAlbum(_selectedAlbumKey)
             _tracks = plex.getTracks(_selectedAlbumKey)
@@ -246,6 +258,7 @@ FocusScope {
             if (homeScreen._playbackTracks.length > 0) {
                 items.push({ label: "Now Playing", action: "nowplaying" })
             }
+            items.push({ label: "Recently Added", action: "recentlyadded" })
             items.push({ label: "Artists", action: "artists" })
             return items
         }
@@ -313,6 +326,8 @@ FocusScope {
                 if (item) {
                     if (item.menuAction === "nowplaying") {
                         listenScreen._goToNowPlaying()
+                    } else if (item.menuAction === "recentlyadded") {
+                        listenScreen.currentView = "recentlyadded"
                     } else if (item.menuAction === "artists") {
                         listenScreen.currentView = "artists"
                     }
@@ -621,7 +636,7 @@ FocusScope {
                         trackList.currentIndex = 0
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        listenScreen.currentView = "detail"
+                        listenScreen.currentView = listenScreen._albumReturnView
                     }
                 } else {
                     // Track list is focused
@@ -653,7 +668,7 @@ FocusScope {
                         listenScreen._goToNowPlaying()
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        listenScreen.currentView = "detail"
+                        listenScreen.currentView = listenScreen._albumReturnView
                     }
                 }
             }
@@ -1288,6 +1303,226 @@ FocusScope {
         }
     }
 
+    // ── Recently Added view ───────────────────────────────────────────────────
+    Item {
+        id: recentlyAddedView
+
+        anchors.fill: parent
+        visible: listenScreen.currentView === "recentlyadded"
+
+        // ── Recently Added header bar ────────────────────────────────────────
+        Rectangle {
+            id: recentlyAddedHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "◀  Recently Added"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+        }
+
+        // ── Recently Added album list ────────────────────────────────────────
+        ListView {
+            id: recentAlbumsList
+
+            anchors {
+                top: recentlyAddedHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                margins: root.vpx(8)
+            }
+
+            model: listenScreen._recentAlbums
+            clip: true
+            focus: false
+            keyNavigationEnabled: false
+            highlightMoveDuration: Theme.animDurationFast
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    if (recentAlbumsList.currentIndex < listenScreen._recentAlbums.length - 1) {
+                        recentAlbumsList.currentIndex++
+                    }
+                } else if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    if (recentAlbumsList.currentIndex > 0) {
+                        recentAlbumsList.currentIndex--
+                    }
+                } else if (keys.isAccept(event)) {
+                    event.accepted = true
+                    var album = listenScreen._recentAlbums[recentAlbumsList.currentIndex]
+                    if (album) {
+                        listenScreen._selectedAlbumKey = album.ratingKey
+                        listenScreen._albumReturnView = "recentlyadded"
+                        listenScreen.currentView = "album"
+                    }
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    listenScreen.currentView = "menu"
+                }
+            }
+
+            // ── Empty state ──────────────────────────────────────────────────
+            Text {
+                anchors.centerIn: parent
+                visible: listenScreen.currentView === "recentlyadded" && listenScreen._recentAlbums.length === 0
+                text: "No recently added albums"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            // ── Album row delegate ───────────────────────────────────────────
+            delegate: Item {
+                id: recentAlbumDelegate
+
+                width: recentAlbumsList.width
+                height: root.vpx(96)
+
+                // Highlight background for focused item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: recentAlbumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+
+                Row {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        leftMargin: root.vpx(8)
+                        rightMargin: root.vpx(8)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    spacing: root.vpx(12)
+
+                    // ── Album art thumbnail ──────────────────────────────────
+                    Item {
+                        width: root.vpx(80)
+                        height: root.vpx(80)
+
+                        // Placeholder shown when there is no art or while loading
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.darker(Theme.colorSecondary, 1.4)
+                            radius: root.vpx(Theme.focusRingRadius)
+                            visible: recentAlbumArt.status !== Image.Ready || !modelData.posterLocal
+
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - root.vpx(8)
+                                text: modelData.title || ""
+                                color: Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                wrapMode: Text.Wrap
+                                horizontalAlignment: Text.AlignHCenter
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Image {
+                            id: recentAlbumArt
+
+                            anchors.fill: parent
+                            source: modelData.posterLocal || ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: root.vpx(80)
+                            sourceSize.height: root.vpx(80)
+                            visible: status === Image.Ready && modelData.posterLocal
+                            clip: true
+                        }
+                    }
+
+                    // ── Album title, artist, and year ────────────────────────
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: root.vpx(4)
+                        width: parent.width - root.vpx(80) - root.vpx(12)
+
+                        Text {
+                            width: parent.width
+                            text: modelData.title || ""
+                            color: recentAlbumDelegate.ListView.isCurrentItem
+                                ? Theme.colorText
+                                : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: modelData.parentTitle || ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: modelData.year > 0 ? "" + modelData.year : ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                            visible: modelData.year > 0
+                        }
+                    }
+                }
+
+                // Focus ring
+                FocusRing {
+                    visible: recentAlbumDelegate.ListView.isCurrentItem && recentAlbumsList.activeFocus
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        recentAlbumsList.currentIndex = index
+                        recentAlbumsList.forceActiveFocus()
+                    }
+                    onDoubleClicked: {
+                        recentAlbumsList.currentIndex = index
+                        var album = listenScreen._recentAlbums[index]
+                        if (album) {
+                            listenScreen._selectedAlbumKey = album.ratingKey
+                            listenScreen._albumReturnView = "recentlyadded"
+                            listenScreen.currentView = "album"
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── Artist detail view ────────────────────────────────────────────────────
     Item {
         id: artistDetailView
@@ -1355,6 +1590,7 @@ FocusScope {
                     var album = listenScreen._albums[albumList.currentIndex]
                     if (album && album.type === "album") {
                         listenScreen._selectedAlbumKey = album.ratingKey
+                        listenScreen._albumReturnView = "detail"
                         listenScreen.currentView = "album"
                     }
                 } else if (keys.isCancel(event)) {
@@ -1536,6 +1772,7 @@ FocusScope {
                             var album = listenScreen._albums[index]
                             if (album && album.type === "album") {
                                 listenScreen._selectedAlbumKey = album.ratingKey
+                                listenScreen._albumReturnView = "detail"
                                 listenScreen.currentView = "album"
                             }
                         }
