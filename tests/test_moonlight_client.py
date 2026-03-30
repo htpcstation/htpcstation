@@ -25,6 +25,10 @@ import pytest
 from PySide6.QtCore import QProcess
 
 from backend.moonlight_client import MoonlightLauncher, list_apps
+from tests.local_overrides import get_override
+
+LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+ALT_IP = get_override("moonlight_alt_ip", "10.0.0.1")
 
 
 # ---------------------------------------------------------------------------
@@ -47,14 +51,14 @@ class TestListApps:
         """list_apps returns a list of app names from stdout."""
         output = b"Cyberpunk 2077\nRed Dead Redemption 2\nThe Witcher 3\n"
         with patch("subprocess.run", return_value=self._make_result(stdout=output)):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == ["Cyberpunk 2077", "Red Dead Redemption 2", "The Witcher 3"]
 
     def test_empty_output_returns_empty_list(self) -> None:
         """list_apps returns [] when stdout is empty."""
         with patch("subprocess.run", return_value=self._make_result(stdout=b"")):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == []
 
@@ -65,21 +69,21 @@ class TestListApps:
             "subprocess.run",
             return_value=self._make_result(stdout=output, returncode=1),
         ):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == []
 
     def test_timeout_returns_empty_list(self) -> None:
         """list_apps returns [] when the subprocess times out."""
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd=[], timeout=10)):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == []
 
     def test_subprocess_exception_returns_empty_list(self) -> None:
         """list_apps returns [] when subprocess raises an exception (e.g. command not found)."""
         with patch("subprocess.run", side_effect=FileNotFoundError("flatpak not found")):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == []
 
@@ -87,19 +91,19 @@ class TestListApps:
         """list_apps uses the custom moonlight_command when provided."""
         output = b"Desktop\n"
         with patch("subprocess.run", return_value=self._make_result(stdout=output)) as mock_run:
-            apps = list_apps("***REMOVED***", moonlight_command="/usr/bin/moonlight")
+            apps = list_apps(LOCAL_IP, moonlight_command="/usr/bin/moonlight")
 
         assert apps == ["Desktop"]
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == "/usr/bin/moonlight"
         assert "list" in call_args
-        assert "***REMOVED***" in call_args
+        assert LOCAL_IP in call_args
 
     def test_stderr_noise_is_ignored(self) -> None:
         """list_apps passes stderr=DEVNULL so SDL/Qt noise is discarded."""
         output = b"Game A\nGame B\n"
         with patch("subprocess.run", return_value=self._make_result(stdout=output)) as mock_run:
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == ["Game A", "Game B"]
         _, kwargs = mock_run.call_args
@@ -108,7 +112,7 @@ class TestListApps:
     def test_default_command_is_flatpak(self) -> None:
         """list_apps uses the Flatpak command by default."""
         with patch("subprocess.run", return_value=self._make_result()) as mock_run:
-            list_apps("***REMOVED***")
+            list_apps(LOCAL_IP)
 
         call_args = mock_run.call_args[0][0]
         assert call_args[0] == "flatpak"
@@ -118,28 +122,28 @@ class TestListApps:
         """list_apps strips and filters blank lines from stdout."""
         output = b"\nGame A\n  \nGame B\n\n"
         with patch("subprocess.run", return_value=self._make_result(stdout=output)):
-            apps = list_apps("***REMOVED***")
+            apps = list_apps(LOCAL_IP)
 
         assert apps == ["Game A", "Game B"]
 
     def test_command_includes_list_subcommand_and_host(self) -> None:
         """list_apps builds the command with 'list' and the host address."""
         with patch("subprocess.run", return_value=self._make_result()) as mock_run:
-            list_apps("10.0.0.1")
+            list_apps(ALT_IP)
 
         call_args = mock_run.call_args[0][0]
         assert "list" in call_args
-        assert "10.0.0.1" in call_args
+        assert ALT_IP in call_args
 
     def test_command_split_uses_shlex(self) -> None:
         """list_apps uses shlex.split to handle commands with spaces correctly."""
         custom_cmd = "flatpak run com.moonlight_stream.Moonlight"
         with patch("subprocess.run", return_value=self._make_result()) as mock_run:
-            list_apps("***REMOVED***", moonlight_command=custom_cmd)
+            list_apps(LOCAL_IP, moonlight_command=custom_cmd)
 
         call_args = mock_run.call_args[0][0]
         # shlex.split should produce individual tokens, not one big string
-        assert call_args == ["flatpak", "run", "com.moonlight_stream.Moonlight", "list", "***REMOVED***"]
+        assert call_args == ["flatpak", "run", "com.moonlight_stream.Moonlight", "list", LOCAL_IP]
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +161,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             launcher._on_started()
 
         assert received == [True]
@@ -171,7 +175,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             launcher._on_finished(0, QProcess.ExitStatus.NormalExit)
 
         assert len(received) == 1
@@ -189,7 +193,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             assert launcher._process is not None
             launcher._on_error_occurred(QProcess.ProcessError.FailedToStart)
 
@@ -205,7 +209,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             launcher._on_error_occurred(QProcess.ProcessError.Crashed)
 
         assert received == []
@@ -219,7 +223,7 @@ class TestMoonlightLauncher:
         launcher._process = mock_process
 
         # Should not create a new process
-        launcher.launch("***REMOVED***", "Cyberpunk 2077")
+        launcher.launch(LOCAL_IP, "Cyberpunk 2077")
 
         # _process should still be the original mock
         assert launcher._process is mock_process
@@ -271,7 +275,7 @@ class TestMoonlightLauncher:
         with patch.object(QProcess, "start") as mock_start, \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
             launcher.launch(
-                "***REMOVED***",
+                LOCAL_IP,
                 "My Game",
                 moonlight_command="flatpak run com.moonlight_stream.Moonlight",
             )
@@ -279,7 +283,7 @@ class TestMoonlightLauncher:
         mock_start.assert_called_once()
         program, args = mock_start.call_args[0]
         assert program == "flatpak"
-        assert args == ["run", "com.moonlight_stream.Moonlight", "stream", "***REMOVED***", "My Game"]
+        assert args == ["run", "com.moonlight_stream.Moonlight", "stream", LOCAL_IP, "My Game"]
 
     def test_launch_builds_stream_command(self) -> None:
         """launch() builds the correct stream command with host and app name."""
@@ -287,12 +291,12 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start") as mock_start, \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("10.0.0.1", "Desktop")
+            launcher.launch(ALT_IP, "Desktop")
 
         mock_start.assert_called_once()
         program, args = mock_start.call_args[0]
         assert "stream" in args
-        assert "10.0.0.1" in args
+        assert ALT_IP in args
         assert "Desktop" in args
 
     def test_process_cleared_after_finish(self) -> None:
@@ -301,7 +305,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             assert launcher._process is not None
             launcher._on_finished(0, QProcess.ExitStatus.NormalExit)
 
@@ -316,7 +320,7 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            launcher.launch(LOCAL_IP, "Cyberpunk 2077")
             launcher._on_started()
 
         assert received == [True]
@@ -327,6 +331,6 @@ class TestMoonlightLauncher:
 
         with patch.object(QProcess, "start"), \
              patch.object(QProcess, "state", return_value=QProcess.ProcessState.NotRunning):
-            result = launcher.launch("***REMOVED***", "Cyberpunk 2077")
+            result = launcher.launch(LOCAL_IP, "Cyberpunk 2077")
 
         assert result is None

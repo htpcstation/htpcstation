@@ -1,3 +1,35 @@
 __pycache__/
 *.pyc
 *.pyo
+
+# Local config/data that may contain tokens
+config.json
+.env
+*.env
+.env.*
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+
+# Virtual environments and build outputs
+venv/
+.venv/
+dist/
+build/
+*.egg-info/
+
+# Editor/IDE settings
+.vscode/
+.idea/
+
+# Misc
+node_modules/
+*.log
+*.DS_Store
+
+# Test overrides (developer-specific)
+tests/local_overrides.json
+tests/.local/

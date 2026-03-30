@@ -23,6 +23,10 @@ from unittest.mock import MagicMock, patch, call
 import pytest
 
 from backend.config import Config
+from tests.local_overrides import get_override
+
+LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+PLEX_SERVER_URL = get_override("plex_server_url", f"http://{LOCAL_IP}:32400")
 
 # ---------------------------------------------------------------------------
 # Helpers shared across SettingsManager tests
@@ -377,7 +381,7 @@ class TestSettingsManagerSetters:
         emitted = []
         manager.plexServerUrlChanged.connect(lambda: emitted.append(True))
 
-        manager.setPlexServerUrl("http://***REMOVED***:32400")
+        manager.setPlexServerUrl(PLEX_SERVER_URL)
 
         # No signal emitted, no config change
         assert len(emitted) == 0

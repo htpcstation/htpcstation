@@ -730,6 +730,7 @@ These are intentional shortcuts that should be revisited:
 - Wants Moonlight to show as single "Moonlight Games" source (not per-host entries)
 - Wants host selection in Settings (not in the source list)
 - Prefers `custom/` subdirectory for user artwork overrides (clear separation from auto-downloaded)
+- Wants all personally identifying info removed from the public repo; keeps private hostnames/IPs in local override files instead of source control
 
 ---
 
@@ -846,6 +847,24 @@ All task briefs from the implementation are at:
 - Examples: `440.jpg` (TF2), `570.jpg` (Dota 2)
 
 Both directories are created automatically on first run. Custom files always take priority over auto-downloaded artwork. Supported formats: jpg, jpeg, png, gif, webp. Changes picked up on next tab navigation or restart.
+
+---
+
+### Test Data Privacy — Local Overrides
+
+- **Goal:** Keep public test fixtures sanitized while allowing developers to use real hostnames/IPs locally.
+- **Helper:** `tests/local_overrides.py` exposes `get_override(key, default)` and looks for JSON files in this order: `HTPC_TEST_OVERRIDES` env var, `tests/local_overrides.json`, `tests/.local/test_overrides.json`.
+- **Usage:** Create a git-ignored JSON file such as:
+  ```json
+  {
+    "moonlight_hostname": "DESKTOP-MYPC",
+    "moonlight_local_ip": "***REMOVED***",
+    "moonlight_manual_ip": "10.0.0.5",
+    "moonlight_public_remote_ip": "***REMOVED***",
+    "plex_server_url": "http://***REMOVED***:32400"
+  }
+  ```
+- **Call sites:** `tests/test_moonlight_parser.py`, `tests/test_moonlight_client.py`, and `tests/test_settings_backend.py` reference sanitized defaults but will automatically substitute the developer’s local values when present. This protects PII in git while keeping tests convenient.
 
 ---
 

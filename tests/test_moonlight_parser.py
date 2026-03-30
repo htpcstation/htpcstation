@@ -22,6 +22,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from backend.moonlight_models import MoonlightApp, MoonlightHost
+from tests.local_overrides import get_override
+
+HOST_NAME = get_override("moonlight_hostname", "***REMOVED***")
+LOCAL_IP = get_override("moonlight_local_ip", "***REMOVED***")
+MANUAL_IP = get_override("moonlight_manual_ip", "10.0.0.1")
+PUBLIC_REMOTE_IP = get_override("moonlight_public_remote_ip", "***REMOVED***")
+REALISTIC_UUID = get_override("moonlight_realistic_uuid", "12345678-9ABC-DEF0-1234-56789ABCDEF0")
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +53,9 @@ def _minimal_conf(hosts_section: str = "") -> str:
 
 def _host_entry(
     prefix: int = 1,
-    name: str = "DESKTOP-ABC",
+    name: str = HOST_NAME,
     uuid: str = "test-uuid-1234",
-    local_address: str = "***REMOVED***",
+    local_address: str = LOCAL_IP,
     remote_address: str = "1.2.3.4",
     manual_address: str = "",
     mac_address: str = "",
@@ -81,19 +88,19 @@ def _host_entry(
 class TestMoonlightHost:
     def test_all_fields_set(self) -> None:
         host = MoonlightHost(
-            name="***REMOVED***",
+            name=HOST_NAME,
             uuid="abc-123",
-            address="***REMOVED***",
-            local_address="***REMOVED***",
+            address=LOCAL_IP,
+            local_address=LOCAL_IP,
             remote_address="1.2.3.4",
             manual_address="",
             mac_address="AA:BB:CC:DD:EE:FF",
             custom_name="",
         )
-        assert host.name == "***REMOVED***"
+        assert host.name == HOST_NAME
         assert host.uuid == "abc-123"
-        assert host.address == "***REMOVED***"
-        assert host.local_address == "***REMOVED***"
+        assert host.address == LOCAL_IP
+        assert host.local_address == LOCAL_IP
         assert host.remote_address == "1.2.3.4"
         assert host.manual_address == ""
         assert host.mac_address == "AA:BB:CC:DD:EE:FF"
@@ -101,22 +108,22 @@ class TestMoonlightHost:
 
     def test_display_name_uses_name_when_custom_name_empty(self) -> None:
         host = MoonlightHost(
-            name="***REMOVED***",
+            name=HOST_NAME,
             uuid="",
-            address="***REMOVED***",
+            address=LOCAL_IP,
             local_address="",
             remote_address="",
             manual_address="",
             mac_address="",
             custom_name="",
         )
-        assert host.display_name == "***REMOVED***"
+        assert host.display_name == HOST_NAME
 
     def test_display_name_prefers_custom_name(self) -> None:
         host = MoonlightHost(
-            name="***REMOVED***",
+            name=HOST_NAME,
             uuid="",
-            address="***REMOVED***",
+            address=LOCAL_IP,
             local_address="",
             remote_address="",
             manual_address="",
@@ -128,9 +135,9 @@ class TestMoonlightHost:
     def test_display_name_with_whitespace_custom_name(self) -> None:
         """A non-empty custom_name (even with spaces) is preferred over name."""
         host = MoonlightHost(
-            name="***REMOVED***",
+            name=HOST_NAME,
             uuid="",
-            address="***REMOVED***",
+            address=LOCAL_IP,
             local_address="",
             remote_address="",
             manual_address="",
@@ -172,11 +179,11 @@ class TestDiscoverMoonlightHostsValid:
             _minimal_conf(
                 _host_entry(
                     prefix=1,
-                    name="***REMOVED***",
+                    name=HOST_NAME,
                     uuid="host-uuid-1",
-                    local_address="***REMOVED***",
+                    local_address=LOCAL_IP,
                     remote_address="5.6.7.8",
-                    manual_address="10.0.0.1",
+                    manual_address=MANUAL_IP,
                     mac_address="AA:BB:CC:DD:EE:FF",
                     custom_name="Gaming Rig",
                 )
@@ -185,13 +192,13 @@ class TestDiscoverMoonlightHostsValid:
         hosts = discover_moonlight_hosts(conf)
         assert len(hosts) == 1
         h = hosts[0]
-        assert h.name == "***REMOVED***"
+        assert h.name == HOST_NAME
         assert h.uuid == "host-uuid-1"
         # address is derived: manual_address takes priority
-        assert h.address == "10.0.0.1"
-        assert h.local_address == "***REMOVED***"
+        assert h.address == MANUAL_IP
+        assert h.local_address == LOCAL_IP
         assert h.remote_address == "5.6.7.8"
-        assert h.manual_address == "10.0.0.1"
+        assert h.manual_address == MANUAL_IP
         assert h.mac_address == "AA:BB:CC:DD:EE:FF"
         assert h.custom_name == "Gaming Rig"
         assert h.display_name == "Gaming Rig"
@@ -243,7 +250,7 @@ class TestDiscoverMoonlightHostsValid:
         from backend.moonlight_parser import discover_moonlight_hosts
 
         section = (
-            _host_entry(prefix=1, name="MYPC", local_address="***REMOVED***")
+            _host_entry(prefix=1, name="MYPC", local_address=LOCAL_IP)
             + "1\\srvcert=@ByteArray(MIIBkTCB+wIJ...)\n"
         )
         conf = _write_conf(tmp_path, _minimal_conf(section))
@@ -272,18 +279,18 @@ class TestDiscoverMoonlightHostsValid:
             "1\\apps\\2\\name=Divinity: Original Sin II\n"
             "1\\apps\\size=2\n"
             "1\\customname=false\n"
-            "1\\hostname=***REMOVED***\n"
+            f"1\\hostname={HOST_NAME}\n"
             "1\\ipv6address=\n"
             "1\\ipv6port=0\n"
-            "1\\localaddress=***REMOVED***\n"
+            f"1\\localaddress={LOCAL_IP}\n"
             "1\\localport=47989\n"
-            "1\\manualaddress=***REMOVED***\n"
+            f"1\\manualaddress={LOCAL_IP}\n"
             "1\\manualport=47989\n"
             "1\\nvidiasw=false\n"
-            "1\\remoteaddress=***REMOVED***\n"
+            f"1\\remoteaddress={PUBLIC_REMOTE_IP}\n"
             "1\\remoteport=47989\n"
             "1\\srvcert=@ByteArray(-----BEGIN CERTIFICATE-----\\nMIIC...\\n-----END CERTIFICATE-----\\n)\n"
-            "1\\uuid=1939F722-9A5D-EA2F-9787-80DD39630D42\n"
+            f"1\\uuid={REALISTIC_UUID}\n"
             "size=1\n"
         )
         conf = _write_conf(tmp_path, _minimal_conf(realistic_section))
@@ -291,16 +298,16 @@ class TestDiscoverMoonlightHostsValid:
 
         assert len(hosts) == 1
         h = hosts[0]
-        assert h.name == "***REMOVED***"
-        assert h.uuid == "1939F722-9A5D-EA2F-9787-80DD39630D42"
-        assert h.local_address == "***REMOVED***"
-        assert h.remote_address == "***REMOVED***"
-        assert h.manual_address == "***REMOVED***"
+        assert h.name == HOST_NAME
+        assert h.uuid == REALISTIC_UUID
+        assert h.local_address == LOCAL_IP
+        assert h.remote_address == PUBLIC_REMOTE_IP
+        assert h.manual_address == LOCAL_IP
         # address is derived: manual_address takes priority
-        assert h.address == "***REMOVED***"
+        assert h.address == LOCAL_IP
         # customname=false means no custom name — display_name falls back to hostname
         assert h.custom_name == ""
-        assert h.display_name == "***REMOVED***"
+        assert h.display_name == HOST_NAME
 
     def test_customname_false_string_treated_as_no_custom_name(self, tmp_path: Path) -> None:
         """customname=false (boolean string) is treated as no custom name set."""
@@ -309,7 +316,7 @@ class TestDiscoverMoonlightHostsValid:
         section = (
             "1\\hostname=MYPC\n"
             "1\\uuid=some-uuid\n"
-            "1\\localaddress=***REMOVED***\n"
+            f"1\\localaddress={LOCAL_IP}\n"
             "1\\customname=false\n"
         )
         conf = _write_conf(tmp_path, _minimal_conf(section))
@@ -326,26 +333,26 @@ class TestDiscoverMoonlightHostsValid:
         section = (
             "1\\hostname=MYPC\n"
             "1\\uuid=some-uuid\n"
-            "1\\remoteaddress=***REMOVED***\n"
+            f"1\\remoteaddress={PUBLIC_REMOTE_IP}\n"
         )
         conf = _write_conf(tmp_path, _minimal_conf(section))
         hosts = discover_moonlight_hosts(conf)
         assert len(hosts) == 1
-        assert hosts[0].address == "***REMOVED***"
+        assert hosts[0].address == PUBLIC_REMOTE_IP
 
         # local_address available (no manual)
         section2 = (
             "1\\hostname=MYPC\n"
             "1\\uuid=some-uuid\n"
-            "1\\localaddress=***REMOVED***\n"
-            "1\\remoteaddress=***REMOVED***\n"
+            f"1\\localaddress={LOCAL_IP}\n"
+            f"1\\remoteaddress={PUBLIC_REMOTE_IP}\n"
         )
         subdir = tmp_path / "conf2"
         subdir.mkdir(exist_ok=True)
         conf2 = _write_conf(subdir, _minimal_conf(section2))
         hosts2 = discover_moonlight_hosts(conf2)
         assert len(hosts2) == 1
-        assert hosts2[0].address == "***REMOVED***"
+        assert hosts2[0].address == LOCAL_IP
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +406,7 @@ class TestDiscoverMoonlightHostsMalformed:
         from backend.moonlight_parser import discover_moonlight_hosts
 
         # Entry with uuid and localaddress but no hostname
-        section = "1\\uuid=some-uuid\n1\\localaddress=***REMOVED***\n"
+        section = f"1\\uuid=some-uuid\n1\\localaddress={LOCAL_IP}\n"
         conf = _write_conf(tmp_path, _minimal_conf(section))
         hosts = discover_moonlight_hosts(conf)
         assert hosts == []
@@ -478,10 +485,10 @@ class TestCheckHostAvailable:
         mock_sock.__exit__ = MagicMock(return_value=False)
 
         with patch("socket.create_connection", return_value=mock_sock) as mock_create:
-            result = check_host_available("***REMOVED***")
+            result = check_host_available(LOCAL_IP)
 
         assert result is True
-        mock_create.assert_called_once_with(("***REMOVED***", 47984), timeout=2.0)
+        mock_create.assert_called_once_with((LOCAL_IP, 47984), timeout=2.0)
 
     def test_returns_false_on_connection_refused(self) -> None:
         """check_host_available returns False when connection is refused."""
@@ -491,7 +498,7 @@ class TestCheckHostAvailable:
             "socket.create_connection",
             side_effect=ConnectionRefusedError("Connection refused"),
         ):
-            result = check_host_available("***REMOVED***")
+            result = check_host_available(LOCAL_IP)
 
         assert result is False
 
@@ -503,7 +510,7 @@ class TestCheckHostAvailable:
             "socket.create_connection",
             side_effect=socket.timeout("timed out"),
         ):
-            result = check_host_available("***REMOVED***")
+            result = check_host_available(LOCAL_IP)
 
         assert result is False
 
@@ -515,7 +522,7 @@ class TestCheckHostAvailable:
             "socket.create_connection",
             side_effect=OSError("Network unreachable"),
         ):
-            result = check_host_available("***REMOVED***")
+            result = check_host_available(LOCAL_IP)
 
         assert result is False
 
@@ -541,7 +548,7 @@ class TestCheckHostAvailable:
             "socket.create_connection",
             side_effect=ConnectionRefusedError(),
         ) as mock_create:
-            check_host_available("***REMOVED***")
+            check_host_available(LOCAL_IP)
 
         args, kwargs = mock_create.call_args
         host, port = args[0]
