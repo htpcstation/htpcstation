@@ -6,15 +6,16 @@ import "../components"
 //
 // Two views:
 //   "artists"  — grid of artists from the Plex music library
-//   "detail"   — artist detail view (placeholder; implemented in task 004)
+//   "detail"   — artist detail view showing album list
 //
 // Focus flow:
 //   Enter ListenScreen → artistGrid gets focus (after library is selected)
-//   D-pad               — navigate artist grid
-//   A (Return)          — select artist → emit artistSelected(ratingKey)
+//   D-pad               — navigate artist grid / album list
+//   A (Return)          — select artist → show album list
+//                         select album → store ratingKey (track list: next task)
 //   B (Escape)          — from "artists": emit back() to return to tab bar
 //                         from "detail":  return to "artists" view
-//   Up at row 0         — emit back() to return to tab bar
+//   Up at row 0         — emit back() / return to "artists" view
 FocusScope {
     id: listenScreen
 
@@ -42,6 +43,16 @@ FocusScope {
 
     // Prevent redundant library lookups when re-entering the tab.
     property bool _initialized: false
+
+    // Selected artist ratingKey (set when user selects an artist).
+    property string _selectedArtistKey: ""
+
+    // Artist detail data and album list (populated when entering detail view).
+    property var _artistData: ({})
+    property var _albums: []
+
+    // Selected album ratingKey (stored for the next task — track list).
+    property string _selectedAlbumKey: ""
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
@@ -92,7 +103,7 @@ FocusScope {
         if (currentView === "artists") {
             artistGrid.forceActiveFocus()
         } else if (currentView === "detail") {
-            detailPlaceholder.forceActiveFocus()
+            albumList.forceActiveFocus()
         }
     }
 
@@ -111,7 +122,16 @@ FocusScope {
         }
     }
 
-    onCurrentViewChanged: _routeFocus()
+    onCurrentViewChanged: {
+        if (currentView === "detail" && _selectedArtistKey) {
+            _artistData = plex.getArtist(_selectedArtistKey)
+            var albums = plex.getAlbums(_selectedArtistKey)
+            // Sort by year descending (newest first)
+            albums.sort(function(a, b) { return (b.year || 0) - (a.year || 0) })
+            _albums = albums
+        }
+        _routeFocus()
+    }
 
     // ── Header bar ────────────────────────────────────────────────────────────
     Rectangle {
@@ -172,6 +192,7 @@ FocusScope {
                 event.accepted = true
                 var item = artistGrid.currentItem
                 if (item) {
+                    listenScreen._selectedArtistKey = item.artistRatingKey
                     listenScreen.artistSelected(item.artistRatingKey)
                     listenScreen.currentView = "detail"
                 }
@@ -344,31 +365,206 @@ FocusScope {
         }
     }
 
-    // ── Artist detail placeholder (task 004 will replace this) ───────────────
-    FocusScope {
-        id: detailPlaceholder
+    // ── Artist detail view ────────────────────────────────────────────────────
+    Item {
+        id: artistDetailView
 
         anchors.fill: parent
         visible: listenScreen.currentView === "detail"
-        focus: false
 
-        Keys.onPressed: (event) => {
-            if (keys.isCancel(event)) {
-                event.accepted = true
-                listenScreen.currentView = "artists"
+        // ── Detail header bar ────────────────────────────────────────────────
+        Rectangle {
+            id: detailHeaderBar
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: "◀  " + (listenScreen._artistData.title || "")
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                elide: Text.ElideRight
             }
         }
 
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.colorBackground
+        // ── Album list ───────────────────────────────────────────────────────
+        ListView {
+            id: albumList
 
+            anchors {
+                top: detailHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                margins: root.vpx(8)
+            }
+
+            model: listenScreen._albums
+            clip: true
+            focus: false
+            keyNavigationEnabled: true
+            highlightMoveDuration: Theme.animDurationFast
+
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    var album = listenScreen._albums[albumList.currentIndex]
+                    if (album) {
+                        listenScreen._selectedAlbumKey = album.ratingKey
+                    }
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    listenScreen.currentView = "artists"
+                } else if (event.key === Qt.Key_Up && albumList.currentIndex <= 0) {
+                    event.accepted = true
+                    listenScreen.currentView = "artists"
+                }
+            }
+
+            // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                text: "Artist Detail (coming soon)"
+                visible: listenScreen.currentView === "detail" && listenScreen._albums.length === 0
+                text: "No albums found"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            // ── Album row delegate ───────────────────────────────────────────
+            delegate: Item {
+                id: albumDelegate
+
+                width: albumList.width
+                height: root.vpx(96)
+
+                // Highlight background for focused item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: albumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+
+                    Behavior on opacity {
+                        NumberAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+
+                Row {
+                    anchors {
+                        left: parent.left
+                        right: parent.right
+                        leftMargin: root.vpx(8)
+                        rightMargin: root.vpx(8)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    spacing: root.vpx(12)
+
+                    // ── Album art thumbnail ──────────────────────────────────
+                    Item {
+                        width: root.vpx(80)
+                        height: root.vpx(80)
+
+                        // Placeholder shown when there is no art or while loading
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.darker(Theme.colorSecondary, 1.4)
+                            radius: root.vpx(Theme.focusRingRadius)
+                            visible: albumArt.status !== Image.Ready || !modelData.posterLocal
+
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - root.vpx(8)
+                                text: modelData.title || ""
+                                color: Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                wrapMode: Text.Wrap
+                                horizontalAlignment: Text.AlignHCenter
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Image {
+                            id: albumArt
+
+                            anchors.fill: parent
+                            source: modelData.posterLocal || ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: root.vpx(80)
+                            sourceSize.height: root.vpx(80)
+                            visible: status === Image.Ready && modelData.posterLocal
+                            clip: true
+                        }
+                    }
+
+                    // ── Album title and subtitle ─────────────────────────────
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: root.vpx(4)
+                        width: parent.width - root.vpx(80) - root.vpx(12)
+
+                        Text {
+                            width: parent.width
+                            text: modelData.title || ""
+                            color: albumDelegate.ListView.isCurrentItem
+                                ? Theme.colorText
+                                : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: {
+                                var yr = modelData.year || ""
+                                var cnt = modelData.leafCount || 0
+                                var trackStr = cnt === 1 ? "1 track" : (cnt + " tracks")
+                                return yr ? (yr + " · " + trackStr) : trackStr
+                            }
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+                    }
+                }
+
+                // Focus ring
+                FocusRing {
+                    visible: albumDelegate.ListView.isCurrentItem && albumList.activeFocus
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        albumList.currentIndex = index
+                        albumList.forceActiveFocus()
+                    }
+                    onDoubleClicked: {
+                        albumList.currentIndex = index
+                        var album = listenScreen._albums[index]
+                        if (album) {
+                            listenScreen._selectedAlbumKey = album.ratingKey
+                        }
+                    }
+                }
             }
         }
     }
