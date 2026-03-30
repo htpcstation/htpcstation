@@ -184,8 +184,10 @@ FocusScope {
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
         } else if (currentView === "album") {
+            trackList._playAllFocused = true
             trackList.forceActiveFocus()
             trackList.currentIndex = 0
+            trackList.positionViewAtBeginning()
         }
     }
 
@@ -525,7 +527,7 @@ FocusScope {
                 top: albumDetailHeaderBar.bottom
                 left: parent.left
                 right: parent.right
-                bottom: parent.bottom
+                bottom: albumActionBar.top
             }
 
             model: listenScreen._tracks
@@ -534,27 +536,52 @@ FocusScope {
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
 
+            // When true, the Play All button in the header is focused
+            // instead of a track row.
+            property bool _playAllFocused: true
+
             Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_Down) {
-                    event.accepted = true
-                    if (trackList.currentIndex < listenScreen._tracks.length - 1) {
-                        trackList.currentIndex++
+                if (trackList._playAllFocused) {
+                    // Play All button is focused
+                    if (keys.isAccept(event)) {
+                        event.accepted = true
+                        listenScreen._playAlbum(0)
+                    } else if (event.key === Qt.Key_Down) {
+                        event.accepted = true
+                        trackList._playAllFocused = false
+                        trackList.currentIndex = 0
+                    } else if (keys.isCancel(event)) {
+                        event.accepted = true
+                        listenScreen.currentView = "detail"
                     }
-                } else if (event.key === Qt.Key_Up) {
-                    event.accepted = true
-                    if (trackList.currentIndex > 0) {
-                        trackList.currentIndex--
+                } else {
+                    // Track list is focused
+                    if (event.key === Qt.Key_Down) {
+                        event.accepted = true
+                        if (trackList.currentIndex < listenScreen._tracks.length - 1) {
+                            trackList.currentIndex++
+                        }
+                    } else if (event.key === Qt.Key_Up) {
+                        event.accepted = true
+                        if (trackList.currentIndex > 0) {
+                            trackList.currentIndex--
+                        } else {
+                            // At first track — move focus to Play All button
+                            trackList._playAllFocused = true
+                            // Scroll to top to show the Play All button
+                            trackList.positionViewAtBeginning()
+                        }
+                    } else if (keys.isAccept(event)) {
+                        event.accepted = true
+                        listenScreen._playAlbum(trackList.currentIndex)
+                    } else if (keys.isContext1(event)) {
+                        // X button — Play All (from track 1)
+                        event.accepted = true
+                        listenScreen._playAlbum(0)
+                    } else if (keys.isCancel(event)) {
+                        event.accepted = true
+                        listenScreen.currentView = "detail"
                     }
-                } else if (keys.isAccept(event)) {
-                    event.accepted = true
-                    listenScreen._playAlbum(trackList.currentIndex)
-                } else if (keys.isContext2(event)) {
-                    // X button — Play All (from track 1)
-                    event.accepted = true
-                    listenScreen._playAlbum(0)
-                } else if (keys.isCancel(event)) {
-                    event.accepted = true
-                    listenScreen.currentView = "detail"
                 }
             }
 
@@ -746,7 +773,7 @@ FocusScope {
                             font.bold: true
                         }
 
-                        // Play All button (subtle, centered)
+                        // Play All button (centered, focusable via D-pad)
                         Rectangle {
                             id: playAllBtn
                             anchors {
@@ -755,21 +782,27 @@ FocusScope {
                             }
                             width: playAllLabel.implicitWidth + root.vpx(16)
                             height: root.vpx(26)
-                            color: "transparent"
+                            color: trackList._playAllFocused && trackList.activeFocus
+                                ? Theme.colorPrimary : "transparent"
                             border.color: Theme.colorPrimary
                             border.width: root.vpx(1)
                             radius: root.vpx(Theme.focusRingRadius)
-                            opacity: playAllMouse.containsMouse ? 1.0 : 0.7
+                            opacity: (trackList._playAllFocused && trackList.activeFocus)
+                                || playAllMouse.containsMouse ? 1.0 : 0.7
 
                             Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                            Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
 
                             Text {
                                 id: playAllLabel
                                 anchors.centerIn: parent
                                 text: "▶ Play All"
-                                color: Theme.colorPrimary
+                                color: trackList._playAllFocused && trackList.activeFocus
+                                    ? Theme.colorBackground : Theme.colorPrimary
                                 font.family: Theme.fontFamily
                                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
+
+                                Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
                             }
 
                             MouseArea {
@@ -811,7 +844,7 @@ FocusScope {
                 Rectangle {
                     anchors.fill: parent
                     color: Theme.colorSecondary
-                    opacity: trackDelegate.ListView.isCurrentItem ? 1.0 : 0.0
+                    opacity: trackDelegate.ListView.isCurrentItem && !trackList._playAllFocused ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
 
                     Behavior on opacity {
@@ -844,7 +877,7 @@ FocusScope {
                         text: modelData.title || ""
                         color: trackDelegate.isPlaying
                             ? Theme.colorPrimary
-                            : (trackDelegate.ListView.isCurrentItem ? Theme.colorText : Theme.colorTextDim)
+                            : (trackDelegate.ListView.isCurrentItem && !trackList._playAllFocused ? Theme.colorText : Theme.colorTextDim)
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeBody)
                         elide: Text.ElideRight
@@ -864,7 +897,7 @@ FocusScope {
 
                 // Focus ring
                 FocusRing {
-                    visible: trackDelegate.ListView.isCurrentItem && trackList.activeFocus
+                    visible: trackDelegate.ListView.isCurrentItem && trackList.activeFocus && !trackList._playAllFocused
                 }
 
                 MouseArea {
@@ -879,6 +912,31 @@ FocusScope {
                         listenScreen._playAlbum(index)
                     }
                 }
+            }
+        }
+
+        // ── Action bar ───────────────────────────────────────────────────────
+        Rectangle {
+            id: albumActionBar
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+            }
+            height: root.vpx(40)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors.centerIn: parent
+                text: keys.useGamepadLabels
+                    ? "[" + keys.acceptLabel + "] Play from track    ["
+                      + keys.context1Label + "] Play All    ["
+                      + keys.cancelLabel + "] Back"
+                    : "[Enter] Play from track    [Esc] Back"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
         }
     }
