@@ -38,28 +38,28 @@ FocusScope {
 
     // Tab visibility — built once on startup from saved settings.
     // Changes take effect on next launch (toggling in Settings saves
-    // the preference and shows a toast).
-    property var tabNames:   _buildTabNames()
-    property var tabSources: _buildTabSources()
+    // the preference and shows a "Restart to apply" toast).
+    // IMPORTANT: These must NOT be bindings to settings properties,
+    // otherwise toggling a setting triggers a live Repeater rebuild
+    // which freezes the UI.
+    property var tabNames:   []
+    property var tabSources: []
 
-    function _buildTabNames() {
+    Component.onCompleted: {
         var names = []
-        if (!settings || settings.showRetroGamesTab) names.push("Retro Games")
-        if (!settings || settings.showPcGamesTab)    names.push("PC Games")
-        if (!settings || settings.showWatchTab)      names.push("Watch")
-        if (!settings || settings.showListenTab)     names.push("Listen")
-        names.push("Settings")
-        return names
-    }
-
-    function _buildTabSources() {
         var sources = []
-        if (!settings || settings.showRetroGamesTab) sources.push("RetroGamesScreen.qml")
-        if (!settings || settings.showPcGamesTab)    sources.push("PcGamesScreen.qml")
-        if (!settings || settings.showWatchTab)      sources.push("WatchScreen.qml")
-        if (!settings || settings.showListenTab)     sources.push("ListenScreen.qml")
+        var allTabs = _allTabs
+        for (var i = 0; i < allTabs.length; i++) {
+            var show = !settings || settings[allTabs[i].setting]
+            if (show) {
+                names.push(allTabs[i].name)
+                sources.push(allTabs[i].source)
+            }
+        }
+        names.push("Settings")
         sources.push("SettingsScreen.qml")
-        return sources
+        tabNames = names
+        tabSources = sources
     }
 
     // Set to true when LB/RB is pressed while focus is in the content area,
@@ -394,7 +394,12 @@ FocusScope {
     }
 
     // On startup, give focus to the first tab.
+    // (tabNames/tabSources are set in the other Component.onCompleted above,
+    // but the Repeater may not have created items yet — defer to next frame.)
     Component.onCompleted: {
-        tabRepeater.itemAt(0).forceActiveFocus()
+        Qt.callLater(function() {
+            var item = tabRepeater.itemAt(0)
+            if (item) item.forceActiveFocus()
+        })
     }
 }
