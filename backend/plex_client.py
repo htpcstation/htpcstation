@@ -130,8 +130,8 @@ class PlexClient:
         return container.get("Metadata", [])
 
     def get_hubs(self, rating_key: str) -> list[dict]:
-        """GET /library/metadata/<ratingKey>/hubs — returns hub sections."""
-        data = self._get(f"/library/metadata/{rating_key}/hubs")
+        """GET /hubs/metadata/<ratingKey> — returns hub sections."""
+        data = self._get(f"/hubs/metadata/{rating_key}")
         if data is None:
             return []
         container = data.get("MediaContainer", {})

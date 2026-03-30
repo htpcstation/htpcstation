@@ -976,7 +976,7 @@ class PlexLibrary(QObject):
         result = []
         for hub in hubs:
             hub_id = hub.get("hubIdentifier", "")
-            if not hub_id.startswith("hub.artist.albums"):
+            if not (hub_id.startswith("artist.albums") or hub_id.startswith("hub.artist.albums")):
                 continue
             # Clean up the hub title: strip leading count prefix
             raw_title = hub.get("title", "")

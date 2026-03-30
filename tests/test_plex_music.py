@@ -1013,7 +1013,7 @@ class TestGetHubs:
             client.get_hubs("42")
 
         call_url = mock_session.get.call_args[0][0]
-        assert call_url == "http://server:32400/library/metadata/42/hubs"
+        assert call_url == "http://server:32400/hubs/metadata/42"
 
 
 # ---------------------------------------------------------------------------
