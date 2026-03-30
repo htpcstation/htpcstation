@@ -1197,6 +1197,15 @@ class PlexLibrary(QObject):
             self._showsReady.emit(shows, total)
         elif section_type == "artist":
             artists = [parse_artist(item) for item in items]
+            # Pre-resolve cached posters on the worker thread so the main
+            # thread doesn't queue hundreds of poster-fetch tasks for
+            # already-cached images.
+            if self._poster_cache is not None:
+                for artist in artists:
+                    if artist.thumb_path:
+                        cached_path = self._poster_cache._cache_path(artist.thumb_path)
+                        if cached_path.exists():
+                            artist.poster_local = cached_path.as_uri()
             self._artistsReady.emit(artists, total)
 
     def _worker_load_more_movies(
@@ -1322,11 +1331,11 @@ class PlexLibrary(QObject):
         # Save to cache for instant load on next launch
         self._save_artists_cache(artists)
 
-        # Kick off poster downloads for new items
+        # Kick off poster downloads only for artists missing a local poster
         client = self._client
         if client is not None:
             for i, artist in enumerate(artists):
-                if artist.thumb_path:
+                if artist.thumb_path and not artist.poster_local:
                     self._executor.submit(
                         self._worker_fetch_poster, client, artist.thumb_path, "artist", i
                     )
