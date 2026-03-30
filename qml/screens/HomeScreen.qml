@@ -36,38 +36,44 @@ FocusScope {
         { name: "Listen",      source: "ListenScreen.qml",     setting: "showListenTab" },
     ]
 
-    property var tabNames: _buildTabNames()
+    // Reactive tab visibility — re-evaluated whenever any setting changes.
+    // We read each setting individually so QML tracks the property bindings.
+    property bool _showRetro:  settings ? settings.showRetroGamesTab : true
+    property bool _showPc:     settings ? settings.showPcGamesTab    : true
+    property bool _showWatch:  settings ? settings.showWatchTab      : true
+    property bool _showListen: settings ? settings.showListenTab     : true
+
+    // Rebuild tab arrays whenever any visibility flag changes.
+    property var tabNames:   _buildTabNames()
     property var tabSources: _buildTabSources()
+
+    on_ShowRetroChanged:  { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
+    on_ShowPcChanged:     { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
+    on_ShowWatchChanged:  { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
+    on_ShowListenChanged: { tabNames = _buildTabNames(); tabSources = _buildTabSources(); _clampTab() }
+
+    function _clampTab() {
+        if (currentTab >= tabNames.length) currentTab = tabNames.length - 1
+    }
 
     function _buildTabNames() {
         var names = []
-        for (var i = 0; i < _allTabs.length; i++) {
-            // Default to showing all tabs if settings hasn't loaded yet
-            if (!settings || settings[_allTabs[i].setting]) names.push(_allTabs[i].name)
-        }
+        if (_showRetro)  names.push("Retro Games")
+        if (_showPc)     names.push("PC Games")
+        if (_showWatch)  names.push("Watch")
+        if (_showListen) names.push("Listen")
         names.push("Settings")
         return names
     }
 
     function _buildTabSources() {
         var sources = []
-        for (var i = 0; i < _allTabs.length; i++) {
-            if (!settings || settings[_allTabs[i].setting]) sources.push(_allTabs[i].source)
-        }
+        if (_showRetro)  sources.push("RetroGamesScreen.qml")
+        if (_showPc)     sources.push("PcGamesScreen.qml")
+        if (_showWatch)  sources.push("WatchScreen.qml")
+        if (_showListen) sources.push("ListenScreen.qml")
         sources.push("SettingsScreen.qml")
         return sources
-    }
-
-    Connections {
-        target: settings
-        function onTabVisibilityChanged() {
-            homeScreen.tabNames = homeScreen._buildTabNames()
-            homeScreen.tabSources = homeScreen._buildTabSources()
-            // Ensure currentTab is still valid
-            if (homeScreen.currentTab >= homeScreen.tabNames.length) {
-                homeScreen.currentTab = homeScreen.tabNames.length - 1
-            }
-        }
     }
 
     // Set to true when LB/RB is pressed while focus is in the content area,
