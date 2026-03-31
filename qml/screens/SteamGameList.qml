@@ -2,23 +2,23 @@ import QtQuick
 import ".."
 import "../components"
 
-// Moonlight app grid — shows a scrollable grid of app tiles for the selected Moonlight host.
+// Steam game list view — split-panel browse view for Steam games.
 //
 // Focus flow:
-//   Gains focus when PcGamesScreen switches to "games" view for a Moonlight source.
-//   Arrow keys navigate the grid natively.
-//   A (Return) on a cell → emits appSelected(index).
-//   B (Escape) → emits back() so PcGamesScreen can return to the source list.
-//   Y (F2)     → opens the sort overlay panel.
+//   Gains focus when PcGamesScreen switches to "games" view (list mode).
+//   Up/Down navigate the list natively.
+//   A (Return)  → emits gameSelected(index)
+//   B (Escape)  → emits back()
+//   Y (F2)      → opens the sort overlay panel
 FocusScope {
-    id: moonlightAppGrid
+    id: steamGameList
 
     // Emitted when the user presses B / Escape to return to the source list.
     signal back()
 
-    // Emitted when the user presses A / Return on an app cell.
-    // index is the row in moonlight.appsModel.
-    signal appSelected(int index)
+    // Emitted when the user presses A / Return on a game row.
+    // index is the row in steam.gamesModel.
+    signal gameSelected(int index)
 
     // Emitted when the user changes the view mode via the sort overlay.
     signal viewModeChanged(string mode)
@@ -26,21 +26,89 @@ FocusScope {
     // Display name of the currently selected source (set by PcGamesScreen).
     property string sourceName: ""
 
-    // ── View mode (set by PcGamesScreen; "grid" or "list") ────────────────────
-    property string _viewMode: "grid"
-
-    // Whether the Moonlight host is offline (set by PcGamesScreen).
-    // When true, the empty state shows "Host unavailable" instead of "No apps found".
-    property bool hostOffline: false
-
     // ── Sort state (mirrors backend state for display) ─────────────────────────
     property string _currentSort: "az"
 
+    // ── View mode (set by PcGamesScreen; "grid" or "list") ────────────────────
+    property string _viewMode: "grid"
+
     // Human-readable sort label for the status bar
     readonly property string _sortLabel: {
-        if (_currentSort === "az") return "A-Z"
-        if (_currentSort === "za") return "Z-A"
+        if (_currentSort === "az")     return "A-Z"
+        if (_currentSort === "za")     return "Z-A"
+        if (_currentSort === "recent") return "Recent"
         return "A-Z"
+    }
+
+    // ── Preview data for the left panel ──────────────────────────────────────
+    // Cached game dict for the currently highlighted item (from steam.getGame).
+    property var _previewData: ({})
+
+    // Async metadata dict populated by steam.metadataChanged signal.
+    property var _previewMetadata: ({})
+
+    // Update preview data when the current index changes.
+    // Null-guards steam and model; resets async metadata; triggers fetch.
+    function _updatePreview(index) {
+        if (!steam) {
+            _previewData = {}
+            _previewMetadata = {}
+            return
+        }
+        if (index < 0 || index >= gameList.count) {
+            _previewData = {}
+            _previewMetadata = {}
+            return
+        }
+        _previewData = steam.getGame(index)
+        _previewMetadata = {}
+        if (_previewData.appId) {
+            steam.fetchMetadata(_previewData.appId)
+        }
+    }
+
+    // ── Listen for metadataChanged to refresh the left panel ─────────────────
+    Connections {
+        target: steam
+        function onMetadataChanged(appId, metadata) {
+            if (appId === steamGameList._previewData.appId) {
+                steamGameList._previewMetadata = metadata
+            }
+        }
+    }
+
+    // ── Helper: format last played timestamp ──────────────────────────────────
+    // Input: Unix timestamp (int) → "YYYY-MM-DD" or "Never"
+    function _formatLastPlayed(timestamp) {
+        if (!timestamp || timestamp <= 0) return "Never"
+        var d = new Date(timestamp * 1000)
+        var year = d.getFullYear()
+        var month = String(d.getMonth() + 1).padStart(2, "0")
+        var day = String(d.getDate()).padStart(2, "0")
+        return year + "-" + month + "-" + day
+    }
+
+    // ── Helper: format rating as stars ────────────────────────────────────────
+    // Input: float 0.0–1.0 → "★★★★☆" (5-star scale)
+    // Returns "" for unrated games (rating <= 0) so the row is hidden.
+    function _formatRating(rating) {
+        if (rating === undefined || rating === null || rating === "") return ""
+        if (rating <= 0) return ""
+        var stars = Math.round(rating * 5)
+        var filled = ""
+        var empty = ""
+        for (var i = 0; i < 5; i++) {
+            if (i < stars) filled += "★"
+            else empty += "☆"
+        }
+        return filled + empty
+    }
+
+    // Re-trigger preview when view becomes visible.
+    onVisibleChanged: {
+        if (visible) {
+            _updatePreview(gameList.currentIndex)
+        }
     }
 
     // ── Header bar ───────────────────────────────────────────────────────────
@@ -61,7 +129,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  " + moonlightAppGrid.sourceName
+            text: "◀  " + steamGameList.sourceName
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -100,184 +168,281 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "Sorted: " + moonlightAppGrid._sortLabel
+            text: "Sorted: " + steamGameList._sortLabel
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
     }
 
-    // ── App grid ─────────────────────────────────────────────────────────────
-    // Cell dimensions: portrait poster (160w × 240h) matching Steam card size
-    readonly property int _targetCellW: 160
-    readonly property int _cellH: 240
-    readonly property int _cellSpacing: 12
-
-    GridView {
-        id: appGrid
+    // ── Split content area ────────────────────────────────────────────────────
+    Item {
+        id: contentArea
 
         anchors {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
-            margins: root.vpx(16)
         }
 
-        model: moonlight ? moonlight.appsModel : null
-        clip: true
-        focus: true
+        // ── Left panel: preview area (45% width) ──────────────────────────────
+        Item {
+            id: leftPanel
 
-        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(moonlightAppGrid._targetCellW + moonlightAppGrid._cellSpacing)))
-        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(moonlightAppGrid._targetCellW + moonlightAppGrid._cellSpacing)
-        cellHeight: root.vpx(moonlightAppGrid._cellH + moonlightAppGrid._cellSpacing)
+            anchors {
+                top: parent.top
+                left: parent.left
+                bottom: parent.bottom
+            }
+            width: Math.round(parent.width * 0.45)
 
-        // Smooth highlight movement
-        highlightMoveDuration: Theme.animDurationFast
+            // ── Portrait poster image area (~60% of panel height) ─────────────
+            Item {
+                id: posterArea
 
-        Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
-                event.accepted = true
-                sortOverlay.open()
-            } else if (keys.isAccept(event)) {
-                event.accepted = true
-                moonlightAppGrid.appSelected(appGrid.currentIndex)
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                moonlightAppGrid.back()
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(16)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+                // Poster area takes ~60% of the left panel height (portrait aspect)
+                height: Math.round(parent.height * 0.60)
+
+                // Placeholder shown when there is no image or while loading
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.darker(Theme.colorSecondary, 1.4)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: posterImage.status !== Image.Ready
+                             || !steamGameList._previewData.imagePath
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: steamGameList._previewData.name || ""
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width - root.vpx(16)
+                    }
+                }
+
+                // Portrait poster image — prepend "file://" for local paths
+                Image {
+                    id: posterImage
+
+                    anchors.fill: parent
+                    source: steamGameList._previewData.imagePath
+                            ? (steamGameList._previewData.imagePath.startsWith("http")
+                                ? steamGameList._previewData.imagePath
+                                : "file://" + steamGameList._previewData.imagePath)
+                            : ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    sourceSize.width: Math.round(leftPanel.width)
+                    sourceSize.height: Math.round(leftPanel.height * 0.60)
+                    visible: status === Image.Ready && !!steamGameList._previewData.imagePath
+                }
+            }
+
+            // ── Compact metadata column ───────────────────────────────────────
+            Column {
+                id: metadataColumn
+
+                anchors {
+                    top: posterArea.bottom
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(8)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+                spacing: root.vpx(4)
+
+                Repeater {
+                    model: [
+                        {
+                            label: "Developer",
+                            value: steamGameList._previewMetadata.developer
+                                   || steamGameList._previewData.developer || ""
+                        },
+                        {
+                            label: "Genre",
+                            value: steamGameList._previewMetadata.genre
+                                   || steamGameList._previewData.genre || ""
+                        },
+                        {
+                            label: "Rating",
+                            value: steamGameList._formatRating(
+                                       steamGameList._previewMetadata.rating !== undefined
+                                       ? steamGameList._previewMetadata.rating
+                                       : steamGameList._previewData.rating)
+                        },
+                        {
+                            label: "Last Played",
+                            value: steamGameList._formatLastPlayed(
+                                       steamGameList._previewData.lastPlayed)
+                        }
+                    ]
+
+                    Row {
+                        spacing: root.vpx(6)
+                        visible: modelData.value !== ""
+
+                        Text {
+                            text: modelData.label + ":"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            width: root.vpx(72)
+                        }
+
+                        Text {
+                            text: modelData.value
+                            color: Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        }
+                    }
+                }
+            }
+
+            // ── Description (scrollable) ──────────────────────────────────────
+            Flickable {
+                id: descriptionFlickable
+
+                anchors {
+                    top: metadataColumn.bottom
+                    topMargin: root.vpx(8)
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                    bottomMargin: root.vpx(8)
+                }
+                clip: true
+                contentWidth: width
+                contentHeight: descriptionText.implicitHeight
+                interactive: false  // preview only — no scroll needed
+
+                Text {
+                    id: descriptionText
+
+                    width: descriptionFlickable.width
+                    text: steamGameList._previewMetadata.description
+                          || steamGameList._previewData.description || ""
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    wrapMode: Text.Wrap
+                }
             }
         }
 
-        // ── Empty state ──────────────────────────────────────────────────────
-        Text {
-            anchors.centerIn: parent
-            visible: appGrid.count === 0
-            text: moonlightAppGrid.hostOffline
-                  ? "Host unavailable — check that your streaming PC is powered on"
-                  : "No apps found"
-            color: moonlightAppGrid.hostOffline ? Theme.colorPrimary : Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            wrapMode: Text.Wrap
-            horizontalAlignment: Text.AlignHCenter
-            width: parent.width - root.vpx(64)
-        }
+        // ── Right panel: game list (55% width) ────────────────────────────────
+        ListView {
+            id: gameList
 
-        // ── App tile delegate ────────────────────────────────────────────────
-        delegate: Item {
-            id: tileRoot
+            anchors {
+                top: parent.top
+                left: leftPanel.right
+                right: parent.right
+                bottom: parent.bottom
+                leftMargin: root.vpx(64)
+                rightMargin: root.vpx(16)
+            }
 
-            width: appGrid.cellWidth
-            height: appGrid.cellHeight
+            model: steam ? steam.gamesModel : null
+            clip: true
+            focus: true
+            keyNavigationEnabled: true
 
-            // Inner container — slightly inset from the cell to create spacing
-            Rectangle {
-                id: tileCard
+            // Smooth highlight movement
+            highlightMoveDuration: Theme.animDurationFast
 
-                anchors {
-                    fill: parent
-                    margins: root.vpx(moonlightAppGrid._cellSpacing / 2)
+            // Update preview data when the current index changes.
+            onCurrentIndexChanged: {
+                steamGameList._updatePreview(currentIndex)
+            }
+
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    steamGameList.gameSelected(gameList.currentIndex)
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    steamGameList.back()
+                } else if (keys.isContext2(event)) {
+                    event.accepted = true
+                    sortOverlay.open()
                 }
+            }
 
-                color: Theme.colorSecondary
-                radius: root.vpx(Theme.focusRingRadius)
+            // ── Game row delegate ────────────────────────────────────────────
+            delegate: FocusScope {
+                id: rowRoot
 
-                // Subtle highlight when focused
+                width: gameList.width
+                height: root.vpx(40)
+
+                // Background highlight for the current item
                 Rectangle {
                     anchors.fill: parent
-                    radius: parent.radius
-                    color: Theme.colorPrimary
-                    opacity: tileRoot.GridView.isCurrentItem && appGrid.activeFocus ? 0.15 : 0.0
+                    color: Theme.colorSecondary
+                    opacity: rowRoot.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
                     }
                 }
 
-                // ── Poster image area ────────────────────────────────────────
-                Item {
-                    id: imageArea
-
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    // Image area takes ~80% of the card height (portrait poster)
-                    height: Math.round(parent.height * 0.80)
-
-                    // Text-only placeholder shown when imagePath is empty or image not loaded
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.darker(Theme.colorSecondary, 1.4)
-                        radius: root.vpx(Theme.focusRingRadius)
-                        visible: posterImage.status !== Image.Ready || model.imagePath === ""
-
-                        Text {
-                            anchors.centerIn: parent
-                            width: parent.width - root.vpx(8)
-                            text: model.name
-                            color: Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                            wrapMode: Text.Wrap
-                            horizontalAlignment: Text.AlignHCenter
-                            maximumLineCount: 4
-                            elide: Text.ElideRight
-                        }
-                    }
-
-                    Image {
-                        id: posterImage
-
-                        anchors.fill: parent
-                        source: model.imagePath
-                            ? (model.imagePath.startsWith("http") ? model.imagePath : "file://" + model.imagePath)
-                            : ""
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(moonlightAppGrid._targetCellW)
-                        sourceSize.height: root.vpx(moonlightAppGrid._cellH)
-                        visible: status === Image.Ready && model.imagePath !== ""
-                    }
-                }
-
-                // ── App name label ───────────────────────────────────────────
+                // Game name
                 Text {
                     anchors {
-                        top: imageArea.bottom
                         left: parent.left
                         right: parent.right
-                        bottom: parent.bottom
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(4)
-                        bottomMargin: root.vpx(4)
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: root.vpx(12)
+                        rightMargin: root.vpx(12)
                     }
                     text: model.name
                     color: Theme.colorText
                     font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
                     elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: Text.AlignHCenter
                 }
 
-                // Focus ring — visible when this tile is the current item
+                // Focus ring — visible when this row is current and list has focus
                 FocusRing {
-                    visible: tileRoot.GridView.isCurrentItem && appGrid.activeFocus
+                    visible: rowRoot.ListView.isCurrentItem && gameList.activeFocus
                 }
             }
+        }
+
+        // ── Empty state (centered in full content area) ───────────────────────
+        // Shown when the list has no items (covers both panels).
+        Text {
+            anchors.centerIn: parent
+            visible: gameList.count === 0
+            text: "No games found"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
     }
 
     // ── Sort overlay ──────────────────────────────────────────────────────────
     //
     // A semi-transparent panel that slides in from the top when Y is pressed.
-    // Navigation: Left/Right moves between sort options.
+    // Navigation: Up/Down switches between sort row and view row.
+    //             Left/Right moves between options in the focused row.
     //             A (Return) applies the selection.
     //             B (Escape) or Y dismisses without changing.
     FocusScope {
@@ -287,7 +452,7 @@ FocusScope {
         visible: false
         enabled: visible
 
-        // Index within the sort options (0=A-Z, 1=Z-A)
+        // Index within the sort options (0=A-Z, 1=Z-A, 2=Recent)
         property int _sortIndex: 0
 
         // Index within the view options (0=Grid, 1=List)
@@ -297,13 +462,13 @@ FocusScope {
         property int _focusRow: 0
 
         function open() {
-            if (!moonlight) return
+            if (!steam) return
             // Sync selection indices to current state
-            var sortKeys = ["az", "za"]
-            var si = sortKeys.indexOf(moonlightAppGrid._currentSort)
+            var sortKeys = ["az", "za", "recent"]
+            var si = sortKeys.indexOf(steamGameList._currentSort)
             _sortIndex = si >= 0 ? si : 0
             var viewKeys = ["grid", "list"]
-            var vi = viewKeys.indexOf(moonlightAppGrid._viewMode)
+            var vi = viewKeys.indexOf(steamGameList._viewMode)
             _viewIndex = vi >= 0 ? vi : 0
             _focusRow = 0
             visible = true
@@ -312,7 +477,7 @@ FocusScope {
 
         function close() {
             visible = false
-            appGrid.forceActiveFocus()
+            gameList.forceActiveFocus()
         }
 
         // ── Backdrop ─────────────────────────────────────────────────────────
@@ -390,8 +555,9 @@ FocusScope {
 
                 Repeater {
                     model: [
-                        { key: "az", label: "A-Z" },
-                        { key: "za", label: "Z-A" }
+                        { key: "az",     label: "A-Z" },
+                        { key: "za",     label: "Z-A" },
+                        { key: "recent", label: "Recent" }
                     ]
 
                     delegate: Rectangle {
@@ -414,7 +580,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === moonlightAppGrid._currentSort
+                                var isActive = modelData.key === steamGameList._currentSort
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -480,7 +646,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === moonlightAppGrid._viewMode
+                                var isActive = modelData.key === steamGameList._viewMode
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -497,7 +663,7 @@ FocusScope {
 
         // ── Key handling ─────────────────────────────────────────────────────
         Keys.onPressed: (event) => {
-            var sortCount = 2
+            var sortCount = 3
             var viewCount = 2
 
             if (keys.isCancel(event) || keys.isContext2(event)) {
@@ -537,22 +703,21 @@ FocusScope {
 
             } else if (keys.isAccept(event)) {
                 event.accepted = true
-                if (!moonlight) return
                 // Apply sort
-                var sortKeys = ["az", "za"]
+                var sortKeys = ["az", "za", "recent"]
                 var newSort = sortKeys[sortOverlay._sortIndex]
-                moonlightAppGrid._currentSort = newSort
-                moonlight.sortApps(newSort)
-                if (settings) settings.setSortMoonlightApps(newSort)
+                steamGameList._currentSort = newSort
+                if (steam) steam.sortGames(newSort)
+                if (settings) settings.setSortSteamGames(newSort)
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
                 var newView = viewKeys[sortOverlay._viewIndex]
-                if (newView !== moonlightAppGrid._viewMode) {
+                if (newView !== steamGameList._viewMode) {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // PcGamesScreen will route focus to the newly visible view.
                     sortOverlay.visible = false
                     if (settings) settings.setPcGamesViewMode(newView)
-                    moonlightAppGrid.viewModeChanged(newView)
+                    steamGameList.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).
                     sortOverlay.close()
@@ -563,11 +728,12 @@ FocusScope {
 
     Component.onCompleted: {
         if (settings) {
-            var saved = settings.sortMoonlightApps
+            var saved = settings.sortSteamGames
             if (saved) {
                 _currentSort = saved
-                if (moonlight) moonlight.sortApps(saved)
+                if (steam) steam.sortGames(saved)
             }
+            // _viewMode is bound from PcGamesScreen; do not overwrite here.
         }
     }
 }

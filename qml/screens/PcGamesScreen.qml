@@ -51,6 +51,9 @@ FocusScope {
     // JS array of recently played entries (populated when "recent" source is selected).
     property var _recentEntries: []
 
+    // Current view mode: "grid" or "list"
+    property string _viewMode: "grid"
+
     // Track whether we have already called steam.refresh() to avoid re-fetching
     // every time the user navigates back to this tab.
     property bool _refreshed: false
@@ -58,6 +61,7 @@ FocusScope {
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: _routeFocus()
+    on_ViewModeChanged: { if (currentView === "games") _routeFocus() }
     onActiveFocusChanged: {
         if (activeFocus) {
             if (!_refreshed) {
@@ -74,11 +78,14 @@ FocusScope {
             sourceList.forceActiveFocus()
         } else if (currentView === "games") {
             if (isRecentSource) {
-                recentlyPlayedGrid.forceActiveFocus()
+                if (_viewMode === "list") recentlyPlayedList.forceActiveFocus()
+                else recentlyPlayedGrid.forceActiveFocus()
             } else if (isMoonlightSource) {
-                moonlightAppGrid.forceActiveFocus()
+                if (_viewMode === "list") moonlightAppList.forceActiveFocus()
+                else moonlightAppGrid.forceActiveFocus()
             } else {
-                steamGameGrid.forceActiveFocus()
+                if (_viewMode === "list") steamGameList.forceActiveFocus()
+                else steamGameGrid.forceActiveFocus()
             }
         } else {
             if (isRecentSource) {
@@ -129,6 +136,7 @@ FocusScope {
                         pcGamesScreen.isMoonlightOffline = false
                         pcGamesScreen._recentEntries = steam.getRecentlyPlayed()
                         recentlyPlayedGrid.entries = pcGamesScreen._recentEntries
+                        recentlyPlayedList.entries = pcGamesScreen._recentEntries
                     } else if (sourceKey === "moonlight") {
                         if (!moonlight) return
                         pcGamesScreen.isRecentSource = false
@@ -225,6 +233,7 @@ FocusScope {
                         pcGamesScreen.isMoonlightOffline = false
                         pcGamesScreen._recentEntries = steam.getRecentlyPlayed()
                         recentlyPlayedGrid.entries = pcGamesScreen._recentEntries
+                        recentlyPlayedList.entries = pcGamesScreen._recentEntries
                     } else if (sourceKey === "moonlight") {
                         if (!moonlight) return
                         pcGamesScreen.isRecentSource = false
@@ -252,12 +261,16 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isRecentSource
+                 && pcGamesScreen._viewMode === "grid"
+
+        _viewMode: pcGamesScreen._viewMode
 
         onBack: pcGamesScreen.currentView = "sources"
         onGameSelected: (index) => {
             pcGamesScreen.selectedGameIndex = index
             pcGamesScreen.currentView = "detail"
         }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
     }
 
     // ── Recently Played detail view ───────────────────────────────────────────
@@ -296,15 +309,17 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && !pcGamesScreen.isMoonlightSource
-                 && !pcGamesScreen.isRecentSource
+                 && !pcGamesScreen.isRecentSource && pcGamesScreen._viewMode === "grid"
 
         sourceName: pcGamesScreen.selectedSourceName
+        _viewMode: pcGamesScreen._viewMode
 
         onBack: pcGamesScreen.currentView = "sources"
         onGameSelected: (index) => {
             pcGamesScreen.selectedGameIndex = index
             pcGamesScreen.currentView = "detail"
         }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
     }
 
     // ── Steam game detail view ────────────────────────────────────────────────
@@ -346,15 +361,18 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isMoonlightSource
+                 && pcGamesScreen._viewMode === "grid"
 
         sourceName: pcGamesScreen.selectedSourceName
         hostOffline: pcGamesScreen.isMoonlightOffline
+        _viewMode: pcGamesScreen._viewMode
 
         onBack: pcGamesScreen.currentView = "sources"
         onAppSelected: (index) => {
             pcGamesScreen.selectedGameIndex = index
             pcGamesScreen.currentView = "detail"
         }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
     }
 
     // ── Moonlight app detail view ─────────────────────────────────────────────
@@ -384,6 +402,61 @@ FocusScope {
             if (pcGamesScreen.selectedGameIndex < count - 1) {
                 pcGamesScreen.selectedGameIndex++
             }
+        }
+    }
+
+    // ── Steam game list view ─────────────────────────────────────────────────
+    SteamGameList {
+        id: steamGameList
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && !pcGamesScreen.isMoonlightSource
+                 && !pcGamesScreen.isRecentSource && pcGamesScreen._viewMode === "list"
+        sourceName: pcGamesScreen.selectedSourceName
+        _viewMode: pcGamesScreen._viewMode
+        onBack: pcGamesScreen.currentView = "sources"
+        onGameSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    // ── Moonlight app list view ──────────────────────────────────────────────
+    MoonlightAppList {
+        id: moonlightAppList
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isMoonlightSource
+                 && pcGamesScreen._viewMode === "list"
+        sourceName: pcGamesScreen.selectedSourceName
+        hostOffline: pcGamesScreen.isMoonlightOffline
+        _viewMode: pcGamesScreen._viewMode
+        onBack: pcGamesScreen.currentView = "sources"
+        onAppSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    // ── Recently Played list view ────────────────────────────────────────────
+    RecentlyPlayedList {
+        id: recentlyPlayedList
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isRecentSource
+                 && pcGamesScreen._viewMode === "list"
+        entries: pcGamesScreen._recentEntries
+        _viewMode: pcGamesScreen._viewMode
+        onBack: pcGamesScreen.currentView = "sources"
+        onGameSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            _viewMode = settings.pcGamesViewMode || "grid"
         }
     }
 }

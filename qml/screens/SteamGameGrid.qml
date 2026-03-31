@@ -20,8 +20,14 @@ FocusScope {
     // index is the row in steam.gamesModel.
     signal gameSelected(int index)
 
+    // Emitted when the user changes the view mode via the sort overlay.
+    signal viewModeChanged(string mode)
+
     // Display name of the currently selected source (set by PcGamesScreen).
     property string sourceName: ""
+
+    // ── View mode (set by PcGamesScreen; "grid" or "list") ────────────────────
+    property string _viewMode: "grid"
 
     // ── Sort state (mirrors backend state for display) ─────────────────────────
     property string _currentSort: "az"
@@ -276,12 +282,22 @@ FocusScope {
         // Index within the sort options (0=A-Z, 1=Z-A, 2=Recent)
         property int _sortIndex: 0
 
+        // Index within the view options (0=Grid, 1=List)
+        property int _viewIndex: 0
+
+        // Currently focused row: 0=sort row, 1=view row
+        property int _focusRow: 0
+
         function open() {
             if (!steam) return
-            // Sync selection index to current state
+            // Sync selection indices to current state
             var sortKeys = ["az", "za", "recent"]
             var si = sortKeys.indexOf(steamGameGrid._currentSort)
             _sortIndex = si >= 0 ? si : 0
+            var viewKeys = ["grid", "list"]
+            var vi = viewKeys.indexOf(steamGameGrid._viewMode)
+            _viewIndex = vi >= 0 ? vi : 0
+            _focusRow = 0
             visible = true
             forceActiveFocus()
         }
@@ -307,7 +323,7 @@ FocusScope {
                 left: parent.left
                 right: parent.right
             }
-            height: root.vpx(130)
+            height: root.vpx(190)
             color: Theme.colorSecondary
             opacity: 0.97
 
@@ -375,7 +391,7 @@ FocusScope {
                         width: root.vpx(80)
                         height: root.vpx(36)
                         color: {
-                            var isFocused = sortOverlay._sortIndex === index
+                            var isFocused = sortOverlay._focusRow === 0 && sortOverlay._sortIndex === index
                             return isFocused ? Theme.colorPrimary : "transparent"
                         }
                         radius: root.vpx(Theme.focusRingRadius)
@@ -395,7 +411,73 @@ FocusScope {
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
-                                var isFocused = sortOverlay._sortIndex === index
+                                var isFocused = sortOverlay._focusRow === 0 && sortOverlay._sortIndex === index
+                                return isFocused ? "#ffffff" : Theme.colorText
+                            }
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        }
+                    }
+                }
+            }
+
+            // ── View label ───────────────────────────────────────────────────
+            Text {
+                id: viewLabel
+                anchors {
+                    top: sortOptionsRow.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(6)
+                }
+                text: "View"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+            }
+
+            // ── View options row ──────────────────────────────────────────────
+            Row {
+                id: viewOptionsRow
+                anchors {
+                    top: viewLabel.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(6)
+                }
+                spacing: root.vpx(8)
+
+                Repeater {
+                    model: [
+                        { key: "grid", label: "Grid" },
+                        { key: "list", label: "List" }
+                    ]
+
+                    delegate: Rectangle {
+                        width: root.vpx(80)
+                        height: root.vpx(36)
+                        color: {
+                            var isFocused = sortOverlay._focusRow === 1 && sortOverlay._viewIndex === index
+                            return isFocused ? Theme.colorPrimary : "transparent"
+                        }
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: root.vpx(8)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: {
+                                var isActive = modelData.key === steamGameGrid._viewMode
+                                return (isActive ? "✓ " : "") + modelData.label
+                            }
+                            color: {
+                                var isFocused = sortOverlay._focusRow === 1 && sortOverlay._viewIndex === index
                                 return isFocused ? "#ffffff" : Theme.colorText
                             }
                             font.family: Theme.fontFamily
@@ -409,31 +491,65 @@ FocusScope {
         // ── Key handling ─────────────────────────────────────────────────────
         Keys.onPressed: (event) => {
             var sortCount = 3
+            var viewCount = 2
 
             if (keys.isCancel(event) || keys.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortOverlay.close()
 
+            } else if (event.key === Qt.Key_Up) {
+                event.accepted = true
+                if (sortOverlay._focusRow > 0)
+                    sortOverlay._focusRow -= 1
+
+            } else if (event.key === Qt.Key_Down) {
+                event.accepted = true
+                if (sortOverlay._focusRow < 1)
+                    sortOverlay._focusRow += 1
+
             } else if (event.key === Qt.Key_Left) {
                 event.accepted = true
-                if (sortOverlay._sortIndex > 0)
-                    sortOverlay._sortIndex -= 1
+                if (sortOverlay._focusRow === 0) {
+                    if (sortOverlay._sortIndex > 0)
+                        sortOverlay._sortIndex -= 1
+                } else {
+                    if (sortOverlay._viewIndex > 0)
+                        sortOverlay._viewIndex -= 1
+                }
 
             } else if (event.key === Qt.Key_Right) {
                 event.accepted = true
-                if (sortOverlay._sortIndex < sortCount - 1)
-                    sortOverlay._sortIndex += 1
+                if (sortOverlay._focusRow === 0) {
+                    if (sortOverlay._sortIndex < sortCount - 1)
+                        sortOverlay._sortIndex += 1
+                } else {
+                    if (sortOverlay._viewIndex < viewCount - 1)
+                        sortOverlay._viewIndex += 1
+                }
 
             } else if (keys.isAccept(event)) {
                 event.accepted = true
                 if (!steam) return
+                // Apply sort
                 var sortKeys = ["az", "za", "recent"]
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 steamGameGrid._currentSort = newSort
                 steam.sortGames(newSort)
                 if (settings) settings.setSortSteamGames(newSort)
-                sortOverlay.close()
+                // Apply view mode
+                var viewKeys = ["grid", "list"]
+                var newView = viewKeys[sortOverlay._viewIndex]
+                if (newView !== steamGameGrid._viewMode) {
+                    // View mode is changing — hide overlay but don't grab focus locally.
+                    // PcGamesScreen will route focus to the newly visible view.
+                    sortOverlay.visible = false
+                    if (settings) settings.setPcGamesViewMode(newView)
+                    steamGameGrid.viewModeChanged(newView)
+                } else {
+                    // Same view mode — close normally (focus stays local).
+                    sortOverlay.close()
+                }
             }
         }
     }

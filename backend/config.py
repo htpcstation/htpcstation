@@ -103,6 +103,7 @@ class Config:
         self._filter_plex_show_genre: str = ""
         # View mode preferences
         self._retro_games_view_mode: str = "grid"
+        self._pc_games_view_mode: str = "grid"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -211,6 +212,11 @@ class Config:
         """Persisted view mode for the retro games screen. Either 'grid' or 'list'."""
         return self._retro_games_view_mode
 
+    @property
+    def pc_games_view_mode(self) -> str:
+        """Persisted view mode for the PC games screen. Either 'grid' or 'list'."""
+        return self._pc_games_view_mode
+
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
@@ -289,6 +295,11 @@ class Config:
     def set_retro_games_view_mode(self, mode: str) -> None:
         """Set the view mode for the retro games screen and persist the config."""
         self._retro_games_view_mode = mode if mode in ("grid", "list") else "grid"
+        self.save()
+
+    def set_pc_games_view_mode(self, mode: str) -> None:
+        """Set the view mode for the PC games screen and persist the config."""
+        self._pc_games_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -408,6 +419,7 @@ class Config:
                 "show_network_indicator": self.show_network_indicator,
                 "button_layout": self.button_layout,
                 "retro_games_view_mode": self._retro_games_view_mode,
+                "pc_games_view_mode": self._pc_games_view_mode,
             },
             "sort_preferences": {
                 "retro_games": self._sort_retro_games,
@@ -519,6 +531,8 @@ class Config:
                 self.button_layout = ui["button_layout"]
             raw_view_mode = ui.get("retro_games_view_mode", "grid")
             self._retro_games_view_mode = raw_view_mode if raw_view_mode in ("grid", "list") else "grid"
+            raw_pc_view_mode = ui.get("pc_games_view_mode", "grid")
+            self._pc_games_view_mode = raw_pc_view_mode if raw_pc_view_mode in ("grid", "list") else "grid"
 
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})
