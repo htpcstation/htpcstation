@@ -15,6 +15,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Mark games as favorites and access them in a dedicated Favorites collection.
 - Browse by Last Played or All Games collections.
 - Sort games A-Z, Z-A, or by most recently played.
+- Switch between Grid and List views from the sort menu. List view shows a preview panel with artwork, metadata, and description alongside the game list.
 - Launch any game directly into RetroArch.
 - Play stats (play count, last played, total time) are tracked automatically.
 
@@ -23,6 +24,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Auto-discovers all installed Steam games — no manual setup needed.
 - Poster artwork is downloaded automatically.
 - Rich metadata from the Steam Store: description, genre, developer, Metacritic score, and more.
+- Grid and List views available for Steam, Moonlight, and Recently Played sources.
 - Sort and launch games directly.
 
 ### Game Streaming (Moonlight)
@@ -39,13 +41,15 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Continue Watching section with progress bars for in-progress titles.
 - TV show detail view with season tabs and per-episode watched indicators.
 - Sort by name, date, year, or rating; filter by genre.
+- Grid and List views for movies, shows, and Continue Watching.
 - Launch any title into Plex Web for playback with a single button press.
-- Live TV support via HDHomeRun tuners connected through Plex DVR.
+- Live TV support via HDHomeRun tuners connected through Plex DVR. Navigate the channel guide with a gamepad: D-pad moves between channels and programs, A opens program details with Watch Now and Record options, LT/RT scroll the timeline, LB/RB switch genre tabs.
 - Multi-user Plex Home support, including content restrictions for managed and kids profiles.
 
 ### Listen (Plex Music)
 
 - Browse artists, albums, playlists, and recently added music from your Plex music library.
+- Grid and List views for the artist browser, with sort support (A-Z, Z-A).
 - Full Now Playing screen with album art, track info, and playback controls.
 - Music keeps playing in the background while you browse other tabs.
 - Press X from any tab to pause or resume playback.
@@ -59,6 +63,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Keyboard navigation works everywhere as well.
 - A visible focus ring always shows where you are on screen.
 - Buttons auto-repeat when held down.
+- Quick scroll with LT/RT (or PageUp/PageDown on keyboard): jumps to the next letter when sorted alphabetically, or skips 10 items otherwise.
 - Action hints update automatically based on whether you are using a gamepad or keyboard.
 - Press Start+Select together to close the Plex browser and return to HTPC Station.
 
@@ -121,7 +126,7 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 python3 -m pytest tests/ -q
 ```
 
-The suite currently covers 1,069 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+The suite currently covers over 1,100 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
 
 1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
 2. Replace the sample data with your real values.
@@ -143,13 +148,13 @@ The tests automatically load these overrides via `tests/local_overrides.py`, so 
 
 ## Using HTPC Station
 
-**Tabs:** The top bar has tabs — Retro Games, PC Games, Watch, Listen, and Settings. Use the bumper buttons (LB/RB) or the left and right arrow keys to switch between them. You can hide tabs you don't use in Settings; changes take effect after restarting the app.
+**Tabs:** The top bar has tabs — Retro Games, PC Games, Watch, Listen, and Settings. Navigate to the tab bar and use Left/Right to switch between them. You can hide tabs you don't use in Settings; changes take effect after restarting the app.
 
 **Navigation:** The D-pad or arrow keys move focus around the screen. The bright focus ring shows where you are. Press Down from the tab bar to enter the content area below.
 
 **Launching content:** Press Accept (A on a gamepad, or Enter on a keyboard) to select or launch something. Press Cancel (B or Escape) to go back.
 
-**Sorting:** Press Y (or F2) to open the sort menu in any grid view. Your sort preference is remembered between sessions.
+**Sorting and view mode:** Press Y (or F2) to open the sort menu in any grid or list view. From this menu you can also switch between Grid and List views. Your sort and view preferences are remembered between sessions.
 
 **Favorites (Retro Games):** Press X (or F1) on a game to toggle it as a favorite. Favorites appear in their own collection at the top of the system list.
 
@@ -173,9 +178,8 @@ Custom images always override auto-downloaded artwork.
 | A / Enter | Select / Launch |
 | B / Escape | Back / Cancel |
 | X / F1 | Favorite (retro games) / Play-Pause (music) |
-| Y / F2 | Sort menu |
-| LB / RB (PageUp/PageDown) | Switch tabs |
-| LT / RT (Home/End) | Page scroll |
+| Y / F2 | Sort / View menu |
+| LT / RT (PgUp/PgDn) | Quick scroll (next letter or ±10 items) |
 | Start / F10 | Quit dialog |
 | Start + Select / Alt + F4 | Close Plex browser |
 
@@ -189,7 +193,7 @@ Custom images always override auto-downloaded artwork.
 - Continue Watching is hidden for managed and kids Plex profiles. This is a Plex platform limitation with no known workaround.
 - Moonlight host pairing must be done through Moonlight's own interface. You can open it from Settings by pressing "Open Moonlight."
 - Large Plex music playlists (over 1,000 tracks) are hidden to avoid performance issues.
-- The Plex Live TV guide is not yet fully navigable with a gamepad.
+- The Plex Live TV guide is navigable with a gamepad (browse channels, select programs, watch/record). Nested playback settings menus (e.g., transcode quality) are not yet reachable from the gamepad during Live TV playback.
 - Per-system emulator core configuration is not yet available (coming soon).
 - Only tested on Linux x86_64 with Xorg. Wayland is not yet supported.
 
