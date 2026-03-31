@@ -101,6 +101,8 @@ class Config:
         self._sort_plex_shows: str = ""
         self._filter_plex_movie_genre: str = ""
         self._filter_plex_show_genre: str = ""
+        # View mode preferences
+        self._retro_games_view_mode: str = "grid"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -204,6 +206,11 @@ class Config:
         """Persisted genre filter key for Plex shows. Empty string means no filter."""
         return self._filter_plex_show_genre
 
+    @property
+    def retro_games_view_mode(self) -> str:
+        """Persisted view mode for the retro games screen. Either 'grid' or 'list'."""
+        return self._retro_games_view_mode
+
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
@@ -277,6 +284,11 @@ class Config:
     def set_filter_plex_show_genre(self, key: str) -> None:
         """Set the genre filter for Plex shows and persist the config."""
         self._filter_plex_show_genre = key
+        self.save()
+
+    def set_retro_games_view_mode(self, mode: str) -> None:
+        """Set the view mode for the retro games screen and persist the config."""
+        self._retro_games_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -395,6 +407,7 @@ class Config:
                 "video_snap_delay_ms": self.video_snap_delay_ms,
                 "show_network_indicator": self.show_network_indicator,
                 "button_layout": self.button_layout,
+                "retro_games_view_mode": self._retro_games_view_mode,
             },
             "sort_preferences": {
                 "retro_games": self._sort_retro_games,
@@ -504,6 +517,8 @@ class Config:
                 self.show_network_indicator = bool(ui["show_network_indicator"])
             if "button_layout" in ui and ui["button_layout"] in ("standard", "alternate"):
                 self.button_layout = ui["button_layout"]
+            raw_view_mode = ui.get("retro_games_view_mode", "grid")
+            self._retro_games_view_mode = raw_view_mode if raw_view_mode in ("grid", "list") else "grid"
 
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})

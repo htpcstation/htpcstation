@@ -1994,3 +1994,140 @@ class TestSettingsManagerTabVisibility:
 
         assert config.show_retro_games_tab is True
         assert len(emitted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Config — retro_games_view_mode
+# ---------------------------------------------------------------------------
+
+
+class TestConfigRetroGamesViewMode:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_retro_games_view_mode_default_is_grid(self, tmp_path: Path) -> None:
+        """A fresh Config() has retro_games_view_mode == 'grid'."""
+        config = self._make_config(tmp_path)
+        assert config.retro_games_view_mode == "grid"
+
+    def test_set_retro_games_view_mode_to_list(self, tmp_path: Path) -> None:
+        """set_retro_games_view_mode('list') → retro_games_view_mode == 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_retro_games_view_mode("list")
+
+        assert config.retro_games_view_mode == "list"
+
+    def test_set_retro_games_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """set_retro_games_view_mode('invalid') falls back to 'grid'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_retro_games_view_mode("invalid")
+
+        assert config.retro_games_view_mode == "grid"
+
+    def test_retro_games_view_mode_persistence_round_trip(self, tmp_path: Path) -> None:
+        """Set to 'list', save, reload from same file → reads back 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_retro_games_view_mode("list")
+
+        # Reload from disk
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.retro_games_view_mode == "list"
+
+    def test_load_validation_bogus_value_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with 'retro_games_view_mode': 'bogus' in ui section loads as 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"retro_games_view_mode": "bogus"}},
+        )
+        assert config.retro_games_view_mode == "grid"
+
+    def test_missing_retro_games_view_mode_key_defaults_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with no retro_games_view_mode key defaults to 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"video_snap_autoplay": True}},
+        )
+        assert config.retro_games_view_mode == "grid"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — retroGamesViewMode property and setRetroGamesViewMode slot
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerRetroGamesViewMode:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_retro_games_view_mode_property_default_is_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """retroGamesViewMode returns 'grid' by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.retroGamesViewMode == "grid"
+
+    def test_set_retro_games_view_mode_to_list(self, tmp_path: Path) -> None:
+        """setRetroGamesViewMode('list') → retroGamesViewMode returns 'list'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setRetroGamesViewMode("list")
+
+        assert manager.retroGamesViewMode == "list"
+
+    def test_set_retro_games_view_mode_emits_signal(self, tmp_path: Path) -> None:
+        """setRetroGamesViewMode('list') emits retroGamesViewModeChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.retroGamesViewModeChanged.connect(lambda: emitted.append(True))
+
+        manager.setRetroGamesViewMode("list")
+
+        assert len(emitted) == 1
+
+    def test_set_retro_games_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """setRetroGamesViewMode('invalid') → retroGamesViewMode returns 'grid'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setRetroGamesViewMode("invalid")
+
+        assert manager.retroGamesViewMode == "grid"

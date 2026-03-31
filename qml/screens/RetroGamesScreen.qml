@@ -4,9 +4,10 @@ import "../components"
 
 // Games section screen.
 //
-// Three views:
+// Four view states:
 //   "systems" — vertical list of discovered platforms with game counts
-//   "games"   — scrollable grid of game tiles for the selected system
+//   "games"   — scrollable grid of game tiles for the selected system (grid mode)
+//   "games"   — split-panel list of game rows for the selected system (list mode)
 //   "detail"  — full metadata panel for the selected game
 //
 // Focus flow:
@@ -36,16 +37,24 @@ FocusScope {
     // Index of the currently selected game in library.gamesModel.
     property int selectedGameIndex: -1
 
+    // Current view mode: "grid" or "list"
+    property string _viewMode: "grid"
+
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: _routeFocus()
     onActiveFocusChanged: if (activeFocus) _routeFocus()
+    on_ViewModeChanged: { if (currentView === "games") _routeFocus() }
 
     function _routeFocus() {
         if (currentView === "systems") {
             systemList.forceActiveFocus()
         } else if (currentView === "games") {
-            gameGridView.forceActiveFocus()
+            if (_viewMode === "list") {
+                gameListView.forceActiveFocus()
+            } else {
+                gameGridView.forceActiveFocus()
+            }
         } else {
             gameDetailView.forceActiveFocus()
         }
@@ -166,14 +175,38 @@ FocusScope {
         id: gameGridView
 
         anchors.fill: parent
-        visible: retroGamesScreen.currentView === "games"
+        visible: retroGamesScreen.currentView === "games" && retroGamesScreen._viewMode === "grid"
 
         systemName: retroGamesScreen.selectedSystemName
+        _viewMode: retroGamesScreen._viewMode
 
         onBack: retroGamesScreen.currentView = "systems"
         onGameSelected: (index) => {
             retroGamesScreen.selectedGameIndex = index
             retroGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => {
+            retroGamesScreen._viewMode = mode
+        }
+    }
+
+    // ── Game list view ───────────────────────────────────────────────────────
+    GameListView {
+        id: gameListView
+
+        anchors.fill: parent
+        visible: retroGamesScreen.currentView === "games" && retroGamesScreen._viewMode === "list"
+
+        systemName: retroGamesScreen.selectedSystemName
+        _viewMode: retroGamesScreen._viewMode
+
+        onBack: retroGamesScreen.currentView = "systems"
+        onGameSelected: (index) => {
+            retroGamesScreen.selectedGameIndex = index
+            retroGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => {
+            retroGamesScreen._viewMode = mode
         }
     }
 
@@ -211,6 +244,12 @@ FocusScope {
         target: library
         function onFavoriteToggled(isFavorite) {
             gameDetailView.showFavoriteToast(isFavorite)
+        }
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            _viewMode = settings.retroGamesViewMode || "grid"
         }
     }
 }

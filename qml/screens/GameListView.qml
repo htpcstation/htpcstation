@@ -1,22 +1,24 @@
 import QtQuick
+import QtMultimedia
 import ".."
 import "../components"
 
-// Game grid view — shows a scrollable grid of game tiles for the selected system.
+// Game list view — split-panel browse view for retro games.
 //
 // Focus flow:
-//   Gains focus when RetroGamesScreen switches to "games" view.
-//   Arrow keys navigate the grid natively.
-//   A (Return) on a cell → emits gameSelected(index) (task 009 will connect to it).
-//   B (Escape) → emits back() so RetroGamesScreen can return to the system list.
-//   Y (F2)     → opens the sort overlay panel.
+//   Gains focus when RetroGamesScreen switches to "games" view (list mode).
+//   Up/Down navigate the list natively.
+//   A (Return)  → emits gameSelected(index)
+//   B (Escape)  → emits back()
+//   Y (F2)      → opens the sort overlay panel
+//   X (F1)      → toggles favorite on the current game
 FocusScope {
-    id: gameGridView
+    id: gameListView
 
     // Emitted when the user presses B / Escape to return to the system list.
     signal back()
 
-    // Emitted when the user presses A / Return on a game cell.
+    // Emitted when the user presses A / Return on a game row.
     // index is the row in library.gamesModel.
     signal gameSelected(int index)
 
@@ -40,6 +42,70 @@ FocusScope {
         return "A-Z"
     }
 
+    // ── Preview data for the left panel ──────────────────────────────────────
+    // Cached game dict for the currently highlighted item.
+    property var _previewData: ({})
+
+    // Update preview data when the current index changes.
+    // Guard against -1 and empty model.
+    function _updatePreview(index) {
+        if (!library || !library.gamesModel) {
+            _previewData = {}
+            return
+        }
+        if (index < 0 || index >= gameList.count) {
+            _previewData = {}
+            return
+        }
+        _previewData = library.getGame(index)
+    }
+
+    // ── Helper: format release date ───────────────────────────────────────────
+    // Input: "19990527T000000" → output: "1999" (year only)
+    function _formatYear(raw) {
+        if (!raw || raw.length < 4) return ""
+        return raw.substring(0, 4)
+    }
+
+    // ── Helper: format rating as stars ────────────────────────────────────────
+    // Input: float 0.0–1.0 → "★★★★☆" (5-star scale)
+    // Returns "" for unrated games (rating <= 0) so the row is hidden.
+    function _formatRating(rating) {
+        if (rating === undefined || rating === null || rating === "") return ""
+        if (rating <= 0) return ""
+        var stars = Math.round(rating * 5)
+        var filled = ""
+        var empty = ""
+        for (var i = 0; i < 5; i++) {
+            if (i < stars) filled += "★"
+            else empty += "☆"
+        }
+        return filled + empty
+    }
+
+    // ── Video playback lifecycle ──────────────────────────────────────────────
+    // Delay play() slightly so the source has time to load.
+    Timer {
+        id: playTimer
+        interval: settings ? settings.videoSnapDelayMs : 1000
+        repeat: false
+        onTriggered: mediaPlayer.play()
+    }
+
+    // Stop video when the view is hidden to avoid background audio/CPU.
+    onVisibleChanged: {
+        if (!visible) {
+            mediaPlayer.stop()
+            playTimer.stop()
+        } else {
+            // Re-trigger preview for the current item when view becomes visible.
+            _updatePreview(gameList.currentIndex)
+            if (_previewData.videoPath && settings && settings.videoSnapAutoplay) {
+                playTimer.restart()
+            }
+        }
+    }
+
     // ── Header bar ───────────────────────────────────────────────────────────
     Rectangle {
         id: headerBar
@@ -58,7 +124,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  " + gameGridView.systemName
+            text: "◀  " + gameListView.systemName
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -97,173 +163,291 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "Sorted: " + gameGridView._sortLabel
+            text: "Sorted: " + gameListView._sortLabel
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
     }
 
-    // ── Game grid ────────────────────────────────────────────────────────────
-    // Target cell dimensions (design-grid px, scaled via vpx).
-    // Actual cellWidth is computed dynamically to fill the grid evenly.
-    readonly property int _targetCellW: 200
-    readonly property int _cellH: 240
-    readonly property int _cellSpacing: 12
-
-    GridView {
-        id: gameGrid
+    // ── Split content area ────────────────────────────────────────────────────
+    Item {
+        id: contentArea
 
         anchors {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
-            margins: root.vpx(16)
         }
 
-        model: library ? library.gamesModel : null
-        clip: true
-        focus: true
+        // ── Left panel: preview area (40% width) ──────────────────────────────
+        Item {
+            id: leftPanel
 
-        // Compute columns from available width and target cell size, then
-        // distribute the full width evenly so there is no dead space.
-        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(gameGridView._targetCellW + gameGridView._cellSpacing)))
-        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(gameGridView._targetCellW + gameGridView._cellSpacing)
-        cellHeight: root.vpx(gameGridView._cellH + gameGridView._cellSpacing)
+            anchors {
+                top: parent.top
+                left: parent.left
+                bottom: parent.bottom
+            }
+            width: Math.round(parent.width * 0.45)
 
-        // Smooth highlight movement
-        highlightMoveDuration: Theme.animDurationFast
+            // ── Media area ────────────────────────────────────────────────────
+            Item {
+                id: mediaArea
 
-        Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
-                event.accepted = true
-                sortOverlay.open()
-            } else if (keys.isAccept(event)) {
-                event.accepted = true
-                gameGridView.gameSelected(gameGrid.currentIndex)
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                gameGridView.back()
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(16)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+                // Media area takes ~55% of the left panel height
+                height: Math.round(parent.height * 0.55)
+
+                // Placeholder shown when there is no image/video or while loading
+                Rectangle {
+                    anchors.fill: parent
+                    color: Qt.darker(Theme.colorSecondary, 1.4)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: mediaPlayer.playbackState !== MediaPlayer.PlayingState
+                             && (previewImage.status !== Image.Ready || !gameListView._previewData.imagePath)
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: gameListView._previewData.name || ""
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width - root.vpx(16)
+                    }
+                }
+
+                // MediaPlayer drives the video — no visual output itself
+                MediaPlayer {
+                    id: mediaPlayer
+                    source: gameListView._previewData.videoPath || ""
+                    videoOutput: videoOutput
+                    audioOutput: AudioOutput { volume: 0 }
+                    loops: MediaPlayer.Infinite
+                }
+
+                // VideoOutput renders the decoded frames
+                VideoOutput {
+                    id: videoOutput
+                    anchors.fill: parent
+                    fillMode: VideoOutput.PreserveAspectFit
+                    visible: mediaPlayer.playbackState === MediaPlayer.PlayingState
+                }
+
+                // Screenshot fallback — shown when no video is playing
+                Image {
+                    id: previewImage
+
+                    anchors.fill: parent
+                    source: gameListView._previewData.imagePath || ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    sourceSize.width: Math.round(leftPanel.width)
+                    sourceSize.height: Math.round(leftPanel.height * 0.65)
+                    visible: mediaPlayer.playbackState !== MediaPlayer.PlayingState
+                             && status === Image.Ready && !!gameListView._previewData.imagePath
+                }
+            }
+
+            // ── Compact metadata column ───────────────────────────────────────
+            Column {
+                id: metadataColumn
+
+                anchors {
+                    top: mediaArea.bottom
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(8)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+                spacing: root.vpx(4)
+
+                Repeater {
+                    model: [
+                        { label: "Genre",    value: gameListView._previewData.genre || "" },
+                        { label: "Players",  value: gameListView._previewData.players || "" },
+                        { label: "Rating",   value: gameListView._formatRating(gameListView._previewData.rating) },
+                        { label: "Released", value: gameListView._formatYear(gameListView._previewData.releaseDate) }
+                    ]
+
+                    Row {
+                        spacing: root.vpx(6)
+                        visible: modelData.value !== ""
+
+                        Text {
+                            text: modelData.label + ":"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            width: root.vpx(60)
+                        }
+
+                        Text {
+                            text: modelData.value
+                            color: Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        }
+                    }
+                }
+            }
+
+            // ── Description (scrollable) ──────────────────────────────────────
+            Flickable {
+                id: descriptionFlickable
+
+                anchors {
+                    top: metadataColumn.bottom
+                    topMargin: root.vpx(8)
+                    left: parent.left
+                    right: parent.right
+                    bottom: parent.bottom
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                    bottomMargin: root.vpx(8)
+                }
+                clip: true
+                contentWidth: width
+                contentHeight: descriptionText.implicitHeight
+                interactive: false  // scrolling not needed — preview only
+
+                Text {
+                    id: descriptionText
+
+                    width: descriptionFlickable.width
+                    text: gameListView._previewData.description || ""
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    wrapMode: Text.Wrap
+                }
             }
         }
 
-        // ── Empty state ──────────────────────────────────────────────────────
-        Text {
-            anchors.centerIn: parent
-            visible: gameGrid.count === 0
-            text: "No games found"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
+        // ── Right panel: game list (60% width) ────────────────────────────────
+        ListView {
+            id: gameList
 
-        // ── Game tile delegate ───────────────────────────────────────────────
-        delegate: Item {
-            id: tileRoot
+            anchors {
+                top: parent.top
+                left: leftPanel.right
+                right: parent.right
+                bottom: parent.bottom
+                leftMargin: root.vpx(64)
+                rightMargin: root.vpx(16)
+            }
 
-            width: gameGrid.cellWidth
-            height: gameGrid.cellHeight
+            model: library ? library.gamesModel : null
+            clip: true
+            focus: true
+            keyNavigationEnabled: true
 
-            // Inner container — slightly inset from the cell to create spacing
-            Rectangle {
-                id: tileCard
+            // Smooth highlight movement
+            highlightMoveDuration: Theme.animDurationFast
 
-                anchors {
-                    fill: parent
-                    margins: root.vpx(gameGridView._cellSpacing / 2)
+            // Update preview data when the current index changes.
+            onCurrentIndexChanged: {
+                mediaPlayer.stop()
+                playTimer.stop()
+                gameListView._updatePreview(currentIndex)
+                if (gameListView._previewData.videoPath && settings && settings.videoSnapAutoplay) {
+                    playTimer.restart()
                 }
+            }
 
-                color: Theme.colorSecondary
-                radius: root.vpx(Theme.focusRingRadius)
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    gameListView.gameSelected(gameList.currentIndex)
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    gameListView.back()
+                } else if (keys.isContext2(event)) {
+                    event.accepted = true
+                    sortOverlay.open()
+                } else if (keys.isContext1(event)) {
+                    event.accepted = true
+                    if (library) library.toggleFavorite(gameList.currentIndex)
+                }
+            }
 
-                // Subtle highlight when focused
+            // ── Game row delegate ────────────────────────────────────────────
+            delegate: FocusScope {
+                id: rowRoot
+
+                width: gameList.width
+                height: root.vpx(40)
+
+                // Background highlight for the current item
                 Rectangle {
                     anchors.fill: parent
-                    radius: parent.radius
-                    color: Theme.colorPrimary
-                    opacity: tileRoot.GridView.isCurrentItem && gameGrid.activeFocus ? 0.15 : 0.0
+                    color: Theme.colorSecondary
+                    opacity: rowRoot.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
                     }
                 }
 
-                // ── Screenshot image ─────────────────────────────────────────
-                Item {
-                    id: imageArea
-
+                // Favorite indicator + game name
+                Row {
                     anchors {
-                        top: parent.top
                         left: parent.left
                         right: parent.right
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: root.vpx(12)
+                        rightMargin: root.vpx(12)
                     }
-                    // Image area takes ~75% of the card height
-                    height: Math.round(parent.height * 0.75)
+                    spacing: 0
 
-                    // Placeholder shown when there is no image or while loading
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.darker(Theme.colorSecondary, 1.4)
-                        radius: root.vpx(Theme.focusRingRadius)
-                        visible: gameImage.status !== Image.Ready || model.imagePath === ""
-
-                        Text {
-                            anchors.centerIn: parent
-                            width: parent.width - root.vpx(8)
-                            text: model.name
-                            color: Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                            wrapMode: Text.Wrap
-                            horizontalAlignment: Text.AlignHCenter
-                            maximumLineCount: 3
-                            elide: Text.ElideRight
-                        }
+                    // Favorite star prefix
+                    Text {
+                        text: "★ "
+                        color: Theme.colorPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        visible: model.favorite === true
                     }
 
-                    Image {
-                        id: gameImage
-
-                        anchors.fill: parent
-                        source: model.imagePath
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(gameGridView._targetCellW)
-                        sourceSize.height: Math.round(root.vpx(gameGridView._cellH) * 0.75)
-                        visible: status === Image.Ready && model.imagePath !== ""
+                    // Game name
+                    Text {
+                        text: model.name
+                        color: Theme.colorText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        elide: Text.ElideRight
+                        width: parent.width - (model.favorite === true ? root.vpx(20) : 0)
                     }
                 }
 
-                // ── Game name label ──────────────────────────────────────────
-                Text {
-                    anchors {
-                        top: imageArea.bottom
-                        left: parent.left
-                        right: parent.right
-                        bottom: parent.bottom
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(4)
-                        bottomMargin: root.vpx(4)
-                    }
-                    text: model.name
-                    color: Theme.colorText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                    verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                // Focus ring — visible when this tile is the current item
+                // Focus ring — visible when this row is current and list has focus
                 FocusRing {
-                    visible: tileRoot.GridView.isCurrentItem && gameGrid.activeFocus
+                    visible: rowRoot.ListView.isCurrentItem && gameList.activeFocus
                 }
             }
+        }
+
+        // ── Empty state (centered in full content area) ───────────────────────
+        // Shown when the list has no items (covers both panels).
+        Text {
+            anchors.centerIn: parent
+            visible: gameList.count === 0
+            text: "No games found"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
     }
 
@@ -293,10 +477,10 @@ FocusScope {
         function open() {
             // Sync selection indices to current state
             var sortKeys = ["az", "za", "recent"]
-            var si = sortKeys.indexOf(gameGridView._currentSort)
+            var si = sortKeys.indexOf(gameListView._currentSort)
             _sortIndex = si >= 0 ? si : 0
             var viewKeys = ["grid", "list"]
-            var vi = viewKeys.indexOf(gameGridView._viewMode)
+            var vi = viewKeys.indexOf(gameListView._viewMode)
             _viewIndex = vi >= 0 ? vi : 0
             _focusRow = 0
             visible = true
@@ -305,7 +489,7 @@ FocusScope {
 
         function close() {
             visible = false
-            gameGrid.forceActiveFocus()
+            gameList.forceActiveFocus()
         }
 
         // ── Backdrop ─────────────────────────────────────────────────────────
@@ -408,7 +592,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === gameGridView._currentSort
+                                var isActive = modelData.key === gameListView._currentSort
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -474,7 +658,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === gameGridView._viewMode
+                                var isActive = modelData.key === gameListView._viewMode
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -534,18 +718,18 @@ FocusScope {
                 // Apply sort
                 var sortKeys = ["az", "za", "recent"]
                 var newSort = sortKeys[sortOverlay._sortIndex]
-                gameGridView._currentSort = newSort
+                gameListView._currentSort = newSort
                 library.sortGames(newSort)
                 if (settings) settings.setSortRetroGames(newSort)
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
                 var newView = viewKeys[sortOverlay._viewIndex]
-                if (newView !== gameGridView._viewMode) {
+                if (newView !== gameListView._viewMode) {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // RetroGamesScreen will route focus to the newly visible view.
                     sortOverlay.visible = false
                     if (settings) settings.setRetroGamesViewMode(newView)
-                    gameGridView.viewModeChanged(newView)
+                    gameListView.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).
                     sortOverlay.close()

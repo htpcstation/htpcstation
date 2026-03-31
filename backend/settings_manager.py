@@ -71,6 +71,7 @@ class SettingsManager(QObject):
     sortPlexShowsChanged = Signal()
     filterPlexMovieGenreChanged = Signal()
     filterPlexShowGenreChanged = Signal()
+    retroGamesViewModeChanged = Signal()
     tabVisibilityChanged = Signal()
 
     def __init__(
@@ -163,6 +164,9 @@ class SettingsManager(QObject):
 
     def _get_filter_plex_show_genre(self) -> str:
         return self._config.filter_plex_show_genre
+
+    def _get_retro_games_view_mode(self) -> str:
+        return self._config.retro_games_view_mode
 
     def _get_show_retro_games_tab(self) -> bool:
         return self._config.show_retro_games_tab
@@ -284,6 +288,11 @@ class SettingsManager(QObject):
         str,
         fget=_get_filter_plex_show_genre,
         notify=filterPlexShowGenreChanged,
+    )
+    retroGamesViewMode = Property(
+        str,
+        fget=_get_retro_games_view_mode,
+        notify=retroGamesViewModeChanged,
     )
     showRetroGamesTab = Property(
         bool,
@@ -441,6 +450,12 @@ class SettingsManager(QObject):
         """Persist the genre filter for Plex shows."""
         self._config.set_filter_plex_show_genre(key)
         self.filterPlexShowGenreChanged.emit()
+
+    @Slot(str)
+    def setRetroGamesViewMode(self, mode: str) -> None:
+        """Persist the view mode for the retro games screen ('grid' or 'list')."""
+        self._config.set_retro_games_view_mode(mode)
+        self.retroGamesViewModeChanged.emit()
 
     @Slot(bool)
     def setShowRetroGamesTab(self, enabled: bool) -> None:
