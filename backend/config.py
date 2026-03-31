@@ -99,12 +99,14 @@ class Config:
         self._sort_moonlight_apps: str = "az"
         self._sort_plex_movies: str = ""
         self._sort_plex_shows: str = ""
+        self._sort_plex_artists: str = ""
         self._filter_plex_movie_genre: str = ""
         self._filter_plex_show_genre: str = ""
         # View mode preferences
         self._retro_games_view_mode: str = "grid"
         self._pc_games_view_mode: str = "grid"
         self._watch_view_mode: str = "grid"
+        self._listen_view_mode: str = "grid"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -199,6 +201,11 @@ class Config:
         return self._sort_plex_shows
 
     @property
+    def sort_plex_artists(self) -> str:
+        """Persisted sort key for the Plex artists grid. Empty string means default order."""
+        return self._sort_plex_artists
+
+    @property
     def filter_plex_movie_genre(self) -> str:
         """Persisted genre filter key for Plex movies. Empty string means no filter."""
         return self._filter_plex_movie_genre
@@ -222,6 +229,11 @@ class Config:
     def watch_view_mode(self) -> str:
         """Persisted view mode for the Watch screen. Either 'grid' or 'list'."""
         return self._watch_view_mode
+
+    @property
+    def listen_view_mode(self) -> str:
+        """Persisted view mode for the Listen screen. Either 'grid' or 'list'."""
+        return self._listen_view_mode
 
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
@@ -288,6 +300,11 @@ class Config:
         self._sort_plex_shows = key
         self.save()
 
+    def set_sort_plex_artists(self, key: str) -> None:
+        """Set the sort preference for the Plex artists grid and persist the config."""
+        self._sort_plex_artists = key
+        self.save()
+
     def set_filter_plex_movie_genre(self, key: str) -> None:
         """Set the genre filter for Plex movies and persist the config."""
         self._filter_plex_movie_genre = key
@@ -311,6 +328,11 @@ class Config:
     def set_watch_view_mode(self, mode: str) -> None:
         """Set the view mode for the Watch screen and persist the config."""
         self._watch_view_mode = mode if mode in ("grid", "list") else "grid"
+        self.save()
+
+    def set_listen_view_mode(self, mode: str) -> None:
+        """Set the view mode for the Listen screen and persist the config."""
+        self._listen_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
     def set_retroarch_command(self, command: str) -> None:
@@ -432,6 +454,7 @@ class Config:
                 "retro_games_view_mode": self._retro_games_view_mode,
                 "pc_games_view_mode": self._pc_games_view_mode,
                 "watch_view_mode": self._watch_view_mode,
+                "listen_view_mode": self._listen_view_mode,
             },
             "sort_preferences": {
                 "retro_games": self._sort_retro_games,
@@ -439,6 +462,7 @@ class Config:
                 "moonlight_apps": self._sort_moonlight_apps,
                 "plex_movies": self._sort_plex_movies,
                 "plex_shows": self._sort_plex_shows,
+                "plex_artists": self._sort_plex_artists,
                 "plex_movie_genre": self._filter_plex_movie_genre,
                 "plex_show_genre": self._filter_plex_show_genre,
             },
@@ -547,6 +571,8 @@ class Config:
             self._pc_games_view_mode = raw_pc_view_mode if raw_pc_view_mode in ("grid", "list") else "grid"
             raw_watch_view_mode = ui.get("watch_view_mode", "grid")
             self._watch_view_mode = raw_watch_view_mode if raw_watch_view_mode in ("grid", "list") else "grid"
+            raw_listen_view_mode = ui.get("listen_view_mode", "grid")
+            self._listen_view_mode = raw_listen_view_mode if raw_listen_view_mode in ("grid", "list") else "grid"
 
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})
@@ -556,6 +582,7 @@ class Config:
             self._sort_moonlight_apps = sort_prefs.get("moonlight_apps", "az")
             self._sort_plex_movies = sort_prefs.get("plex_movies", "")
             self._sort_plex_shows = sort_prefs.get("plex_shows", "")
+            self._sort_plex_artists = sort_prefs.get("plex_artists", "")
             self._filter_plex_movie_genre = sort_prefs.get("plex_movie_genre", "")
             self._filter_plex_show_genre = sort_prefs.get("plex_show_genre", "")
 

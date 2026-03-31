@@ -788,6 +788,21 @@ class PlexLibrary(QObject):
         )
 
     @Slot(str)
+    def sortArtists(self, sort_key: str) -> None:
+        """Re-fetch artists with the given sort.
+
+        sort_key: 'az', 'za', 'recent', 'year_desc', 'year_asc', 'rating'
+        """
+        if self._client is None or not self._current_section_key:
+            return
+        api_sort = self._SORT_MAP.get(sort_key, "")
+        client = self._client
+        section_key = self._current_section_key
+        self._executor.submit(
+            self._worker_load_section, client, section_key, "artist", api_sort
+        )
+
+    @Slot(str)
     def filterShowsByGenre(self, genre_key: str) -> None:
         """Re-fetch shows filtered by genre. Empty string clears the filter."""
         if self._client is None or not self._current_section_key:

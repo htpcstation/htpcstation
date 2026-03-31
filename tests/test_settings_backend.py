@@ -2405,3 +2405,243 @@ class TestSettingsManagerWatchViewMode:
         manager.setWatchViewMode("invalid")
 
         assert manager.watchViewMode == "grid"
+
+
+# ---------------------------------------------------------------------------
+# Config — listen_view_mode
+# ---------------------------------------------------------------------------
+
+
+class TestConfigListenViewMode:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_listen_view_mode_default_is_grid(self, tmp_path: Path) -> None:
+        """A fresh Config() has listen_view_mode == 'grid'."""
+        config = self._make_config(tmp_path)
+        assert config.listen_view_mode == "grid"
+
+    def test_set_listen_view_mode_to_list(self, tmp_path: Path) -> None:
+        """set_listen_view_mode('list') → listen_view_mode == 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_listen_view_mode("list")
+
+        assert config.listen_view_mode == "list"
+
+    def test_set_listen_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """set_listen_view_mode('invalid') falls back to 'grid'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_listen_view_mode("invalid")
+
+        assert config.listen_view_mode == "grid"
+
+    def test_listen_view_mode_persistence_round_trip(self, tmp_path: Path) -> None:
+        """Set to 'list', save, reload from same file → reads back 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_listen_view_mode("list")
+
+        # Reload from disk
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.listen_view_mode == "list"
+
+    def test_load_validation_bogus_value_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with 'listen_view_mode': 'bogus' in ui section loads as 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"listen_view_mode": "bogus"}},
+        )
+        assert config.listen_view_mode == "grid"
+
+    def test_missing_listen_view_mode_key_defaults_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with no listen_view_mode key defaults to 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"video_snap_autoplay": True}},
+        )
+        assert config.listen_view_mode == "grid"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — listenViewMode property and setListenViewMode slot
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerListenViewMode:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_listen_view_mode_property_default_is_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """listenViewMode returns 'grid' by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.listenViewMode == "grid"
+
+    def test_set_listen_view_mode_to_list(self, tmp_path: Path) -> None:
+        """setListenViewMode('list') → listenViewMode returns 'list'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setListenViewMode("list")
+
+        assert manager.listenViewMode == "list"
+
+    def test_set_listen_view_mode_emits_signal(self, tmp_path: Path) -> None:
+        """setListenViewMode('list') emits listenViewModeChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.listenViewModeChanged.connect(lambda: emitted.append(True))
+
+        manager.setListenViewMode("list")
+
+        assert len(emitted) == 1
+
+    def test_set_listen_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """setListenViewMode('invalid') → listenViewMode returns 'grid'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setListenViewMode("invalid")
+
+        assert manager.listenViewMode == "grid"
+
+
+# ---------------------------------------------------------------------------
+# Config — sort_plex_artists
+# ---------------------------------------------------------------------------
+
+
+class TestConfigSortPlexArtists:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_sort_plex_artists_default_is_empty(self, tmp_path: Path) -> None:
+        """A fresh Config() has sort_plex_artists == ''."""
+        config = self._make_config(tmp_path)
+        assert config.sort_plex_artists == ""
+
+    def test_set_sort_plex_artists_to_az(self, tmp_path: Path) -> None:
+        """set_sort_plex_artists('az') → sort_plex_artists == 'az'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_sort_plex_artists("az")
+
+        assert config.sort_plex_artists == "az"
+
+    def test_sort_plex_artists_persistence_round_trip(self, tmp_path: Path) -> None:
+        """Set to 'az', save, reload from same file → reads back 'az'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_sort_plex_artists("az")
+
+        # Reload from disk
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.sort_plex_artists == "az"
+
+    def test_missing_sort_plex_artists_key_defaults_to_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with no plex_artists key in sort_preferences defaults to ''."""
+        config = self._make_config(
+            tmp_path,
+            {"sort_preferences": {"plex_movies": "rating"}},
+        )
+        assert config.sort_plex_artists == ""
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — sortPlexArtists property and setSortPlexArtists slot
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerSortPlexArtists:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_sort_plex_artists_property_default_is_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """sortPlexArtists returns '' by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.sortPlexArtists == ""
+
+    def test_set_sort_plex_artists_to_az(self, tmp_path: Path) -> None:
+        """setSortPlexArtists('az') → sortPlexArtists returns 'az'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setSortPlexArtists("az")
+
+        assert config.sort_plex_artists == "az"
+
+    def test_set_sort_plex_artists_emits_signal(self, tmp_path: Path) -> None:
+        """setSortPlexArtists('az') emits sortPlexArtistsChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.sortPlexArtistsChanged.connect(lambda: emitted.append(True))
+
+        manager.setSortPlexArtists("az")
+
+        assert len(emitted) == 1

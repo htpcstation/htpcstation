@@ -69,11 +69,13 @@ class SettingsManager(QObject):
     sortMoonlightAppsChanged = Signal()
     sortPlexMoviesChanged = Signal()
     sortPlexShowsChanged = Signal()
+    sortPlexArtistsChanged = Signal()
     filterPlexMovieGenreChanged = Signal()
     filterPlexShowGenreChanged = Signal()
     retroGamesViewModeChanged = Signal()
     pcGamesViewModeChanged = Signal()
     watchViewModeChanged = Signal()
+    listenViewModeChanged = Signal()
     tabVisibilityChanged = Signal()
 
     def __init__(
@@ -161,6 +163,9 @@ class SettingsManager(QObject):
     def _get_sort_plex_shows(self) -> str:
         return self._config.sort_plex_shows
 
+    def _get_sort_plex_artists(self) -> str:
+        return self._config.sort_plex_artists
+
     def _get_filter_plex_movie_genre(self) -> str:
         return self._config.filter_plex_movie_genre
 
@@ -175,6 +180,9 @@ class SettingsManager(QObject):
 
     def _get_watch_view_mode(self) -> str:
         return self._config.watch_view_mode
+
+    def _get_listen_view_mode(self) -> str:
+        return self._config.listen_view_mode
 
     def _get_show_retro_games_tab(self) -> bool:
         return self._config.show_retro_games_tab
@@ -287,6 +295,11 @@ class SettingsManager(QObject):
         fget=_get_sort_plex_shows,
         notify=sortPlexShowsChanged,
     )
+    sortPlexArtists = Property(
+        str,
+        fget=_get_sort_plex_artists,
+        notify=sortPlexArtistsChanged,
+    )
     filterPlexMovieGenre = Property(
         str,
         fget=_get_filter_plex_movie_genre,
@@ -311,6 +324,11 @@ class SettingsManager(QObject):
         str,
         fget=_get_watch_view_mode,
         notify=watchViewModeChanged,
+    )
+    listenViewMode = Property(
+        str,
+        fget=_get_listen_view_mode,
+        notify=listenViewModeChanged,
     )
     showRetroGamesTab = Property(
         bool,
@@ -458,6 +476,12 @@ class SettingsManager(QObject):
         self.sortPlexShowsChanged.emit()
 
     @Slot(str)
+    def setSortPlexArtists(self, key: str) -> None:
+        """Persist the sort preference for the Plex artists grid."""
+        self._config.set_sort_plex_artists(key)
+        self.sortPlexArtistsChanged.emit()
+
+    @Slot(str)
     def setFilterPlexMovieGenre(self, key: str) -> None:
         """Persist the genre filter for Plex movies."""
         self._config.set_filter_plex_movie_genre(key)
@@ -486,6 +510,12 @@ class SettingsManager(QObject):
         """Persist the view mode for the Watch screen ('grid' or 'list')."""
         self._config.set_watch_view_mode(mode)
         self.watchViewModeChanged.emit()
+
+    @Slot(str)
+    def setListenViewMode(self, mode: str) -> None:
+        """Persist the view mode for the Listen screen ('grid' or 'list')."""
+        self._config.set_listen_view_mode(mode)
+        self.listenViewModeChanged.emit()
 
     @Slot(bool)
     def setShowRetroGamesTab(self, enabled: bool) -> None:

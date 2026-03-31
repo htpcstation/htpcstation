@@ -38,6 +38,9 @@ FocusScope {
     // Current view: "menu", "artists", "detail", "album", or "nowplaying"
     property string currentView: "menu"
 
+    // Current artists view mode: "grid" or "list"
+    property string _viewMode: "grid"
+
     // Previous view — used by Now Playing's B button to return to the right place
     property string _previousView: "menu"
 
@@ -171,7 +174,11 @@ FocusScope {
         if (currentView === "menu") {
             listenMenu.forceActiveFocus()
         } else if (currentView === "artists") {
-            artistGrid.forceActiveFocus()
+            if (_viewMode === "list") {
+                artistList.forceActiveFocus()
+            } else {
+                artistGrid.forceActiveFocus()
+            }
         } else if (currentView === "detail") {
             albumList.forceActiveFocus()
         } else if (currentView === "recentlyadded") {
@@ -238,7 +245,18 @@ FocusScope {
         _routeFocus()
     }
 
-    // ── Header bar (shared by menu and artists views) ──────────────────────────
+    on_ViewModeChanged: {
+        if (currentView === "artists") _routeFocus()
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            var savedMode = settings.listenViewMode
+            if (savedMode) _viewMode = savedMode
+        }
+    }
+
+    // ── Header bar (menu view only — artists view has its own header) ──────────
     Rectangle {
         id: headerBar
 
@@ -249,7 +267,7 @@ FocusScope {
         }
         height: root.vpx(56)
         color: Theme.colorSecondary
-        visible: listenScreen.currentView === "menu" || listenScreen.currentView === "artists"
+        visible: listenScreen.currentView === "menu"
 
         Text {
             anchors {
@@ -257,7 +275,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: listenScreen.currentView === "artists" ? "◀  Artists" : "Listen"
+            text: "Listen"
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -375,225 +393,38 @@ FocusScope {
         }
     }
 
-    // ── Artist grid ───────────────────────────────────────────────────────────
-    // Cell dimensions: portrait poster (160w × 240h)
-    readonly property int _targetCellW: 160
-    readonly property int _cellH: 240
-    readonly property int _cellSpacing: 12
-
-    GridView {
+    // ── Artist grid component ─────────────────────────────────────────────────
+    PlexArtistGrid {
         id: artistGrid
-
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            margins: root.vpx(16)
+        anchors.fill: parent
+        visible: listenScreen.currentView === "artists" && listenScreen._viewMode === "grid"
+        loading: listenScreen._loading
+        noLibrary: listenScreen._noLibrary
+        _viewMode: listenScreen._viewMode
+        onBack: listenScreen.currentView = "menu"
+        onArtistSelected: (ratingKey) => {
+            listenScreen._selectedArtistKey = ratingKey
+            listenScreen.artistSelected(ratingKey)
+            listenScreen.currentView = "detail"
         }
+        onViewModeChanged: (mode) => { listenScreen._viewMode = mode }
+    }
 
-        model: plex ? plex.artistsModel : null
-        clip: true
-        focus: true
-        visible: listenScreen.currentView === "artists"
-
-        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(listenScreen._targetCellW + listenScreen._cellSpacing)))
-        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(listenScreen._targetCellW + listenScreen._cellSpacing)
-        cellHeight: root.vpx(listenScreen._cellH + listenScreen._cellSpacing)
-
-        // Smooth highlight movement
-        highlightMoveDuration: Theme.animDurationFast
-
-        Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
-                event.accepted = true
-                var item = artistGrid.currentItem
-                if (item) {
-                    listenScreen._selectedArtistKey = item.artistRatingKey
-                    listenScreen.artistSelected(item.artistRatingKey)
-                    listenScreen.currentView = "detail"
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                listenScreen.currentView = "menu"
-            } else if (event.key === Qt.Key_Up && artistGrid.currentIndex < artistGrid._columns) {
-                event.accepted = true
-                listenScreen.currentView = "menu"
-            }
+    // ── Artist list component ─────────────────────────────────────────────────
+    PlexArtistList {
+        id: artistList
+        anchors.fill: parent
+        visible: listenScreen.currentView === "artists" && listenScreen._viewMode === "list"
+        loading: listenScreen._loading
+        noLibrary: listenScreen._noLibrary
+        _viewMode: listenScreen._viewMode
+        onBack: listenScreen.currentView = "menu"
+        onArtistSelected: (ratingKey) => {
+            listenScreen._selectedArtistKey = ratingKey
+            listenScreen.artistSelected(ratingKey)
+            listenScreen.currentView = "detail"
         }
-
-        // ── Loading indicator ────────────────────────────────────────────────
-        Column {
-            anchors.centerIn: parent
-            visible: listenScreen._loading
-            spacing: root.vpx(8)
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "Loading music library..."
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            }
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "First load may take several minutes"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                opacity: 0.7
-            }
-        }
-
-        // ── No library message ───────────────────────────────────────────────
-        Text {
-            anchors.centerIn: parent
-            visible: listenScreen._noLibrary && !listenScreen._loading
-            text: "No music library found"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-        // ── Empty state (loaded but no artists) ──────────────────────────────
-        Text {
-            anchors.centerIn: parent
-            visible: !listenScreen._loading && !listenScreen._noLibrary && artistGrid.count === 0
-            text: "No artists found"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-        // ── Artist tile delegate ─────────────────────────────────────────────
-        delegate: Item {
-            id: tileRoot
-
-            // Expose ratingKey so the key handler can read it.
-            readonly property string artistRatingKey: model.ratingKey
-
-            width: artistGrid.cellWidth
-            height: artistGrid.cellHeight
-
-            // Inner container — slightly inset from the cell to create spacing
-            Rectangle {
-                id: tileCard
-
-                anchors {
-                    fill: parent
-                    margins: root.vpx(listenScreen._cellSpacing / 2)
-                }
-
-                color: Theme.colorSecondary
-                radius: root.vpx(Theme.focusRingRadius)
-
-                // Subtle highlight when focused
-                Rectangle {
-                    anchors.fill: parent
-                    radius: parent.radius
-                    color: Theme.colorPrimary
-                    opacity: tileRoot.GridView.isCurrentItem && artistGrid.activeFocus ? 0.15 : 0.0
-
-                    Behavior on opacity {
-                        NumberAnimation { duration: Theme.animDurationFast }
-                    }
-                }
-
-                // ── Poster image area ────────────────────────────────────────
-                Item {
-                    id: posterArea
-
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    // Poster takes ~80% of the card height
-                    height: Math.round(parent.height * 0.80)
-
-                    // Placeholder shown when there is no poster or while loading
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.darker(Theme.colorSecondary, 1.4)
-                        radius: root.vpx(Theme.focusRingRadius)
-                        visible: posterImage.status !== Image.Ready || model.imageLocal === ""
-
-                        Text {
-                            anchors.centerIn: parent
-                            width: parent.width - root.vpx(8)
-                            text: model.title || ""
-                            color: Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                            wrapMode: Text.Wrap
-                            horizontalAlignment: Text.AlignHCenter
-                            maximumLineCount: 3
-                            elide: Text.ElideRight
-                        }
-                    }
-
-                    Image {
-                        id: posterImage
-
-                        anchors.fill: parent
-                        source: model.imageLocal || ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(listenScreen._targetCellW)
-                        sourceSize.height: Math.round(root.vpx(listenScreen._cellH) * 0.80)
-                        visible: status === Image.Ready && model.imageLocal !== ""
-                        clip: true
-                    }
-                }
-
-                // ── Artist name label ────────────────────────────────────────
-                Text {
-                    id: titleText
-
-                    anchors {
-                        top: posterArea.bottom
-                        left: parent.left
-                        right: parent.right
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(4)
-                    }
-                    text: model.title || ""
-                    color: Theme.colorText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    wrapMode: Text.NoWrap
-                    elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                // ── Genre subtitle ───────────────────────────────────────────
-                Text {
-                    anchors {
-                        top: titleText.bottom
-                        left: parent.left
-                        right: parent.right
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(2)
-                    }
-                    text: model.genre || ""
-                    color: Theme.colorTextDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.NoWrap
-                    elide: Text.ElideRight
-                }
-
-                // Focus ring — visible when this tile is the current item
-                FocusRing {
-                    visible: tileRoot.GridView.isCurrentItem && artistGrid.activeFocus
-                }
-            }
-        }
+        onViewModeChanged: (mode) => { listenScreen._viewMode = mode }
     }
 
     // ── Album detail view ─────────────────────────────────────────────────────
