@@ -119,6 +119,557 @@ window.__htpcGamepadMappings.plex = (function () {
   }
 
   // ---------------------------------------------------------------------------
+  // Live TV guide — detection and state
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Returns true when the Live TV guide is active (URL hash contains
+   * 'live-tv' and the channel grid container is rendered in the DOM).
+   */
+  /**
+   * Returns true if the given element is inside the mini player bar at the
+   * bottom of the viewport.  Uses both DOM ancestry checks and a position-
+   * based fallback (bottom 100px of the viewport) since the mini player's
+   * container class names may vary across Plex versions.
+   */
+  function isInMiniPlayer(el) {
+    if (!el) return false;
+    // DOM-based check: walk up to known mini player containers.
+    if (el.closest(
+      '[class*="PlayerContainer"], [class*="MiniPlayer"], ' +
+      '[class*="miniPlayer"], [class*="AudioVideoMiniPlayer"], ' +
+      '[class*="AudioVideoStripe"]'
+    )) {
+      return true;
+    }
+    // Position-based fallback: the mini player bar sits in the bottom ~100px.
+    var rect = el.getBoundingClientRect();
+    var viewportH = window.innerHeight || document.documentElement.clientHeight;
+    if (rect.top > viewportH - 100) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Returns true when the URL indicates we are on the Live TV page.
+   * Does NOT require the grid to be rendered — use this for mini player
+   * exclusion and routing decisions that should apply as soon as the page loads.
+   */
+  function isLiveTvPage() {
+    return !!(window.location.hash && window.location.hash.indexOf('live-tv') !== -1);
+  }
+
+  /**
+   * Returns true when the Live TV guide grid is rendered and navigable.
+   */
+  function isLiveTvGuide() {
+    return isLiveTvPage() && !!document.querySelector('[class*="ChannelsGrid-container"]');
+  }
+
+  // 'tabs'   — cursor is in the genre-tab row at the top of the guide.
+  // 'grid'   — cursor is inside the channel programme grid.
+  // 'detail' — a programme detail row is expanded (Watch Now / Record buttons).
+  var guideZone = 'tabs';
+
+  // When true, suppress the grid→detail auto-detect.  Set after the user
+  // explicitly dismisses the detail row so we don't immediately re-enter it
+  // (the detail DOM node may linger for a few frames after Escape).
+  var guideDetailDismissed = false;
+
+  // Used by checkGuideReset() to detect when the user navigates away from
+  // the Live TV guide so state can be reset.
+  var lastGuideHash = '';
+
+  /**
+   * Reset guide navigation state when the URL hash moves away from live-tv.
+   * Called at the start of handleLiveTvAction() on every button press.
+   */
+  function checkGuideReset() {
+    var hash = window.location.hash || '';
+    var isGuide = hash.indexOf('live-tv') !== -1;
+    if (!isGuide && lastGuideHash.indexOf('live-tv') !== -1) {
+      guideZone = 'tabs';
+      guideRowIndex = 0;
+      guideProgramIndex = 0;
+    }
+    lastGuideHash = hash;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live TV guide — element finders
+  // ---------------------------------------------------------------------------
+
+  /** Returns all visible channel row containers rendered by the virtual scroller. */
+  function getGuideRows() {
+    return Array.from(document.querySelectorAll('[class*="ChannelsGridRow-container"]'));
+  }
+
+  /**
+   * Returns all programme-cell underlay buttons in a row that have non-zero
+   * dimensions (i.e. are actually visible on screen).
+   */
+  function getProgramsInRow(rowEl) {
+    return Array.from(rowEl.querySelectorAll(
+      'button[class*="underlay"], [role="button"][class*="underlay"]'
+    )).filter(function (el) {
+      var rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  /** Returns the < and > time-navigation buttons from the timeline header. */
+  function getTimelineNavButtons() {
+    var container = document.querySelector('[class*="ChannelsGridTimeline-navigationButtons"]');
+    if (!container) return { prev: null, next: null };
+    var buttons = container.querySelectorAll('button');
+    return {
+      prev: buttons[0] || null,
+      next: buttons[1] || null
+    };
+  }
+
+  /**
+   * Returns clickable genre tab elements from the GuideTab-tabs container.
+   * Filters to elements with non-zero dimensions.
+   */
+  function getGenreTabs() {
+    var container = document.querySelector('[class*="GuideTab-tabs"]');
+    if (!container) return [];
+    return Array.from(container.querySelectorAll(
+      'button, [role="button"], [role="tab"], a[href], [class*="Tab"]'
+    )).filter(function (el) {
+      var rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live TV guide — focus helpers (position-based, no index tracking)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Get ALL visible programme underlay buttons across all rendered rows.
+   * Filters to elements with non-zero dimensions.
+   */
+  function getAllGuidePrograms() {
+    return Array.from(document.querySelectorAll(
+      '[class*="ChannelsGridRow-container"] button[class*="underlay"], ' +
+      '[class*="ChannelsGridRow-container"] [role="button"][class*="underlay"]'
+    )).filter(function (el) {
+      var rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+  }
+
+  /**
+   * Focus the first visible programme in the first rendered guide row.
+   */
+  function focusFirstGuideProgram() {
+    var rows = getGuideRows();
+    for (var r = 0; r < rows.length; r++) {
+      var programs = getProgramsInRow(rows[r]);
+      if (programs.length) {
+        setFocus(programs[0]);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Find the adjacent row's programme closest to the current focus position.
+   * direction: 'up' or 'down'.
+   *
+   * Strategy: find the row container of the currently focused element, then
+   * find the next/previous row container by comparing vertical positions.
+   * Within that row, pick the programme whose horizontal centre is closest
+   * to the current programme's horizontal centre (stay at the same time).
+   */
+  function navigateGuideRow(direction) {
+    if (!currentFocusEl) {
+      focusFirstGuideProgram();
+      return;
+    }
+
+    var currentRow = currentFocusEl.closest('[class*="ChannelsGridRow-container"]');
+    if (!currentRow) return;
+
+    var currentRect = currentFocusEl.getBoundingClientRect();
+    var currentCX = currentRect.left + currentRect.width / 2;
+    var currentRowRect = currentRow.getBoundingClientRect();
+    var currentRowCY = currentRowRect.top + currentRowRect.height / 2;
+
+    var rows = getGuideRows();
+    var targetRow = null;
+    var bestRowDist = Infinity;
+
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i] === currentRow) continue;
+      var rowRect = rows[i].getBoundingClientRect();
+      var rowCY = rowRect.top + rowRect.height / 2;
+
+      if (direction === 'down' && rowCY > currentRowCY) {
+        var dist = rowCY - currentRowCY;
+        if (dist < bestRowDist) {
+          bestRowDist = dist;
+          targetRow = rows[i];
+        }
+      } else if (direction === 'up' && rowCY < currentRowCY) {
+        var dist2 = currentRowCY - rowCY;
+        if (dist2 < bestRowDist) {
+          bestRowDist = dist2;
+          targetRow = rows[i];
+        }
+      }
+    }
+
+    if (!targetRow) {
+      // No adjacent row found — scroll the grid to bring more rows into view.
+      scrollGuideGrid(direction);
+      // After scrolling, try again with a short delay to let the virtual
+      // scroller render new rows.
+      setTimeout(function () {
+        navigateGuideRow(direction);
+      }, 100);
+      return;
+    }
+
+    // Find the programme in the target row closest to the current X position.
+    var programs = getProgramsInRow(targetRow);
+    if (!programs.length) return;
+
+    var bestProg = programs[0];
+    var bestProgDist = Infinity;
+    for (var j = 0; j < programs.length; j++) {
+      var pRect = programs[j].getBoundingClientRect();
+      var pCX = pRect.left + pRect.width / 2;
+      var pDist = Math.abs(pCX - currentCX);
+      if (pDist < bestProgDist) {
+        bestProgDist = pDist;
+        bestProg = programs[j];
+      }
+    }
+    setFocus(bestProg);
+
+    // Ensure the focused element is visible by scrolling the grid container.
+    var focusedRect = bestProg.getBoundingClientRect();
+    var scroller = document.querySelector('[class*="ChannelsGrid-gridInnerContent"]');
+    if (scroller) {
+      var scrollerRect = scroller.getBoundingClientRect();
+      if (focusedRect.bottom > scrollerRect.bottom) {
+        scroller.scrollTop += focusedRect.bottom - scrollerRect.bottom + 10;
+      } else if (focusedRect.top < scrollerRect.top) {
+        scroller.scrollTop -= scrollerRect.top - focusedRect.top + 10;
+      }
+    }
+  }
+
+  /**
+   * Navigate left/right within the current row.
+   * direction: -1 (left) or +1 (right).
+   */
+  function navigateGuideProgram(direction) {
+    if (!currentFocusEl) {
+      focusFirstGuideProgram();
+      return;
+    }
+
+    var currentRow = currentFocusEl.closest('[class*="ChannelsGridRow-container"]');
+    if (!currentRow) return;
+
+    var programs = getProgramsInRow(currentRow);
+    var currentIdx = programs.indexOf(currentFocusEl);
+    if (currentIdx < 0) {
+      // Focus might be on a child of the underlay — find the closest match.
+      for (var i = 0; i < programs.length; i++) {
+        if (programs[i].contains(currentFocusEl) || currentFocusEl.contains(programs[i])) {
+          currentIdx = i;
+          break;
+        }
+      }
+    }
+
+    var newIdx = currentIdx + direction;
+    if (newIdx >= 0 && newIdx < programs.length) {
+      setFocus(programs[newIdx]);
+    }
+  }
+
+  /**
+   * Scroll the virtual scroller container to bring more rows into view.
+   */
+  function scrollGuideGrid(direction) {
+    var scroller = document.querySelector('[class*="ChannelsGrid-gridInnerContent"]');
+    if (!scroller) return;
+    // Use the height of a row as the scroll amount for precise scrolling.
+    var rows = getGuideRows();
+    var scrollAmount = 80;
+    if (rows.length > 0) {
+      var rowRect = rows[0].getBoundingClientRect();
+      scrollAmount = rowRect.height || 80;
+    }
+    if (direction === 'down') {
+      scroller.scrollTop += scrollAmount;
+    } else {
+      scroller.scrollTop -= scrollAmount;
+    }
+  }
+
+  /**
+   * Returns the currently visible detail row container, or null.
+   * Plex expands a ChannelsGridDetailRow below the selected programme.
+   */
+  function getGuideDetailRow() {
+    var detail = document.querySelector('[class*="ChannelsGridDetailRow-container"]');
+    if (!detail) return null;
+    var rect = detail.getBoundingClientRect();
+    return (rect.width > 0 && rect.height > 0) ? detail : null;
+  }
+
+  /**
+   * Returns the primary action buttons inside the guide detail row:
+   * "Watch Now" and "Record".  Excludes title links, Previous/Next nav,
+   * and other non-primary elements so Left/Right cycles only between the
+   * main actions.
+   */
+  function getDetailRowButtons() {
+    var detail = getGuideDetailRow();
+    if (!detail) return [];
+    // Target the specific play and record buttons by their class patterns.
+    return Array.from(detail.querySelectorAll(
+      '[class*="ChannelsGridMetadataDetailButtons-playButton"], ' +
+      '[class*="ChannelsGridMetadataDetailButtons-recordButton"], ' +
+      'button[class*="DetailButtons"]'
+    )).filter(function (el) {
+      var rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && !el.disabled;
+    });
+  }
+
+  /**
+   * Close the guide detail row by pressing Escape or clicking elsewhere.
+   * Tries to re-focus the programme cell that was selected.
+   */
+  function _closeGuideDetail() {
+    guideDetailDismissed = true;
+
+    // Try multiple approaches to close the detail row:
+    // 1. Click the currently selected programme cell again (toggle off).
+    // 2. Send Escape to the detail row.
+    // 3. Click elsewhere in the grid to deselect.
+    var detail = getGuideDetailRow();
+
+    // Find the selected programme cell (has "selected" in its class).
+    var selectedCell = document.querySelector(
+      '[class*="ChannelsGridMetadataItemCell-selected"] button[class*="underlay"]'
+    );
+    if (selectedCell) {
+      simulateClick(selectedCell);
+    } else if (detail) {
+      sendKey('Escape', 'Escape', detail);
+    }
+
+    // Recover focus to a guide programme cell.
+    setTimeout(function () {
+      if (!currentFocusEl || !document.contains(currentFocusEl) ||
+          currentFocusEl.closest('[class*="ChannelsGridDetailRow"]')) {
+        focusFirstGuideProgram();
+      }
+    }, 150);
+  }
+
+  /**
+   * Move focus to an adjacent genre tab.
+   * direction: -1 (left/previous) or +1 (right/next).
+   * Clicking the tab also filters the guide to that genre.
+   */
+  function scrollGenreTabs(tabs, direction) {
+    var currentIdx = -1;
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i] === currentFocusEl || tabs[i].classList.contains('__htpc-focus')) {
+        currentIdx = i;
+        break;
+      }
+    }
+    var newIdx = currentIdx + direction;
+    if (newIdx >= 0 && newIdx < tabs.length) {
+      setFocus(tabs[newIdx]);
+      simulateClick(tabs[newIdx]); // clicking a genre tab filters the guide
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Live TV guide — main action handler
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Handle a gamepad action while the Live TV guide is active and no modal /
+   * dropdown / popup panel is open.
+   *
+   * Zone 'tabs':   the virtual cursor is in the genre-tab row at the top.
+   * Zone 'grid':   the virtual cursor is inside the channel programme grid.
+   * Zone 'detail': a programme detail row is expanded with Watch Now / Record.
+   */
+  function handleLiveTvAction(action) {
+    checkGuideReset();
+
+    // Clear the dismiss flag once the detail row is actually gone from the DOM.
+    if (guideDetailDismissed && !getGuideDetailRow()) {
+      guideDetailDismissed = false;
+    }
+
+    // Auto-detect detail zone: if a detail row appeared after clicking a
+    // programme, switch to detail zone and focus the "Watch Now" button.
+    // Only trigger from grid zone, and not if the user just dismissed it.
+    if (guideZone === 'grid' && !guideDetailDismissed && getGuideDetailRow()) {
+      var detailBtns = getDetailRowButtons();
+      if (detailBtns.length) {
+        guideZone = 'detail';
+        setFocus(detailBtns[0]); // "Watch Now" button
+        return; // Consume the action — we've handled the transition.
+      }
+    }
+
+    // If we're supposed to be in detail zone but the detail row is gone
+    // (Plex closed it), fall back to grid zone.
+    if (guideZone === 'detail' && !getGuideDetailRow()) {
+      guideZone = 'grid';
+    }
+
+    switch (action) {
+      case 'down':
+        if (guideZone === 'tabs') {
+          guideZone = 'grid';
+          focusFirstGuideProgram();
+        } else if (guideZone === 'detail') {
+          // Down from detail row — close detail and continue in grid.
+          _closeGuideDetail();
+          guideZone = 'grid';
+        } else {
+          navigateGuideRow('down');
+        }
+        break;
+
+      case 'up':
+        if (guideZone === 'detail') {
+          // Up from detail row — close detail and return to the grid row.
+          _closeGuideDetail();
+          guideZone = 'grid';
+        } else if (guideZone === 'grid') {
+          var currentRow = currentFocusEl
+            ? currentFocusEl.closest('[class*="ChannelsGridRow-container"]')
+            : null;
+          var rows = getGuideRows();
+          var isFirstRow = currentRow && rows.length > 0 && currentRow === rows[0];
+          var hasRowAbove = false;
+          if (currentRow) {
+            var crRect = currentRow.getBoundingClientRect();
+            for (var ri = 0; ri < rows.length; ri++) {
+              if (rows[ri] === currentRow) continue;
+              var rRect = rows[ri].getBoundingClientRect();
+              if (rRect.top + rRect.height / 2 < crRect.top) {
+                hasRowAbove = true;
+                break;
+              }
+            }
+          }
+          if (isFirstRow && !hasRowAbove) {
+            guideZone = 'tabs';
+            var tabs = getGenreTabs();
+            if (tabs.length) setFocus(tabs[0]);
+          } else {
+            navigateGuideRow('up');
+          }
+        } else {
+          navigateFocus('up');
+        }
+        break;
+
+      case 'left':
+        if (guideZone === 'detail') {
+          // Navigate between detail row buttons.
+          var dBtns = getDetailRowButtons();
+          var dIdx = dBtns.indexOf(currentFocusEl);
+          if (dIdx > 0) setFocus(dBtns[dIdx - 1]);
+        } else if (guideZone === 'grid') {
+          navigateGuideProgram(-1);
+        } else {
+          navigateFocus('left');
+        }
+        break;
+
+      case 'right':
+        if (guideZone === 'detail') {
+          var dBtns2 = getDetailRowButtons();
+          var dIdx2 = dBtns2.indexOf(currentFocusEl);
+          if (dIdx2 >= 0 && dIdx2 < dBtns2.length - 1) setFocus(dBtns2[dIdx2 + 1]);
+        } else if (guideZone === 'grid') {
+          navigateGuideProgram(1);
+        } else {
+          navigateFocus('right');
+        }
+        break;
+
+      case 'accept':
+        if (guideZone === 'grid') {
+          if (currentFocusEl) {
+            simulateClick(currentFocusEl);
+            // Plex will render a detail row below the selected programme.
+            // The auto-detect at the top of this function will catch it
+            // on the next button press and switch to detail zone.
+          }
+        } else if (guideZone === 'detail') {
+          // Click the focused detail button (Watch Now / Record).
+          if (currentFocusEl) simulateClick(currentFocusEl);
+        } else {
+          handleNavAction('accept');
+        }
+        break;
+
+      case 'cancel':
+        if (guideZone === 'detail') {
+          // Close the detail row and return to the grid.
+          _closeGuideDetail();
+          guideZone = 'grid';
+        } else if (guideZone === 'grid') {
+          guideZone = 'tabs';
+          var cancelTabs = getGenreTabs();
+          if (cancelTabs.length) setFocus(cancelTabs[0]);
+        } else {
+          handleNavAction('cancel');
+        }
+        break;
+
+      case 'leftTrigger':
+        // Scroll the timeline backward — click the < navigation button.
+        var navBtns = getTimelineNavButtons();
+        if (navBtns.prev) simulateClick(navBtns.prev);
+        break;
+
+      case 'rightTrigger':
+        // Scroll the timeline forward — click the > navigation button.
+        var navBtns2 = getTimelineNavButtons();
+        if (navBtns2.next) simulateClick(navBtns2.next);
+        break;
+
+      case 'leftBumper':
+        // Scroll genre tabs left — focus the previous tab.
+        scrollGenreTabs(getGenreTabs(), -1);
+        break;
+
+      case 'rightBumper':
+        // Scroll genre tabs right — focus the next tab.
+        scrollGenreTabs(getGenreTabs(), 1);
+        break;
+
+      default:
+        // Pass through to the normal handler for unmapped actions.
+        handleNavAction(action);
+        break;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Player context detection
   // ---------------------------------------------------------------------------
 
@@ -172,7 +723,9 @@ window.__htpcGamepadMappings.plex = (function () {
     var style = document.createElement('style');
     style.id = '__htpc-focus-style';
     style.textContent =
-      '.__htpc-focus { outline: 3px solid #e5a00d !important; outline-offset: 2px !important; }';
+      '.__htpc-focus { outline: 3px solid #e5a00d !important; outline-offset: 2px !important; } ' +
+      '.__htpc-guide-focus { outline: 3px solid #e5a00d !important; outline-offset: -3px !important; ' +
+      'background-color: rgba(229, 160, 13, 0.25) !important; z-index: 10 !important; position: relative !important; }';
     document.head.appendChild(style);
   }());
 
@@ -463,6 +1016,11 @@ window.__htpcGamepadMappings.plex = (function () {
       if (rect.width <= 0 || rect.height <= 0 || el.disabled) {
         return false;
       }
+      // When on the Live TV page, exclude mini player elements so the
+      // spatial navigation cursor doesn't get stuck on them.
+      if (isLiveTvPage() && isInMiniPlayer(el)) {
+        return false;
+      }
       // When scoped to a modal, dropdown, or popup panel, relax the
       // offsetParent check because these elements are often
       // position:fixed/absolute and offsetParent is null for such elements.
@@ -504,17 +1062,35 @@ window.__htpcGamepadMappings.plex = (function () {
     if (currentFocusEl) {
       currentFocusEl.classList.remove('__htpc-focus');
     }
+    // Also clear any guide cell highlight.
+    var oldGuideCell = document.querySelector('.__htpc-guide-focus');
+    if (oldGuideCell) {
+      oldGuideCell.classList.remove('__htpc-guide-focus');
+    }
   }
 
   /**
    * Apply the highlight class to el and update currentFocusEl.
    * Scrolls the element into view if it is off-screen.
+   *
+   * For Live TV guide programme cells, the focusable element is an invisible
+   * underlay button.  Outlining it is not visible, so we also highlight the
+   * parent programme cell container with a distinct class and style.
    */
   function setFocus(el) {
     clearHighlight();
     currentFocusEl = el;
     if (el) {
       el.classList.add('__htpc-focus');
+      // If this is a guide programme underlay button, also highlight the
+      // visible parent cell so the user can see which programme is focused.
+      var guideCell = el.closest(
+        '[class*="ChannelsGridMetadataItemCell-container"], ' +
+        '[class*="ChannelsGridRow-program"]'
+      );
+      if (guideCell) {
+        guideCell.classList.add('__htpc-guide-focus');
+      }
       el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       // Record position so we can find a replacement if the element is
       // later removed from the DOM (e.g. React re-render swaps buttons).
@@ -881,6 +1457,22 @@ window.__htpcGamepadMappings.plex = (function () {
       // Start+Select combo closes the browser window from any context.
       if (action === 'closeWindow') {
         window.close();
+        return;
+      }
+
+      // Full-screen player takes priority even on the Live TV page.
+      // Detect it via the AudioVideoFullPlayer container which is only
+      // present when the player is expanded (not the mini player).
+      var isFullScreenPlayer = !!document.querySelector(
+        '[class*="AudioVideoFullPlayer"]'
+      );
+
+      // Live TV page gets its own navigation handler.  Use isLiveTvPage()
+      // (not isLiveTvGuide()) so it activates even before the grid renders,
+      // preventing the user from getting trapped in the mini player.
+      // Modals/dropdowns/popups and the full-screen player still take priority.
+      if (isLiveTvPage() && !isFullScreenPlayer && !getActiveModal() && !getActiveDropdown() && !getActivePopupPanel()) {
+        handleLiveTvAction(action);
         return;
       }
 
