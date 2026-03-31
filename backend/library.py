@@ -212,6 +212,13 @@ class GameListModel(QAbstractListModel):
             idx = self.index(row, 0)
             self.dataChanged.emit(idx, idx, list(self.roleNames().keys()))
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the name of the game at *index*, or "" if out of range."""
+        if 0 <= index < len(self._games):
+            return self._games[index].name
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # GameLibrary — main orchestrator

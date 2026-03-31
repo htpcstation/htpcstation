@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import "../helpers/JumpHelper.js" as JumpHelper
 
 // Plex TV show list view — split-panel browse view for Plex TV shows.
 //
@@ -89,12 +90,27 @@ FocusScope {
 
         // Y button hint
         Text {
+            id: sortHint
             anchors {
                 right: parent.right
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
             text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
+        // Quick scroll hint
+        Text {
+            id: scrollHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -324,6 +340,20 @@ FocusScope {
                 } else if (keys.isContext2(event)) {
                     event.accepted = true
                     sortFilterOverlay.open()
+                } else if (keys.isPageDown(event)) {
+                    event.accepted = true
+                    var mdl = plex ? plex.showsModel : null
+                    showList.currentIndex = JumpHelper.jumpIndex(
+                        showList.count, showList.currentIndex, showListView._currentSort,
+                        function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
+                    )
+                } else if (keys.isPageUp(event)) {
+                    event.accepted = true
+                    var mdl2 = plex ? plex.showsModel : null
+                    showList.currentIndex = JumpHelper.jumpIndex(
+                        showList.count, showList.currentIndex, showListView._currentSort,
+                        function(i) { return mdl2 ? mdl2.titleAt(i) : "" }, -1
+                    )
                 }
             }
 

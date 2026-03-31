@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia
 import ".."
 import "../components"
+import "../helpers/JumpHelper.js" as JumpHelper
 
 // Game list view — split-panel browse view for retro games.
 //
@@ -132,12 +133,27 @@ FocusScope {
 
         // Y button hint
         Text {
+            id: sortHint
             anchors {
                 right: parent.right
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
             text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "F2  Sort"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
+        // Quick scroll hint
+        Text {
+            id: scrollHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -379,6 +395,20 @@ FocusScope {
                 } else if (keys.isContext1(event)) {
                     event.accepted = true
                     if (library) library.toggleFavorite(gameList.currentIndex)
+                } else if (keys.isPageDown(event)) {
+                    event.accepted = true
+                    var mdl = library ? library.gamesModel : null
+                    gameList.currentIndex = JumpHelper.jumpIndex(
+                        gameList.count, gameList.currentIndex, gameListView._currentSort,
+                        function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
+                    )
+                } else if (keys.isPageUp(event)) {
+                    event.accepted = true
+                    var mdl2 = library ? library.gamesModel : null
+                    gameList.currentIndex = JumpHelper.jumpIndex(
+                        gameList.count, gameList.currentIndex, gameListView._currentSort,
+                        function(i) { return mdl2 ? mdl2.titleAt(i) : "" }, -1
+                    )
                 }
             }
 

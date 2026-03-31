@@ -191,6 +191,13 @@ class PlexMovieListModel(QAbstractListModel):
             self.SummaryRole: b"summary",
         }
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the title of the movie at *index*, or "" if out of range."""
+        if 0 <= index < len(self._movies):
+            return self._movies[index].title
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # PlexShowListModel
@@ -280,6 +287,13 @@ class PlexShowListModel(QAbstractListModel):
             self.ViewedLeafCountRole: b"viewedLeafCount",
         }
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the title of the show at *index*, or "" if out of range."""
+        if 0 <= index < len(self._shows):
+            return self._shows[index].title
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # PlexOnDeckModel
@@ -355,6 +369,13 @@ class PlexOnDeckModel(QAbstractListModel):
             self.DurationRole: b"duration",
         }
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the title of the on-deck item at *index*, or "" if out of range."""
+        if 0 <= index < len(self._items):
+            return self._items[index].get("title", "")
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # PlexArtistListModel
@@ -416,6 +437,13 @@ class PlexArtistListModel(QAbstractListModel):
             self.GenreRole: b"genre",
             self.ImageLocalRole: b"imageLocal",
         }
+
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the title of the artist at *index*, or "" if out of range."""
+        if 0 <= index < len(self._artists):
+            return self._artists[index].title
+        return ""
 
 
 # ---------------------------------------------------------------------------

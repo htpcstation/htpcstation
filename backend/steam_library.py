@@ -94,6 +94,13 @@ class SteamGameListModel(QAbstractListModel):
             self.SizeOnDiskRole: b"sizeOnDisk",
         }
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the name of the game at *index*, or "" if out of range."""
+        if 0 <= index < len(self._games):
+            return self._games[index].name
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # SteamSourceListModel

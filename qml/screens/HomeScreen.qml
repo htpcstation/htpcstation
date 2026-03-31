@@ -151,8 +151,7 @@ FocusScope {
         return min + ":" + (sec < 10 ? "0" : "") + sec
     }
 
-    // Intercept LB/RB and Start at the HomeScreen level so they work even
-    // when focus is inside the content area.
+    // Intercept Start and X button (isContext1) at the HomeScreen level.
     // Also intercept X button (isContext1) for global play/pause when music is loaded.
     Keys.onPressed: (event) => {
         if (keys.isMenu(event)) {
@@ -164,25 +163,6 @@ FocusScope {
             // to child screens (e.g. Retro Games uses X for Favorite).
             event.accepted = true
             homeScreen._togglePlayPause()
-        } else if (keys.isPrevTab(event)) {
-            event.accepted = true
-            if (currentTab > 0) {
-                // Remember whether focus was in the content area before switching.
-                _focusContentOnLoad = contentLoader.item !== null && contentLoader.item.activeFocus
-                currentTab--
-                if (!_focusContentOnLoad) {
-                    tabRepeater.itemAt(currentTab).forceActiveFocus()
-                }
-            }
-        } else if (keys.isNextTab(event)) {
-            event.accepted = true
-            if (currentTab < tabNames.length - 1) {
-                _focusContentOnLoad = contentLoader.item !== null && contentLoader.item.activeFocus
-                currentTab++
-                if (!_focusContentOnLoad) {
-                    tabRepeater.itemAt(currentTab).forceActiveFocus()
-                }
-            }
         }
     }
 

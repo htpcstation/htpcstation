@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import "../helpers/JumpHelper.js" as JumpHelper
 
 // Plex on-deck (Continue Watching) list view — split-panel browse view for
 // in-progress movies and episodes.
@@ -69,12 +70,27 @@ FocusScope {
 
         // Y button hint — opens the view toggle overlay
         Text {
+            id: viewHint
             anchors {
                 right: parent.right
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
             text: keys.useGamepadLabels ? keys.context2Label + "  View" : "F2  View"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
+        // Quick scroll hint
+        Text {
+            id: scrollHint
+            anchors {
+                right: viewHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -307,6 +323,18 @@ FocusScope {
                 } else if (keys.isContext2(event)) {
                     event.accepted = true
                     viewOverlay.open()
+                } else if (keys.isPageDown(event)) {
+                    event.accepted = true
+                    onDeckList.currentIndex = JumpHelper.jumpIndex(
+                        onDeckList.count, onDeckList.currentIndex, null,
+                        function(i) { return "" }, 1
+                    )
+                } else if (keys.isPageUp(event)) {
+                    event.accepted = true
+                    onDeckList.currentIndex = JumpHelper.jumpIndex(
+                        onDeckList.count, onDeckList.currentIndex, null,
+                        function(i) { return "" }, -1
+                    )
                 }
             }
 

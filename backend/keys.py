@@ -182,10 +182,25 @@ class Keys(QObject):
 
     @Slot(QJSValue, result=bool)
     def isPageUp(self, event: QJSValue) -> bool:
-        """LT / Home — scroll page up."""
-        return _key_code(event) == Qt.Key.Key_Home
+        """LT / Home / PageUp — quick scroll up."""
+        key = _key_code(event)
+        return key == Qt.Key.Key_Home or key == Qt.Key.Key_PageUp
 
     @Slot(QJSValue, result=bool)
     def isPageDown(self, event: QJSValue) -> bool:
-        """RT / End — scroll page down."""
-        return _key_code(event) == Qt.Key.Key_End
+        """RT / End / PageDown — quick scroll down."""
+        key = _key_code(event)
+        return key == Qt.Key.Key_End or key == Qt.Key.Key_PageDown
+
+    # ------------------------------------------------------------------
+    # Quick scroll labels
+    # ------------------------------------------------------------------
+
+    def _get_page_up_label(self) -> str:
+        return "LT"
+
+    def _get_page_down_label(self) -> str:
+        return "RT"
+
+    pageUpLabel = Property(str, _get_page_up_label, constant=True)
+    pageDownLabel = Property(str, _get_page_down_label, constant=True)

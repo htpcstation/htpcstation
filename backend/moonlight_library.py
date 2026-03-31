@@ -88,6 +88,13 @@ class MoonlightAppListModel(QAbstractListModel):
             self.LastPlayedRole: b"lastPlayed",
         }
 
+    @Slot(int, result=str)
+    def titleAt(self, index: int) -> str:
+        """Return the name of the app at *index*, or "" if out of range."""
+        if 0 <= index < len(self._apps):
+            return self._apps[index].name
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # MoonlightLibrary — main orchestrator
