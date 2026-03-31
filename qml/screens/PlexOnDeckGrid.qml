@@ -21,6 +21,12 @@ FocusScope {
     // ratingKey is the Plex ratingKey for the selected item.
     signal itemSelected(string ratingKey)
 
+    // Emitted when the user changes the view mode via the view overlay.
+    signal viewModeChanged(string mode)
+
+    // View mode ("grid" or "list") — set by WatchScreen; do not overwrite in onCompleted
+    property string _viewMode: "grid"
+
     // Reset to the first item whenever this grid gains focus so the
     // top-left (most recently watched) item is always highlighted on entry.
     onActiveFocusChanged: {
@@ -58,14 +64,14 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
 
-        // B button hint
+        // Y button hint — opens the view toggle overlay
         Text {
             anchors {
                 right: parent.right
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+            text: keys.useGamepadLabels ? keys.context2Label + "  View" : "F2  View"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -96,7 +102,10 @@ FocusScope {
         highlightMoveDuration: Theme.animDurationFast
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (keys.isContext2(event)) {
+                event.accepted = true
+                viewOverlay.open()
+            } else if (keys.isAccept(event)) {
                 event.accepted = true
                 var item = onDeckGrid.currentItem
                 if (item) {
@@ -286,6 +295,189 @@ FocusScope {
                 // Focus ring — visible when this tile is the current item
                 FocusRing {
                     visible: tileRoot.GridView.isCurrentItem && onDeckGrid.activeFocus
+                }
+            }
+        }
+    }
+
+    // ── View overlay ──────────────────────────────────────────────────────────
+    //
+    // A semi-transparent panel that slides in from the top when Y is pressed.
+    // Only has a View row (no sort — on-deck ordering is fixed by Plex).
+    // Navigation: Left/Right moves between view options.
+    //             A (Return) applies the selection.
+    //             B (Escape) or Y dismisses without changing.
+    FocusScope {
+        id: viewOverlay
+
+        anchors.fill: parent
+        visible: false
+        enabled: visible
+
+        // Index within the view options (0=Grid, 1=List)
+        property int _viewIndex: 0
+
+        function open() {
+            // Sync selection index to current state
+            var viewKeys = ["grid", "list"]
+            var vi = viewKeys.indexOf(onDeckGridView._viewMode)
+            _viewIndex = vi >= 0 ? vi : 0
+            visible = true
+            forceActiveFocus()
+        }
+
+        function close() {
+            visible = false
+            onDeckGrid.forceActiveFocus()
+        }
+
+        // ── Backdrop ─────────────────────────────────────────────────────────
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+            opacity: 0.55
+        }
+
+        // ── Panel ─────────────────────────────────────────────────────────────
+        Rectangle {
+            id: overlayPanel
+
+            anchors {
+                top: parent.top
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(130)
+            color: Theme.colorSecondary
+            opacity: 0.97
+
+            // ── Panel title ──────────────────────────────────────────────────
+            Text {
+                id: panelTitle
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(10)
+                }
+                text: "View"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            Text {
+                anchors {
+                    top: parent.top
+                    right: parent.right
+                    rightMargin: root.vpx(16)
+                    topMargin: root.vpx(14)
+                }
+                text: keys.useGamepadLabels
+                      ? keys.cancelLabel + " / " + keys.context2Label + "  Close"
+                      : "Esc / F2  Close"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            // ── Divider ──────────────────────────────────────────────────────
+            Rectangle {
+                id: divider
+                anchors {
+                    top: panelTitle.bottom
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(8)
+                }
+                height: root.vpx(1)
+                color: Theme.colorTextDim
+                opacity: 0.3
+            }
+
+            // ── View options row ──────────────────────────────────────────────
+            Row {
+                id: viewOptionsRow
+                anchors {
+                    top: divider.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(10)
+                }
+                spacing: root.vpx(8)
+
+                Repeater {
+                    model: [
+                        { key: "grid", label: "Grid" },
+                        { key: "list", label: "List" }
+                    ]
+
+                    delegate: Rectangle {
+                        width: root.vpx(80)
+                        height: root.vpx(36)
+                        color: viewOverlay._viewIndex === index
+                               ? Theme.colorPrimary
+                               : "transparent"
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: root.vpx(8)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: {
+                                var isActive = modelData.key === onDeckGridView._viewMode
+                                return (isActive ? "✓ " : "") + modelData.label
+                            }
+                            color: viewOverlay._viewIndex === index
+                                   ? "#ffffff"
+                                   : Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Key handling ─────────────────────────────────────────────────────
+        Keys.onPressed: (event) => {
+            var viewCount = 2
+
+            if (keys.isCancel(event) || keys.isContext2(event)) {
+                // B or Y — dismiss without applying
+                event.accepted = true
+                viewOverlay.close()
+
+            } else if (event.key === Qt.Key_Left) {
+                event.accepted = true
+                if (viewOverlay._viewIndex > 0)
+                    viewOverlay._viewIndex -= 1
+
+            } else if (event.key === Qt.Key_Right) {
+                event.accepted = true
+                if (viewOverlay._viewIndex < viewCount - 1)
+                    viewOverlay._viewIndex += 1
+
+            } else if (keys.isAccept(event)) {
+                event.accepted = true
+                // Apply view mode
+                var viewKeys = ["grid", "list"]
+                var newView = viewKeys[viewOverlay._viewIndex]
+                if (newView !== onDeckGridView._viewMode) {
+                    // View mode is changing — hide overlay but don't grab focus locally.
+                    // WatchScreen will route focus to the newly visible view.
+                    viewOverlay.visible = false
+                    if (settings) settings.setWatchViewMode(newView)
+                    onDeckGridView.viewModeChanged(newView)
+                } else {
+                    // Same view mode — close normally (focus stays local).
+                    viewOverlay.close()
                 }
             }
         }

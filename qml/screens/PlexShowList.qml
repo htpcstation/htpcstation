@@ -2,36 +2,30 @@ import QtQuick
 import ".."
 import "../components"
 
-// Plex movie poster grid — shows a scrollable grid of movie posters.
+// Plex TV show list view — split-panel browse view for Plex TV shows.
 //
 // Focus flow:
-//   Gains focus when WatchScreen switches to "content" view for a movie library.
-//   Arrow keys navigate the grid natively.
-//   A (Return) on a cell → emits movieSelected(ratingKey).
-//   B (Escape) → emits back() so WatchScreen can return to the library list.
-//   Y (F2)     → opens the sort/filter overlay panel.
-//
-// Infinite scroll:
-//   When the focused index approaches the end of the loaded list,
-//   plex.loadMoreMovies() is called to fetch the next page.
+//   Gains focus when WatchScreen switches to "content" view for a show library
+//   (list mode).
+//   Up/Down navigate the list natively.
+//   A (Return)  → emits showSelected(ratingKey)
+//   B (Escape)  → emits back()
+//   Y (F2)      → opens the sort/filter/view overlay panel
 FocusScope {
-    id: movieGridView
+    id: showListView
 
     // Emitted when the user presses B / Escape to return to the library list.
     signal back()
 
-    // Emitted when the user presses A / Return on a movie cell.
-    // ratingKey is the Plex ratingKey for the selected movie.
-    signal movieSelected(string ratingKey, int index)
+    // Emitted when the user presses A / Return on a show row.
+    // ratingKey is the Plex ratingKey for the selected show.
+    signal showSelected(string ratingKey)
 
     // Emitted when the user changes the view mode via the sort/filter overlay.
     signal viewModeChanged(string mode)
 
     // Display name of the currently selected library (set by WatchScreen).
     property string systemName: ""
-
-    // View mode ("grid" or "list") — set by WatchScreen; do not overwrite in onCompleted
-    property string _viewMode: "grid"
 
     // ── Sort/filter state (mirrors backend state for display) ──────────────────
     property string _currentSort: ""
@@ -41,11 +35,14 @@ FocusScope {
     // True while a sort/filter re-fetch is in progress
     property bool _loading: false
 
+    // ── View mode (set by WatchScreen; "grid" or "list") ──────────────────────
+    property string _viewMode: "grid"
+
     // Clear loading flag when the model is refreshed
     Connections {
         target: plex
-        function onMoviesModelChanged() {
-            movieGridView._loading = false
+        function onShowsModelChanged() {
+            showListView._loading = false
         }
     }
 
@@ -60,10 +57,11 @@ FocusScope {
         return "Default"
     }
 
-    // ── Cell dimensions (design-grid px, scaled via vpx) ─────────────────────
-    readonly property int _targetCellW: 160
-    readonly property int _cellH: 280
-    readonly property int _cellSpacing: 12
+    // ── Helper: format audience rating as "X.X/10" ───────────────────────────
+    function _formatRating(rating) {
+        if (!rating || rating <= 0) return ""
+        return rating.toFixed(1) + "/10"
+    }
 
     // ── Header bar ───────────────────────────────────────────────────────────
     Rectangle {
@@ -83,7 +81,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  " + movieGridView.systemName
+            text: "◀  " + showListView.systemName
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -123,10 +121,10 @@ FocusScope {
             }
             text: {
                 var parts = []
-                if (movieGridView._currentSort !== "")
-                    parts.push("Sort: " + movieGridView._sortLabel)
-                if (movieGridView._currentGenreTitle !== "")
-                    parts.push("Genre: " + movieGridView._currentGenreTitle)
+                if (showListView._currentSort !== "")
+                    parts.push("Sort: " + showListView._sortLabel)
+                if (showListView._currentGenreTitle !== "")
+                    parts.push("Genre: " + showListView._currentGenreTitle)
                 return parts.length > 0 ? parts.join("  ·  ") : "Default order"
             }
             color: Theme.colorTextDim
@@ -135,207 +133,293 @@ FocusScope {
         }
     }
 
-    // ── Movie grid ────────────────────────────────────────────────────────────
-    GridView {
-        id: movieGrid
+    // ── Loading indicator ─────────────────────────────────────────────────────
+    Text {
+        anchors.centerIn: parent
+        visible: showListView._loading
+        text: "Loading..."
+        color: Theme.colorTextDim
+        font.family: Theme.fontFamily
+        font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        z: 1
+    }
+
+    // ── Split content area ────────────────────────────────────────────────────
+    Item {
+        id: contentArea
 
         anchors {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
-            margins: root.vpx(16)
         }
 
-        model: plex ? plex.moviesModel : null
-        clip: true
-        focus: true
+        // ── Left panel: preview area (45% width) ──────────────────────────────
+        Item {
+            id: leftPanel
 
-        readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)))
-        cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)
-        cellHeight: root.vpx(movieGridView._cellH + movieGridView._cellSpacing)
-
-        // Smooth highlight movement
-        highlightMoveDuration: Theme.animDurationFast
-
-        // ── Infinite scroll ──────────────────────────────────────────────────
-        onCurrentIndexChanged: {
-            var threshold = movieGrid.count - movieGrid._columns * 2
-            if (movieGrid.count > 0 && movieGrid.currentIndex >= threshold) {
-                plex.loadMoreMovies()
+            anchors {
+                top: parent.top
+                left: parent.left
+                bottom: parent.bottom
             }
-        }
+            width: Math.round(parent.width * 0.45)
 
-        Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
-                event.accepted = true
-                sortFilterOverlay.open()
-            } else if (keys.isAccept(event)) {
-                event.accepted = true
-                var item = movieGrid.currentItem
-                if (item) {
-                    movieGridView.movieSelected(item.movieRatingKey, movieGrid.currentIndex)
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                movieGridView.back()
-            }
-        }
-
-        // ── Empty state ──────────────────────────────────────────────────────
-        Text {
-            anchors.centerIn: parent
-            visible: movieGrid.count === 0 && !movieGridView._loading
-            text: "Loading movies..."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-        // ── Loading indicator — shown while a sort/filter re-fetch is in progress
-        Text {
-            anchors.centerIn: parent
-            visible: movieGridView._loading
-            text: "Loading..."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-        // ── Movie tile delegate ───────────────────────────────────────────────
-        delegate: Item {
-            id: tileRoot
-
-            // Expose ratingKey so the key handler can read it.
-            readonly property string movieRatingKey: model.ratingKey
-
-            width: movieGrid.cellWidth
-            height: movieGrid.cellHeight
-
-            // Inner container — slightly inset from the cell to create spacing
-            Rectangle {
-                id: tileCard
+            // ── Portrait poster image area (~65% of panel height) ─────────────
+            // More space since there is no synopsis to display.
+            Item {
+                id: posterArea
 
                 anchors {
-                    fill: parent
-                    margins: root.vpx(movieGridView._cellSpacing / 2)
+                    top: parent.top
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(16)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
                 }
+                // Poster area takes ~65% of the left panel height (portrait aspect)
+                height: Math.round(parent.height * 0.65)
 
-                color: Theme.colorSecondary
-                radius: root.vpx(Theme.focusRingRadius)
-
-                // Subtle highlight when focused
+                // Placeholder shown when there is no poster or while loading
                 Rectangle {
                     anchors.fill: parent
-                    radius: parent.radius
-                    color: Theme.colorPrimary
-                    opacity: tileRoot.GridView.isCurrentItem && movieGrid.activeFocus ? 0.15 : 0.0
+                    color: Qt.darker(Theme.colorSecondary, 1.4)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: posterImage.status !== Image.Ready
+                             || !showList.currentItem
+                             || showList.currentItem.posterLocalValue === ""
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: showList.currentItem ? (showList.currentItem.titleValue || "") : ""
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        wrapMode: Text.Wrap
+                        horizontalAlignment: Text.AlignHCenter
+                        width: parent.width - root.vpx(16)
+                    }
+                }
+
+                Image {
+                    id: posterImage
+
+                    anchors.fill: parent
+                    source: showList.currentItem ? (showList.currentItem.posterLocalValue || "") : ""
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    sourceSize.width: Math.round(leftPanel.width)
+                    sourceSize.height: Math.round(leftPanel.height * 0.65)
+                    visible: status === Image.Ready
+                             && showList.currentItem
+                             && showList.currentItem.posterLocalValue !== ""
+                }
+            }
+
+            // ── Compact metadata column ───────────────────────────────────────
+            Column {
+                id: metadataColumn
+
+                anchors {
+                    top: posterArea.bottom
+                    left: parent.left
+                    right: parent.right
+                    topMargin: root.vpx(8)
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+                spacing: root.vpx(4)
+
+                Repeater {
+                    model: [
+                        {
+                            label: "Year",
+                            value: (showList.currentItem && showList.currentItem.yearValue > 0)
+                                   ? String(showList.currentItem.yearValue) : ""
+                        },
+                        {
+                            label: "Score",
+                            value: showList.currentItem
+                                   ? showListView._formatRating(showList.currentItem.audienceRatingValue)
+                                   : ""
+                        },
+                        {
+                            label: "Seasons",
+                            value: (showList.currentItem && showList.currentItem.childCountValue > 0)
+                                   ? String(showList.currentItem.childCountValue) : ""
+                        },
+                        {
+                            label: "Episodes",
+                            value: (showList.currentItem && showList.currentItem.leafCountValue > 0)
+                                   ? (showList.currentItem.viewedLeafCountValue + "/"
+                                      + showList.currentItem.leafCountValue + " watched")
+                                   : ""
+                        }
+                    ]
+
+                    Row {
+                        spacing: root.vpx(6)
+                        visible: modelData.value !== ""
+
+                        Text {
+                            text: modelData.label + ":"
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            width: root.vpx(72)
+                        }
+
+                        Text {
+                            text: modelData.value
+                            color: Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── Right panel: show list (55% width) ────────────────────────────────
+        ListView {
+            id: showList
+
+            anchors {
+                top: parent.top
+                left: leftPanel.right
+                right: parent.right
+                bottom: parent.bottom
+                leftMargin: root.vpx(64)
+                rightMargin: root.vpx(16)
+            }
+
+            model: plex ? plex.showsModel : null
+            clip: true
+            focus: true
+            keyNavigationEnabled: true
+
+            // Smooth highlight movement
+            highlightMoveDuration: Theme.animDurationFast
+
+            // ── Infinite scroll ──────────────────────────────────────────────
+            onCurrentIndexChanged: {
+                var threshold = showList.count - 8
+                if (showList.count > 0 && showList.currentIndex >= threshold) {
+                    plex.loadMoreShows()
+                }
+            }
+
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    var item = showList.currentItem
+                    if (item) {
+                        showListView.showSelected(item.ratingKeyValue)
+                    }
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    showListView.back()
+                } else if (keys.isContext2(event)) {
+                    event.accepted = true
+                    sortFilterOverlay.open()
+                }
+            }
+
+            // ── Show row delegate ────────────────────────────────────────────
+            delegate: FocusScope {
+                id: rowRoot
+
+                // Expose model values so the left panel and key handler can read them.
+                readonly property string ratingKeyValue: model.ratingKey
+                readonly property string titleValue: model.title || ""
+                readonly property int yearValue: model.year || 0
+                readonly property string posterLocalValue: model.posterLocal || ""
+                readonly property real audienceRatingValue: model.audienceRating || 0
+                readonly property int childCountValue: model.childCount || 0
+                readonly property int leafCountValue: model.leafCount || 0
+                readonly property int viewedLeafCountValue: model.viewedLeafCount || 0
+
+                width: showList.width
+                height: root.vpx(40)
+
+                // Background highlight for the current item
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: rowRoot.ListView.isCurrentItem ? 1.0 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
                     }
                 }
 
-                // ── Poster image area ─────────────────────────────────────────
-                Item {
-                    id: posterArea
-
-                    anchors {
-                        top: parent.top
-                        left: parent.left
-                        right: parent.right
-                    }
-                    // Poster takes ~80% of the card height (portrait 2:3 ratio)
-                    height: Math.round(parent.height * 0.80)
-
-                    // Placeholder shown when there is no poster or while loading
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.darker(Theme.colorSecondary, 1.4)
-                        radius: root.vpx(Theme.focusRingRadius)
-                        visible: posterImage.status !== Image.Ready || model.posterLocal === ""
-
-                        Text {
-                            anchors.centerIn: parent
-                            width: parent.width - root.vpx(8)
-                            text: model.title || ""
-                            color: Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                            wrapMode: Text.Wrap
-                            horizontalAlignment: Text.AlignHCenter
-                            maximumLineCount: 3
-                            elide: Text.ElideRight
-                        }
-                    }
-
-                    Image {
-                        id: posterImage
-
-                        anchors.fill: parent
-                        source: model.posterLocal || ""
-                        fillMode: Image.PreserveAspectCrop
-                        asynchronous: true
-                        // Limit decoded resolution to the display size for performance
-                        sourceSize.width: root.vpx(movieGridView._targetCellW)
-                        sourceSize.height: Math.round(root.vpx(movieGridView._cellH) * 0.80)
-                        visible: status === Image.Ready && model.posterLocal !== ""
-                        clip: true
-                    }
-                }
-
-                // ── Title label ───────────────────────────────────────────────
+                // Show title + year (left-aligned)
                 Text {
-                    id: titleText
+                    id: titleLabel
 
                     anchors {
-                        top: posterArea.bottom
                         left: parent.left
-                        right: parent.right
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(4)
+                        right: progressLabel.left
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: root.vpx(12)
+                        rightMargin: root.vpx(8)
                     }
-                    text: model.title || ""
+                    text: {
+                        var t = model.title || ""
+                        var y = model.year || 0
+                        return y > 0 ? t + " (" + y + ")" : t
+                    }
                     color: Theme.colorText
                     font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    wrapMode: Text.NoWrap
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
                     elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignHCenter
                 }
 
-                // ── Year label ────────────────────────────────────────────────
+                // Episode progress (right-aligned): "8/12"
                 Text {
+                    id: progressLabel
+
                     anchors {
-                        top: titleText.bottom
-                        left: parent.left
                         right: parent.right
-                        leftMargin: root.vpx(6)
-                        rightMargin: root.vpx(6)
-                        topMargin: root.vpx(2)
+                        verticalCenter: parent.verticalCenter
+                        rightMargin: root.vpx(12)
                     }
-                    text: model.year > 0 ? "(" + model.year + ")" : ""
+                    text: model.leafCount > 0
+                          ? model.viewedLeafCount + "/" + model.leafCount
+                          : ""
                     color: Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    horizontalAlignment: Text.AlignHCenter
                 }
 
-                // Focus ring — visible when this tile is the current item
+                // Focus ring — visible when this row is current and list has focus
                 FocusRing {
-                    visible: tileRoot.GridView.isCurrentItem && movieGrid.activeFocus
+                    visible: rowRoot.ListView.isCurrentItem && showList.activeFocus
                 }
             }
         }
+
+        // ── Empty state (centered in full content area) ───────────────────────
+        // Shown when the list has no items and not loading.
+        Text {
+            anchors.centerIn: parent
+            visible: showList.count === 0 && !showListView._loading
+            text: "No shows found"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
     }
 
-    // ── Sort/Filter overlay ───────────────────────────────────────────────────
+    // ── Sort/Filter/View overlay ──────────────────────────────────────────────
     //
     // A semi-transparent panel that slides in from the top when Y is pressed.
     // Navigation:
-    //   Left/Right moves between sort options (top row).
-    //   Up/Down moves between sort row and genre list.
+    //   Left/Right moves between options in the focused section.
+    //   Up/Down moves between sections (Sort → Genre → View).
     //   A (Return) applies the selection.
     //   B (Escape) or Y dismisses without changing.
     FocusScope {
@@ -345,13 +429,13 @@ FocusScope {
         visible: false
         enabled: visible
 
-        // 0 = sort row focused, 1 = genre list focused, 2 = view row focused
+        // 0 = sort row, 1 = genre list, 2 = view row
         property int _section: 0
         // Index within sort options
         property int _sortIndex: 0
         // Index within genre list (0 = "All")
         property int _genreIndex: 0
-        // Index within view options (0=Grid, 1=List)
+        // Index within view options (0 = Grid, 1 = List)
         property int _viewIndex: 0
         // Genres loaded from backend
         property var _genres: []
@@ -366,19 +450,19 @@ FocusScope {
         ]
 
         function open() {
-            // Sync selection to current state
+            // Sync sort selection to current state
             var sortKeys = ["az", "za", "recent", "year_desc", "year_asc", "rating"]
-            var si = sortKeys.indexOf(movieGridView._currentSort)
+            var si = sortKeys.indexOf(showListView._currentSort)
             _sortIndex = si >= 0 ? si : 0
 
             // Load genres
-            _genres = plex.getMovieGenres()
+            _genres = plex.getShowGenres()
 
             // Sync genre selection
             _genreIndex = 0
-            if (movieGridView._currentGenreKey !== "") {
+            if (showListView._currentGenreKey !== "") {
                 for (var i = 0; i < _genres.length; i++) {
-                    if (_genres[i].key === movieGridView._currentGenreKey) {
+                    if (_genres[i].key === showListView._currentGenreKey) {
                         _genreIndex = i + 1  // +1 for "All" at index 0
                         break
                     }
@@ -387,7 +471,7 @@ FocusScope {
 
             // Sync view selection
             var viewKeys = ["grid", "list"]
-            var vi = viewKeys.indexOf(movieGridView._viewMode)
+            var vi = viewKeys.indexOf(showListView._viewMode)
             _viewIndex = vi >= 0 ? vi : 0
 
             _section = 0
@@ -397,7 +481,7 @@ FocusScope {
 
         function close() {
             visible = false
-            movieGrid.forceActiveFocus()
+            showList.forceActiveFocus()
         }
 
         // ── Backdrop ─────────────────────────────────────────────────────────
@@ -418,7 +502,7 @@ FocusScope {
             }
             // Height: title + sort row + genre flow + view row + padding
             // Use implicit height from content so wrapped genres don't clip
-            height: viewOptionsRow.y + viewOptionsRow.height + root.vpx(16)
+            height: viewRow.y + viewRow.height + root.vpx(16)
             color: Theme.colorSecondary
             opacity: 0.97
 
@@ -514,7 +598,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === movieGridView._currentSort
+                                var isActive = modelData.key === showListView._currentSort
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: {
@@ -578,7 +662,7 @@ FocusScope {
                             leftMargin: root.vpx(6)
                             verticalCenter: parent.verticalCenter
                         }
-                        text: (movieGridView._currentGenreKey === "" ? "✓ " : "") + "All"
+                        text: (showListView._currentGenreKey === "" ? "✓ " : "") + "All"
                         color: {
                             var isFocused = sortFilterOverlay._section === 1
                                          && sortFilterOverlay._genreIndex === 0
@@ -613,7 +697,7 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === movieGridView._currentGenreKey
+                                var isActive = modelData.key === showListView._currentGenreKey
                                 return (isActive ? "✓ " : "") + modelData.title
                             }
                             color: {
@@ -647,14 +731,14 @@ FocusScope {
 
             // ── View options row ──────────────────────────────────────────────
             Row {
-                id: viewOptionsRow
+                id: viewRow
                 anchors {
                     top: viewLabel.bottom
                     left: parent.left
                     leftMargin: root.vpx(16)
                     topMargin: root.vpx(4)
                 }
-                spacing: root.vpx(8)
+                spacing: root.vpx(6)
 
                 Repeater {
                     model: [
@@ -663,12 +747,13 @@ FocusScope {
                     ]
 
                     delegate: Rectangle {
-                        width: root.vpx(80)
+                        width: root.vpx(72)
                         height: root.vpx(32)
-                        color: sortFilterOverlay._section === 2
-                               && sortFilterOverlay._viewIndex === index
-                               ? Theme.colorPrimary
-                               : "transparent"
+                        color: {
+                            var isFocused = sortFilterOverlay._section === 2
+                                         && sortFilterOverlay._viewIndex === index
+                            return isFocused ? Theme.colorPrimary : "transparent"
+                        }
                         radius: root.vpx(Theme.focusRingRadius)
 
                         Behavior on color {
@@ -682,13 +767,14 @@ FocusScope {
                                 verticalCenter: parent.verticalCenter
                             }
                             text: {
-                                var isActive = modelData.key === movieGridView._viewMode
+                                var isActive = modelData.key === showListView._viewMode
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
-                            color: sortFilterOverlay._section === 2
-                                   && sortFilterOverlay._viewIndex === index
-                                   ? "#ffffff"
-                                   : Theme.colorText
+                            color: {
+                                var isFocused = sortFilterOverlay._section === 2
+                                             && sortFilterOverlay._viewIndex === index
+                                return isFocused ? "#ffffff" : Theme.colorText
+                            }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)
                         }
@@ -747,37 +833,47 @@ FocusScope {
 
             } else if (keys.isAccept(event)) {
                 event.accepted = true
-
-                // Apply sort
-                var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
-                movieGridView._currentSort = newSort
-                movieGridView._loading = true
-                plex.sortMovies(newSort)
-                if (settings) settings.setSortPlexMovies(newSort)
-
-                // Apply genre
-                if (sortFilterOverlay._genreIndex === 0) {
-                    movieGridView._currentGenreKey = ""
-                    movieGridView._currentGenreTitle = ""
-                    plex.filterByGenre("")
-                    if (settings) settings.setFilterPlexMovieGenre("")
-                } else {
-                    var genre = sortFilterOverlay._genres[sortFilterOverlay._genreIndex - 1]
-                    movieGridView._currentGenreKey = genre.key
-                    movieGridView._currentGenreTitle = genre.title
-                    plex.filterByGenre(genre.key)
-                    if (settings) settings.setFilterPlexMovieGenre(genre.key)
-                }
-
-                // Apply view mode
-                var viewKeys = ["grid", "list"]
-                var newView = viewKeys[sortFilterOverlay._viewIndex]
-                if (newView !== movieGridView._viewMode) {
-                    sortFilterOverlay.visible = false
-                    if (settings) settings.setWatchViewMode(newView)
-                    movieGridView.viewModeChanged(newView)
-                } else {
+                if (sortFilterOverlay._section === 0) {
+                    // Apply sort — dismiss overlay so user sees list with loading indicator
+                    var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
+                    showListView._currentSort = newSort
+                    showListView._loading = true
                     sortFilterOverlay.close()
+                    plex.sortShows(newSort)
+                    if (settings) settings.setSortPlexShows(newSort)
+                } else if (sortFilterOverlay._section === 1) {
+                    // Apply genre filter
+                    sortFilterOverlay.close()
+                    if (sortFilterOverlay._genreIndex === 0) {
+                        // "All" — clear filter
+                        showListView._currentGenreKey = ""
+                        showListView._currentGenreTitle = ""
+                        showListView._loading = true
+                        plex.filterShowsByGenre("")
+                        if (settings) settings.setFilterPlexShowGenre("")
+                    } else {
+                        var gi = sortFilterOverlay._genreIndex - 1
+                        var genre = sortFilterOverlay._genres[gi]
+                        showListView._currentGenreKey = genre.key
+                        showListView._currentGenreTitle = genre.title
+                        showListView._loading = true
+                        plex.filterShowsByGenre(genre.key)
+                        if (settings) settings.setFilterPlexShowGenre(genre.key)
+                    }
+                } else {
+                    // Apply view mode
+                    var viewKeys = ["grid", "list"]
+                    var newView = viewKeys[sortFilterOverlay._viewIndex]
+                    if (newView !== showListView._viewMode) {
+                        // View mode is changing — hide overlay but don't grab focus locally.
+                        // WatchScreen will route focus to the newly visible view.
+                        sortFilterOverlay.visible = false
+                        if (settings) settings.setWatchViewMode(newView)
+                        showListView.viewModeChanged(newView)
+                    } else {
+                        // Same view mode — close normally (focus stays local).
+                        sortFilterOverlay.close()
+                    }
                 }
             }
         }
@@ -785,18 +881,19 @@ FocusScope {
 
     Component.onCompleted: {
         if (settings) {
-            var savedSort = settings.sortPlexMovies
-            var savedGenre = settings.filterPlexMovieGenre
+            var savedSort = settings.sortPlexShows
+            var savedGenre = settings.filterPlexShowGenre
             if (savedSort) {
                 _currentSort = savedSort
                 _loading = true
-                plex.sortMovies(savedSort)
+                plex.sortShows(savedSort)
             }
             if (savedGenre) {
                 _currentGenreKey = savedGenre
                 _loading = true
-                plex.filterByGenre(savedGenre)
+                plex.filterShowsByGenre(savedGenre)
             }
+            // Do NOT overwrite _viewMode — it is set by WatchScreen.
         }
     }
 }

@@ -20,8 +20,14 @@ FocusScope {
     // ratingKey is the Plex ratingKey for the selected show.
     signal showSelected(string ratingKey)
 
+    // Emitted when the user changes the view mode via the sort/filter overlay.
+    signal viewModeChanged(string mode)
+
     // Display name of the currently selected library (set by WatchScreen).
     property string systemName: ""
+
+    // View mode ("grid" or "list") — set by WatchScreen; do not overwrite in onCompleted
+    property string _viewMode: "grid"
 
     // ── Sort/filter state (mirrors backend state for display) ──────────────────
     property string _currentSort: ""
@@ -355,12 +361,14 @@ FocusScope {
         visible: false
         enabled: visible
 
-        // 0 = sort row focused, 1 = genre list focused
+        // 0 = sort row focused, 1 = genre list focused, 2 = view row focused
         property int _section: 0
         // Index within sort options
         property int _sortIndex: 0
         // Index within genre list (0 = "All")
         property int _genreIndex: 0
+        // Index within view options (0=Grid, 1=List)
+        property int _viewIndex: 0
         // Genres loaded from backend
         property var _genres: []
 
@@ -393,6 +401,11 @@ FocusScope {
                 }
             }
 
+            // Sync view selection
+            var viewKeys = ["grid", "list"]
+            var vi = viewKeys.indexOf(showGridView._viewMode)
+            _viewIndex = vi >= 0 ? vi : 0
+
             _section = 0
             visible = true
             forceActiveFocus()
@@ -419,9 +432,9 @@ FocusScope {
                 left: parent.left
                 right: parent.right
             }
-            // Height: title + sort row + genre flow (wraps to multiple rows) + padding
+            // Height: title + sort row + genre flow + view row + padding
             // Use implicit height from content so wrapped genres don't clip
-            height: genreRow.y + genreRow.height + root.vpx(16)
+            height: viewOptionsRow.y + viewOptionsRow.height + root.vpx(16)
             color: Theme.colorSecondary
             opacity: 0.97
 
@@ -632,6 +645,72 @@ FocusScope {
                     }
                 }
             }
+
+            // ── View section label ────────────────────────────────────────────
+            Text {
+                id: viewLabel
+                anchors {
+                    top: genreRow.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(10)
+                }
+                text: "View"
+                color: sortFilterOverlay._section === 2 ? Theme.colorText : Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            // ── View options row ──────────────────────────────────────────────
+            Row {
+                id: viewOptionsRow
+                anchors {
+                    top: viewLabel.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(4)
+                }
+                spacing: root.vpx(8)
+
+                Repeater {
+                    model: [
+                        { key: "grid", label: "Grid" },
+                        { key: "list", label: "List" }
+                    ]
+
+                    delegate: Rectangle {
+                        width: root.vpx(80)
+                        height: root.vpx(32)
+                        color: sortFilterOverlay._section === 2
+                               && sortFilterOverlay._viewIndex === index
+                               ? Theme.colorPrimary
+                               : "transparent"
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: root.vpx(6)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: {
+                                var isActive = modelData.key === showGridView._viewMode
+                                return (isActive ? "✓ " : "") + modelData.label
+                            }
+                            color: sortFilterOverlay._section === 2
+                                   && sortFilterOverlay._viewIndex === index
+                                   ? "#ffffff"
+                                   : Theme.colorText
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        }
+                    }
+                }
+            }
         }
 
         // ── Key handling ─────────────────────────────────────────────────────
@@ -639,6 +718,7 @@ FocusScope {
             var sortCount = sortFilterOverlay._sortOptions.length
             // +1 for "All"
             var genreCount = sortFilterOverlay._genres.length + 1
+            var viewCount = 2
 
             if (keys.isCancel(event) || keys.isContext2(event)) {
                 // B or Y — dismiss without applying
@@ -647,22 +727,25 @@ FocusScope {
 
             } else if (event.key === Qt.Key_Up) {
                 event.accepted = true
-                if (sortFilterOverlay._section === 1)
-                    sortFilterOverlay._section = 0
+                if (sortFilterOverlay._section > 0)
+                    sortFilterOverlay._section -= 1
 
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
-                if (sortFilterOverlay._section === 0)
-                    sortFilterOverlay._section = 1
+                if (sortFilterOverlay._section < 2)
+                    sortFilterOverlay._section += 1
 
             } else if (event.key === Qt.Key_Left) {
                 event.accepted = true
                 if (sortFilterOverlay._section === 0) {
                     if (sortFilterOverlay._sortIndex > 0)
                         sortFilterOverlay._sortIndex -= 1
-                } else {
+                } else if (sortFilterOverlay._section === 1) {
                     if (sortFilterOverlay._genreIndex > 0)
                         sortFilterOverlay._genreIndex -= 1
+                } else {
+                    if (sortFilterOverlay._viewIndex > 0)
+                        sortFilterOverlay._viewIndex -= 1
                 }
 
             } else if (event.key === Qt.Key_Right) {
@@ -670,40 +753,47 @@ FocusScope {
                 if (sortFilterOverlay._section === 0) {
                     if (sortFilterOverlay._sortIndex < sortCount - 1)
                         sortFilterOverlay._sortIndex += 1
-                } else {
+                } else if (sortFilterOverlay._section === 1) {
                     if (sortFilterOverlay._genreIndex < genreCount - 1)
                         sortFilterOverlay._genreIndex += 1
+                } else {
+                    if (sortFilterOverlay._viewIndex < viewCount - 1)
+                        sortFilterOverlay._viewIndex += 1
                 }
 
             } else if (keys.isAccept(event)) {
                 event.accepted = true
-                // Dismiss overlay immediately so user sees the grid with loading indicator
-                sortFilterOverlay.close()
-                if (sortFilterOverlay._section === 0) {
-                    // Apply sort
-                    var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
-                    showGridView._currentSort = newSort
-                    showGridView._loading = true
-                    plex.sortShows(newSort)
-                    if (settings) settings.setSortPlexShows(newSort)
+
+                // Apply sort
+                var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
+                showGridView._currentSort = newSort
+                showGridView._loading = true
+                plex.sortShows(newSort)
+                if (settings) settings.setSortPlexShows(newSort)
+
+                // Apply genre
+                if (sortFilterOverlay._genreIndex === 0) {
+                    showGridView._currentGenreKey = ""
+                    showGridView._currentGenreTitle = ""
+                    plex.filterShowsByGenre("")
+                    if (settings) settings.setFilterPlexShowGenre("")
                 } else {
-                    // Apply genre filter
-                    if (sortFilterOverlay._genreIndex === 0) {
-                        // "All" — clear filter
-                        showGridView._currentGenreKey = ""
-                        showGridView._currentGenreTitle = ""
-                        showGridView._loading = true
-                        plex.filterShowsByGenre("")
-                        if (settings) settings.setFilterPlexShowGenre("")
-                    } else {
-                        var gi = sortFilterOverlay._genreIndex - 1
-                        var genre = sortFilterOverlay._genres[gi]
-                        showGridView._currentGenreKey = genre.key
-                        showGridView._currentGenreTitle = genre.title
-                        showGridView._loading = true
-                        plex.filterShowsByGenre(genre.key)
-                        if (settings) settings.setFilterPlexShowGenre(genre.key)
-                    }
+                    var genre = sortFilterOverlay._genres[sortFilterOverlay._genreIndex - 1]
+                    showGridView._currentGenreKey = genre.key
+                    showGridView._currentGenreTitle = genre.title
+                    plex.filterShowsByGenre(genre.key)
+                    if (settings) settings.setFilterPlexShowGenre(genre.key)
+                }
+
+                // Apply view mode
+                var viewKeys = ["grid", "list"]
+                var newView = viewKeys[sortFilterOverlay._viewIndex]
+                if (newView !== showGridView._viewMode) {
+                    sortFilterOverlay.visible = false
+                    if (settings) settings.setWatchViewMode(newView)
+                    showGridView.viewModeChanged(newView)
+                } else {
+                    sortFilterOverlay.close()
                 }
             }
         }

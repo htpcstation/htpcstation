@@ -50,6 +50,9 @@ FocusScope {
     // ratingKey of the show selected for detail view.
     property string selectedShowRatingKey: ""
 
+    // Current view mode: "grid" or "list"
+    property string _viewMode: "grid"
+
     // Track whether we have already called plex.refresh() to avoid re-fetching
     // every time the user navigates back to this tab.
     property bool _refreshed: false
@@ -82,6 +85,7 @@ FocusScope {
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: _routeFocus()
+    on_ViewModeChanged: { if (currentView === "content") _routeFocus() }
     onActiveFocusChanged: {
         if (activeFocus) {
             if (!_refreshed || _libraryEntries.length === 0) {
@@ -98,11 +102,14 @@ FocusScope {
             libraryList.forceActiveFocus()
         } else if (currentView === "content") {
             if (selectedLibraryType === "movie") {
-                movieGrid.forceActiveFocus()
+                if (_viewMode === "list") movieList.forceActiveFocus()
+                else movieGrid.forceActiveFocus()
             } else if (selectedLibraryType === "show") {
-                showGrid.forceActiveFocus()
+                if (_viewMode === "list") showList.forceActiveFocus()
+                else showGrid.forceActiveFocus()
             } else if (selectedLibraryType === "ondeck") {
-                onDeckGrid.forceActiveFocus()
+                if (_viewMode === "list") onDeckList.forceActiveFocus()
+                else onDeckGrid.forceActiveFocus()
             } else {
                 contentPlaceholder.forceActiveFocus()
             }
@@ -337,9 +344,11 @@ FocusScope {
         anchors.fill: parent
         visible: watchScreen.currentView === "content"
                  && watchScreen.selectedLibraryType === "movie"
+                 && watchScreen._viewMode === "grid"
         focus: false
 
         systemName: watchScreen.selectedLibraryTitle
+        _viewMode: watchScreen._viewMode
 
         onMovieSelected: (ratingKey, index) => {
             watchScreen.selectedRatingKey = ratingKey
@@ -351,6 +360,8 @@ FocusScope {
         onBack: {
             watchScreen.currentView = "libraries"
         }
+
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
 
     // ── Movie detail view (task 017) ──────────────────────────────────────────
@@ -403,9 +414,11 @@ FocusScope {
         anchors.fill: parent
         visible: watchScreen.currentView === "content"
                  && watchScreen.selectedLibraryType === "show"
+                 && watchScreen._viewMode === "grid"
         focus: false
 
         systemName: watchScreen.selectedLibraryTitle
+        _viewMode: watchScreen._viewMode
 
         onShowSelected: (ratingKey) => {
             watchScreen.selectedShowRatingKey = ratingKey
@@ -415,6 +428,8 @@ FocusScope {
         onBack: {
             watchScreen.currentView = "libraries"
         }
+
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
 
     // ── Show detail view (task 018) ───────────────────────────────────────────
@@ -444,7 +459,10 @@ FocusScope {
         anchors.fill: parent
         visible: watchScreen.currentView === "content"
                  && watchScreen.selectedLibraryType === "ondeck"
+                 && watchScreen._viewMode === "grid"
         focus: false
+
+        _viewMode: watchScreen._viewMode
 
         onItemSelected: (ratingKey) => {
             plex.launchContent(ratingKey)
@@ -453,6 +471,71 @@ FocusScope {
         onBack: {
             watchScreen.currentView = "libraries"
         }
+
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
+    }
+
+    // ── Movie list view ───────────────────────────────────────────────────────
+    PlexMovieList {
+        id: movieList
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "movie"
+                 && watchScreen._viewMode === "list"
+        focus: false
+
+        systemName: watchScreen.selectedLibraryTitle
+        _viewMode: watchScreen._viewMode
+
+        onMovieSelected: (ratingKey, index) => {
+            watchScreen.selectedRatingKey = ratingKey
+            watchScreen.selectedMovieIndex = index
+            watchScreen.selectedMovieData = plex.getMovie(ratingKey)
+            watchScreen.currentView = "detail"
+        }
+
+        onBack: watchScreen.currentView = "libraries"
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
+    }
+
+    // ── Show list view ────────────────────────────────────────────────────────
+    PlexShowList {
+        id: showList
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "show"
+                 && watchScreen._viewMode === "list"
+        focus: false
+
+        systemName: watchScreen.selectedLibraryTitle
+        _viewMode: watchScreen._viewMode
+
+        onShowSelected: (ratingKey) => {
+            watchScreen.selectedShowRatingKey = ratingKey
+            watchScreen.currentView = "detail"
+        }
+
+        onBack: watchScreen.currentView = "libraries"
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
+    }
+
+    // ── On-deck list view ─────────────────────────────────────────────────────
+    PlexOnDeckList {
+        id: onDeckList
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "ondeck"
+                 && watchScreen._viewMode === "list"
+        focus: false
+
+        _viewMode: watchScreen._viewMode
+
+        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onBack: watchScreen.currentView = "libraries"
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
 
     // ── Content placeholder (non-movie, non-show, non-ondeck libraries) ───────
@@ -482,5 +565,11 @@ FocusScope {
         }
 
         FocusRing {}
+    }
+
+    Component.onCompleted: {
+        if (settings) {
+            _viewMode = settings.watchViewMode || "grid"
+        }
     }
 }
