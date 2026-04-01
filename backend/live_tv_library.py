@@ -323,32 +323,45 @@ class LiveTvLibrary(QObject):
         grid_start = now - 43200   # 12 hours back
         grid_end = now + 7200      # 2 hours ahead
 
-        # Step 1: discover channels from first page (no channel filter)
-        discovery_params = {
-            "type": "1",
-            "gridStartTime": grid_start,
-            "gridEndTime": grid_end,
-            "X-Plex-Container-Start": 0,
-            "X-Plex-Container-Size": _EPG_PAGE_SIZE,
-        }
-        discovery_data = client._get(f"/{epg_provider_key}/grid", params=discovery_params)
-        if discovery_data is None:
-            return []
-
-        discovery_items = discovery_data.get("MediaContainer", {}).get("Metadata", [])
-
-        # Extract unique channel gridKeys in order of first appearance
+        # Step 1: paginate the full grid to discover ALL channel gridKeys.
+        # Each page may introduce new channels — we must read all pages before
+        # we know the complete channel list.
         seen_grid_keys: list[str] = []
         seen_set: set[str] = set()
-        for item in discovery_items:
-            media = item.get("Media", [{}])[0]
-            gk = media.get("gridKey", "")
-            if gk and gk not in seen_set:
-                seen_grid_keys.append(gk)
-                seen_set.add(gk)
+        disc_start = 0
+
+        while True:
+            discovery_params = {
+                "type": "1",
+                "gridStartTime": grid_start,
+                "gridEndTime": grid_end,
+                "X-Plex-Container-Start": disc_start,
+                "X-Plex-Container-Size": _EPG_PAGE_SIZE,
+            }
+            discovery_data = client._get(f"/{epg_provider_key}/grid", params=discovery_params)
+            if discovery_data is None:
+                break
+            container = discovery_data.get("MediaContainer", {})
+            discovery_items = container.get("Metadata", [])
+            if not discovery_items:
+                break
+
+            for item in discovery_items:
+                media = item.get("Media", [{}])[0]
+                gk = media.get("gridKey", "")
+                if gk and gk not in seen_set:
+                    seen_grid_keys.append(gk)
+                    seen_set.add(gk)
+
+            total_size = int(container.get("totalSize", container.get("size", 0)))
+            disc_start += len(discovery_items)
+            if disc_start >= total_size or len(discovery_items) < _EPG_PAGE_SIZE:
+                break
 
         if not seen_grid_keys:
             return []
+
+        logger.info("LiveTvLibrary: discovered %d channels", len(seen_grid_keys))
 
         # Step 2: fetch per-channel schedules in parallel (5 programs each)
         per_channel_params = {
