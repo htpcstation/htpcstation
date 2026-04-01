@@ -419,84 +419,60 @@ class TestBuildChannels:
 # ---------------------------------------------------------------------------
 
 
-class TestFetchChannelsPagination:
-    def test_fetches_all_pages_when_total_exceeds_page_size(self) -> None:
-        """Pagination: fetches all pages when totalSize > page_size."""
-        from backend.live_tv_library import _EPG_PAGE_SIZE
+class TestFetchChannelsParallel:
+    def test_discovery_then_per_channel_fetch(self) -> None:
+        """_fetch_channels does a discovery request then per-channel requests in parallel."""
         lib, client, _ = _make_library()
-
         now = _NOW
 
-        # Build 150 programs across 2 channels (75 each)
-        page1_items = [
-            _make_program(
-                f"ch{i % 2 + 1}", f"{i % 2 + 1}.1", f"CH{i % 2 + 1}", "", f"gk{i % 2 + 1}",
-                i % 2 + 1,
-                f"Show {i}",
-                begins_at=now - 1800 + i * 60,
-                ends_at=now + 1800 + i * 60,
-            )
-            for i in range(_EPG_PAGE_SIZE)
+        # Discovery page returns 2 channels
+        discovery_items = [
+            _make_program("ch1", "7.1", "ABC", "", "gk1", 1, "Show A",
+                          begins_at=now - 1800, ends_at=now + 1800),
+            _make_program("ch2", "7.2", "Bounce", "", "gk2", 2, "Show B",
+                          begins_at=now - 900, ends_at=now + 2700),
         ]
-        page2_items = [
-            _make_program(
-                f"ch{i % 2 + 1}", f"{i % 2 + 1}.1", f"CH{i % 2 + 1}", "", f"gk{i % 2 + 1}",
-                i % 2 + 1,
-                f"Show {i + _EPG_PAGE_SIZE}",
-                begins_at=now + 1800 + i * 60,
-                ends_at=now + 5400 + i * 60,
-            )
-            for i in range(50)
-        ]
-
-        call_count = [0]
 
         def fake_get(path, params=None):
-            call_count[0] += 1
-            if params and params.get("X-Plex-Container-Start", 0) == 0:
-                return _make_grid_response(page1_items, total_size=150)
-            else:
-                return _make_grid_response(page2_items, total_size=150)
+            if params and "channelGridKey" in params:
+                gk = params["channelGridKey"]
+                if gk == "gk1":
+                    return _make_grid_response([discovery_items[0]], total_size=1)
+                if gk == "gk2":
+                    return _make_grid_response([discovery_items[1]], total_size=1)
+                return _make_grid_response([], total_size=0)
+            # Discovery request
+            return _make_grid_response(discovery_items, total_size=2)
 
         client._get.side_effect = fake_get
 
         with patch("backend.live_tv_library.time.time", return_value=now):
             channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
 
-        # Should have made 2 API calls (page 1 and page 2)
-        assert call_count[0] == 2
-        # Should have 2 channels
         assert len(channels) == 2
+        vcns = {ch.vcn for ch in channels}
+        assert "7.1" in vcns
+        assert "7.2" in vcns
 
-    def test_stops_pagination_when_no_items_returned(self) -> None:
-        """Pagination stops when an empty page is returned."""
+    def test_returns_empty_when_discovery_fails(self) -> None:
+        """Returns [] when the discovery request fails."""
         lib, client, _ = _make_library()
+        client._get.return_value = None
 
-        now = _NOW
-        items = [
-            _make_program(
-                "ch1", "7.1", "ABC", "", "gk1", 1,
-                "Show",
-                begins_at=now - 1800,
-                ends_at=now + 1800,
-            ),
-        ]
-
-        call_count = [0]
-
-        def fake_get(path, params=None):
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return _make_grid_response(items, total_size=1)
-            return _make_grid_response([], total_size=1)
-
-        client._get.side_effect = fake_get
-
-        with patch("backend.live_tv_library.time.time", return_value=now):
+        with patch("backend.live_tv_library.time.time", return_value=_NOW):
             channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
 
-        assert call_count[0] == 1
-        assert len(channels) == 1
+        assert channels == []
+
+    def test_returns_empty_when_discovery_has_no_items(self) -> None:
+        """Returns [] when the discovery page has no items."""
+        lib, client, _ = _make_library()
+        client._get.return_value = _make_grid_response([], total_size=0)
+
+        with patch("backend.live_tv_library.time.time", return_value=_NOW):
+            channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
+
+        assert channels == []
 
 
 # ---------------------------------------------------------------------------

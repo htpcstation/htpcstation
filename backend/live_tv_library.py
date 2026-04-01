@@ -307,33 +307,75 @@ class LiveTvLibrary(QObject):
         epg_provider_key: str,
         hdhomerun_host: str,
     ) -> list[LiveTvChannel]:
-        """Fetch all channels and programs from the EPG grid (paginated)."""
+        """Fetch all channels and programs from the EPG grid.
+
+        Strategy for speed:
+        1. Fetch one page of the grid (no channel filter) to discover all channel
+           gridKeys and their metadata.
+        2. Fetch each channel's schedule in parallel (5 programs per channel),
+           using channelGridKey to filter server-side.
+
+        gridStartTime is set 12 hours in the past so that long-running programs
+        (movies, marathons) that started before now are included.
+        gridEndTime is set 2 hours ahead — enough to always have a "next" program.
+        """
         now = int(time.time())
-        grid_end = now + 10800  # 3 hours
+        grid_start = now - 43200   # 12 hours back
+        grid_end = now + 7200      # 2 hours ahead
 
-        all_items: list[dict] = []
-        start = 0
+        # Step 1: discover channels from first page (no channel filter)
+        discovery_params = {
+            "type": "1",
+            "gridStartTime": grid_start,
+            "gridEndTime": grid_end,
+            "X-Plex-Container-Start": 0,
+            "X-Plex-Container-Size": _EPG_PAGE_SIZE,
+        }
+        discovery_data = client._get(f"/{epg_provider_key}/grid", params=discovery_params)
+        if discovery_data is None:
+            return []
 
-        while True:
-            params = {
-                "type": "1",
-                "gridStartTime": now,
-                "gridEndTime": grid_end,
-                "X-Plex-Container-Start": start,
-                "X-Plex-Container-Size": _EPG_PAGE_SIZE,
-            }
+        discovery_items = discovery_data.get("MediaContainer", {}).get("Metadata", [])
+
+        # Extract unique channel gridKeys in order of first appearance
+        seen_grid_keys: list[str] = []
+        seen_set: set[str] = set()
+        for item in discovery_items:
+            media = item.get("Media", [{}])[0]
+            gk = media.get("gridKey", "")
+            if gk and gk not in seen_set:
+                seen_grid_keys.append(gk)
+                seen_set.add(gk)
+
+        if not seen_grid_keys:
+            return []
+
+        # Step 2: fetch per-channel schedules in parallel (5 programs each)
+        per_channel_params = {
+            "type": "1",
+            "gridStartTime": grid_start,
+            "gridEndTime": grid_end,
+            "X-Plex-Container-Start": 0,
+            "X-Plex-Container-Size": 5,
+        }
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def fetch_channel(grid_key: str) -> list[dict]:
+            params = {**per_channel_params, "channelGridKey": grid_key}
             data = client._get(f"/{epg_provider_key}/grid", params=params)
             if data is None:
-                break
-            container = data.get("MediaContainer", {})
-            items = container.get("Metadata", [])
-            if not items:
-                break
-            all_items.extend(items)
-            total_size = int(container.get("totalSize", container.get("size", 0)))
-            start += len(items)
-            if start >= total_size or len(items) < _EPG_PAGE_SIZE:
-                break
+                return []
+            return data.get("MediaContainer", {}).get("Metadata", [])
+
+        all_items: list[dict] = []
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(fetch_channel, gk): gk for gk in seen_grid_keys}
+            for future in as_completed(futures):
+                try:
+                    all_items.extend(future.result())
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("LiveTvLibrary: channel fetch failed: %s", exc)
 
         return self._build_channels(all_items, hdhomerun_host, now)
 
@@ -404,6 +446,8 @@ class LiveTvLibrary(QObject):
                 prog_title = prog.get("title", "")
                 prog_thumb = prog.get("thumb", "")
 
+                # A program is current if it spans now, OR if Plex explicitly
+                # marks it onAir (handles edge cases where timestamps are slightly off)
                 is_current = begins_at <= now < ends_at
 
                 if is_current or prog_on_air:
@@ -412,8 +456,11 @@ class LiveTvLibrary(QObject):
                     current_end = ends_at
                     current_thumb = prog_thumb
                     on_air = True
-                elif begins_at > now and not next_program:
-                    # First program that starts after now is the "next" program
+                elif begins_at >= now and not next_program:
+                    # Programs are sorted by beginsAt — the first one that starts
+                    # at or after now (and isn't current) is the next program.
+                    # Using >= instead of > handles the edge case where a program
+                    # starts exactly at now but wasn't caught by is_current.
                     next_program = prog_title
                     next_start = begins_at
                     next_end = ends_at
