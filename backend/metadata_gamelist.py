@@ -41,6 +41,7 @@ class GameMetadata:
     release_date: str = ""
     rating: float = 0.0
     image_path: str = ""
+    favorite: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +176,8 @@ def write_game_metadata(directory: Path, key: str, metadata: GameMetadata) -> No
     if metadata.rating != 0.0:
         _set_or_create_text(target, "rating", str(metadata.rating))
     _merge_field(target, "image", metadata.image_path)
+    # Always write favorite (True or False) so toggling off persists correctly
+    _set_or_create_text(target, "favorite", "true" if metadata.favorite else "false")
 
     try:
         tree.write(gamelist_file, encoding="utf-8", xml_declaration=True)
@@ -205,6 +208,8 @@ def _parse_game_element(elem: ET.Element, directory: Path) -> GameMetadata:
     if image_raw:
         image_path = str(_resolve_path(directory, image_raw))
 
+    favorite = _text(elem, "favorite", "false").lower() == "true"
+
     return GameMetadata(
         name=_text(elem, "name"),
         app_id=_text(elem, "appid"),
@@ -216,6 +221,7 @@ def _parse_game_element(elem: ET.Element, directory: Path) -> GameMetadata:
         release_date=_text(elem, "releasedate"),
         rating=rating,
         image_path=image_path,
+        favorite=favorite,
     )
 
 

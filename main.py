@@ -219,9 +219,13 @@ def main() -> None:
                 "hostAddress": host_address,
             })
         steam.setMoonlightRecentlyPlayed(recent_items)
+        steam.setMoonlightFavoriteCount(moonlight.favoriteCount)
 
     moonlight.hostsChanged.connect(_on_moonlight_hosts_changed)
     moonlight.loadingChanged.connect(_on_moonlight_hosts_changed)
+    moonlight.favoriteToggled.connect(
+        lambda _: steam.setMoonlightFavoriteCount(moonlight.favoriteCount)
+    )
 
     # Detect real keyboard input to switch hint labels.
     # Gamepad input is tracked by GamepadManager calling keys.setGamepadInput().

@@ -22,7 +22,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from backend.metadata_gamelist import read_gamelist, write_game_metadata
+from backend.metadata_gamelist import GameMetadata, read_gamelist, write_game_metadata
 from backend.moonlight_play_history import clear_history
 from backend.steam_config import get_steam_dir
 from backend.steam_metadata import fetch_steam_metadata
@@ -51,6 +51,7 @@ class SteamGameListModel(QAbstractListModel):
     ImageLocalRole = Qt.ItemDataRole.UserRole + 3
     LastPlayedRole = Qt.ItemDataRole.UserRole + 4
     SizeOnDiskRole = Qt.ItemDataRole.UserRole + 5
+    FavoriteRole = Qt.ItemDataRole.UserRole + 6
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -81,6 +82,8 @@ class SteamGameListModel(QAbstractListModel):
             return game.last_played
         if role == self.SizeOnDiskRole:
             return game.size_on_disk
+        if role == self.FavoriteRole:
+            return game.favorite
         if role == Qt.ItemDataRole.DisplayRole:
             return game.name
         return None
@@ -92,6 +95,7 @@ class SteamGameListModel(QAbstractListModel):
             self.ImageLocalRole: b"imageLocal",
             self.LastPlayedRole: b"lastPlayed",
             self.SizeOnDiskRole: b"sizeOnDisk",
+            self.FavoriteRole: b"favorite",
         }
 
     @Slot(int, result=str)
@@ -193,6 +197,7 @@ class SteamLibrary(QObject):
     gamesModelChanged = Signal()
     gameRunning = Signal()
     gameStopped = Signal()
+    favoriteToggled = Signal(bool)
 
     # Public signal: emitted when metadata is available for a game.
     # QML connects to this to update the detail view.
@@ -219,6 +224,9 @@ class SteamLibrary(QObject):
 
         # Moonlight sources injected by setMoonlightSources
         self._moonlight_sources: list[dict] = []
+
+        # Moonlight favorite count injected by setMoonlightFavoriteCount
+        self._moonlight_favorite_count: int = 0
 
         # Reference to MoonlightLibrary for dispatching Moonlight launches
         self._moonlight_library: Optional["MoonlightLibrary"] = None
@@ -273,6 +281,12 @@ class SteamLibrary(QObject):
         except Exception as exc:  # noqa: BLE001
             logger.warning("SteamLibrary.refresh: failed to load metadata cache: %s", exc)
             self._metadata_cache = {}
+
+        # Populate favorite flag on each game from the metadata cache
+        for game in self._all_games:
+            cached = self._metadata_cache.get(game.app_id)
+            if cached is not None:
+                game.favorite = cached.favorite
 
         # Rebuild sources model with updated game count
         self._rebuild_sources_model()
@@ -474,16 +488,110 @@ class SteamLibrary(QObject):
         self._rebuild_sources_model()
         logger.info("SteamLibrary.clearRecentlyPlayed: cleared Moonlight play history")
 
+    @Slot(int)
+    def toggleFavorite(self, index: int) -> None:
+        """Toggle the favorite status of the game at *index* in _current_games.
+
+        Flips game.favorite, writes back to gamelist.xml, updates the in-memory
+        cache, emits favoriteToggled, and rebuilds the sources model so the
+        "PC Favorites" count updates immediately.
+        """
+        if not (0 <= index < len(self._current_games)):
+            logger.warning("SteamLibrary.toggleFavorite: index %d out of range", index)
+            return
+
+        game = self._current_games[index]
+        new_value = not game.favorite
+        game.favorite = new_value
+
+        # _all_games and _current_games share the same SteamGame objects after
+        # _apply_sort (which does list(self._current_games) — shallow copy).
+        # If the object is not in _all_games (shouldn't happen), update it there too.
+        for g in self._all_games:
+            if g.app_id == game.app_id:
+                g.favorite = new_value
+                break
+
+        # Build metadata to write — merge with existing cache entry if available
+        cached = self._metadata_cache.get(game.app_id)
+        if cached is not None:
+            cached.favorite = new_value
+            metadata = cached
+        else:
+            metadata = GameMetadata(name=game.name, app_id=game.app_id, favorite=new_value)
+            self._metadata_cache[game.app_id] = metadata
+
+        try:
+            write_game_metadata(get_steam_dir(), game.app_id, metadata)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "SteamLibrary.toggleFavorite: failed to write metadata for app_id=%s: %s",
+                game.app_id,
+                exc,
+            )
+
+        self.favoriteToggled.emit(new_value)
+        self._rebuild_sources_model()
+
+    @Slot(result="QVariant")
+    def getFavorites(self) -> list:
+        """Return all favorited Steam games sorted A-Z.
+
+        Returns a list of dicts in the same shape as getGame().
+        Used by the Favorites source view.
+        """
+        favorites = sorted(
+            [g for g in self._all_games if g.favorite],
+            key=lambda g: g.name.lower(),
+        )
+        result = []
+        for game in favorites:
+            entry = {
+                "appId": game.app_id,
+                "name": game.name,
+                "source": "steam",
+                "installDir": game.install_dir,
+                "lastPlayed": game.last_played,
+                "sizeOnDisk": game.size_on_disk,
+                "imagePath": game.image_path,
+                "hostAddress": "",
+                "favorite": game.favorite,
+            }
+            cached = self._metadata_cache.get(game.app_id)
+            if cached is not None:
+                entry["description"] = cached.description
+                entry["developer"] = cached.developer
+                entry["publisher"] = cached.publisher
+                entry["genre"] = cached.genre
+                entry["players"] = cached.players
+                entry["releaseDate"] = cached.release_date
+                entry["rating"] = cached.rating
+            result.append(entry)
+        return result
+
+    @Slot(int)
+    def setMoonlightFavoriteCount(self, count: int) -> None:
+        """Inject the Moonlight favorite count for the "PC Favorites" source entry.
+
+        Called by main.py whenever MoonlightLibrary.hostsChanged fires or a
+        Moonlight favorite is toggled.
+        """
+        self._moonlight_favorite_count = count
+        self._rebuild_sources_model()
+
     @Slot(str)
     def selectSource(self, source: str) -> None:
         """Select which source to display.
 
-        Currently only "steam" is supported.  Rebuilds gamesModel.
+        Supports "steam", "favorites", and Moonlight sources.  Rebuilds gamesModel.
         """
         self._current_source = source
-        # Future: filter self._all_games by source when GOG/Epic are added.
-        # For now, all games are from Steam.
-        self._current_games = list(self._all_games)
+        if source == "favorites":
+            self._current_games = [g for g in self._all_games if g.favorite]
+        else:
+            # Future: filter self._all_games by source when GOG/Epic are added.
+            # For now, all non-favorites sources show all Steam games.
+            self._current_games = list(self._all_games)
         self._apply_sort()
 
     @Slot(str)
@@ -553,7 +661,7 @@ class SteamLibrary(QObject):
     def _rebuild_sources_model(self) -> None:
         """Rebuild the sources model from current state and emit sourcesModelChanged.
 
-        Order: "Recently Played" (if any) → "Steam" → Moonlight sources.
+        Order: "Recently Played" (if any) → "PC Favorites" (if any) → "Steam" → Moonlight sources.
         """
         sources: list[dict] = []
 
@@ -564,6 +672,16 @@ class SteamLibrary(QObject):
                 "name": "Recently Played",
                 "gameCount": recent_count,
                 "source": "recent",
+            })
+
+        # "PC Favorites" entry — only shown when there are favorited games
+        steam_favorite_count = sum(1 for g in self._all_games if g.favorite)
+        total_favorite_count = steam_favorite_count + self._moonlight_favorite_count
+        if total_favorite_count > 0:
+            sources.append({
+                "name": "PC Favorites",
+                "gameCount": total_favorite_count,
+                "source": "favorites",
             })
 
         # Steam entry

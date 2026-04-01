@@ -45,11 +45,17 @@ FocusScope {
     // Track whether the current source is the "Recently Played" source.
     property bool isRecentSource: false
 
+    // Track whether the current source is the "PC Favorites" source.
+    property bool isFavoritesSource: false
+
     // Track whether the currently selected Moonlight source is offline.
     property bool isMoonlightOffline: false
 
     // JS array of recently played entries (populated when "recent" source is selected).
     property var _recentEntries: []
+
+    // JS array of favorites entries (populated when "favorites" source is selected).
+    property var _favoritesEntries: []
 
     // Current view mode: "grid" or "list"
     property string _viewMode: "grid"
@@ -60,7 +66,13 @@ FocusScope {
 
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
-    onCurrentViewChanged: _routeFocus()
+    onCurrentViewChanged: {
+        if (currentView === "sources") {
+            isFavoritesSource = false
+            isRecentSource = false
+        }
+        _routeFocus()
+    }
     on_ViewModeChanged: { if (currentView === "games") _routeFocus() }
     onActiveFocusChanged: {
         if (activeFocus) {
@@ -80,6 +92,9 @@ FocusScope {
             if (isRecentSource) {
                 if (_viewMode === "list") recentlyPlayedList.forceActiveFocus()
                 else recentlyPlayedGrid.forceActiveFocus()
+            } else if (isFavoritesSource) {
+                if (_viewMode === "list") favoritesPlayedList.forceActiveFocus()
+                else favoritesPlayedGrid.forceActiveFocus()
             } else if (isMoonlightSource) {
                 if (_viewMode === "list") moonlightAppList.forceActiveFocus()
                 else moonlightAppGrid.forceActiveFocus()
@@ -90,6 +105,8 @@ FocusScope {
         } else {
             if (isRecentSource) {
                 recentlyPlayedDetail.forceActiveFocus()
+            } else if (isFavoritesSource) {
+                favoritesDetail.forceActiveFocus()
             } else if (isMoonlightSource) {
                 moonlightAppDetail.forceActiveFocus()
             } else {
@@ -132,20 +149,37 @@ FocusScope {
                     var sourceName = currentItem.sourceNameValue
                     if (sourceKey === "recent") {
                         pcGamesScreen.isRecentSource = true
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = false
                         pcGamesScreen.isMoonlightOffline = false
                         pcGamesScreen._recentEntries = steam.getRecentlyPlayed()
                         recentlyPlayedGrid.entries = pcGamesScreen._recentEntries
                         recentlyPlayedList.entries = pcGamesScreen._recentEntries
+                    } else if (sourceKey === "favorites") {
+                        pcGamesScreen.isFavoritesSource = true
+                        pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isMoonlightSource = false
+                        pcGamesScreen.isMoonlightOffline = false
+                        var steamFavs = steam ? steam.getFavorites() : []
+                        var moonFavs = moonlight ? moonlight.getFavorites() : []
+                        var combined = steamFavs.concat(moonFavs)
+                        combined.sort(function(a, b) {
+                            return (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase())
+                        })
+                        pcGamesScreen._favoritesEntries = combined
+                        favoritesPlayedGrid.entries = combined
+                        favoritesPlayedList.entries = combined
                     } else if (sourceKey === "moonlight") {
                         if (!moonlight) return
                         pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = true
                         pcGamesScreen.isMoonlightOffline = currentItem.offlineValue || false
                         moonlightAppGrid._currentSort = "az"
                     } else {
                         steam.selectSource(sourceKey)
                         pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = false
                         pcGamesScreen.isMoonlightOffline = false
                         steamGameGrid._currentSort = "az"
@@ -229,20 +263,37 @@ FocusScope {
                     var sourceName = model.name
                     if (sourceKey === "recent") {
                         pcGamesScreen.isRecentSource = true
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = false
                         pcGamesScreen.isMoonlightOffline = false
                         pcGamesScreen._recentEntries = steam.getRecentlyPlayed()
                         recentlyPlayedGrid.entries = pcGamesScreen._recentEntries
                         recentlyPlayedList.entries = pcGamesScreen._recentEntries
+                    } else if (sourceKey === "favorites") {
+                        pcGamesScreen.isFavoritesSource = true
+                        pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isMoonlightSource = false
+                        pcGamesScreen.isMoonlightOffline = false
+                        var steamFavs2 = steam ? steam.getFavorites() : []
+                        var moonFavs2 = moonlight ? moonlight.getFavorites() : []
+                        var combined2 = steamFavs2.concat(moonFavs2)
+                        combined2.sort(function(a, b) {
+                            return (a.name || "").toLowerCase().localeCompare((b.name || "").toLowerCase())
+                        })
+                        pcGamesScreen._favoritesEntries = combined2
+                        favoritesPlayedGrid.entries = combined2
+                        favoritesPlayedList.entries = combined2
                     } else if (sourceKey === "moonlight") {
                         if (!moonlight) return
                         pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = true
                         pcGamesScreen.isMoonlightOffline = model.offline || false
                         moonlightAppGrid._currentSort = "az"
                     } else {
                         steam.selectSource(sourceKey)
                         pcGamesScreen.isRecentSource = false
+                        pcGamesScreen.isFavoritesSource = false
                         pcGamesScreen.isMoonlightSource = false
                         pcGamesScreen.isMoonlightOffline = false
                         steamGameGrid._currentSort = "az"
@@ -261,7 +312,7 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isRecentSource
-                 && pcGamesScreen._viewMode === "grid"
+                 && !pcGamesScreen.isFavoritesSource && pcGamesScreen._viewMode === "grid"
 
         _viewMode: pcGamesScreen._viewMode
 
@@ -279,9 +330,11 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "detail" && pcGamesScreen.isRecentSource
+                 && !pcGamesScreen.isFavoritesSource
 
         // Load game data from the JS array when the detail view is active.
         gameData: pcGamesScreen.currentView === "detail" && pcGamesScreen.isRecentSource
+                  && !pcGamesScreen.isFavoritesSource
                   && pcGamesScreen.selectedGameIndex >= 0
                   && pcGamesScreen.selectedGameIndex < pcGamesScreen._recentEntries.length
                   ? pcGamesScreen._recentEntries[pcGamesScreen.selectedGameIndex]
@@ -309,7 +362,8 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && !pcGamesScreen.isMoonlightSource
-                 && !pcGamesScreen.isRecentSource && pcGamesScreen._viewMode === "grid"
+                 && !pcGamesScreen.isRecentSource && !pcGamesScreen.isFavoritesSource
+                 && pcGamesScreen._viewMode === "grid"
 
         sourceName: pcGamesScreen.selectedSourceName
         _viewMode: pcGamesScreen._viewMode
@@ -328,12 +382,13 @@ FocusScope {
 
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "detail" && !pcGamesScreen.isMoonlightSource
-                 && !pcGamesScreen.isRecentSource
+                 && !pcGamesScreen.isRecentSource && !pcGamesScreen.isFavoritesSource
 
         // Load game data only when the detail view is active to avoid unnecessary
         // steam.getGame() calls while browsing sources or the game grid.
         gameData: pcGamesScreen.currentView === "detail" && !pcGamesScreen.isMoonlightSource
-                  && !pcGamesScreen.isRecentSource && pcGamesScreen.selectedGameIndex >= 0
+                  && !pcGamesScreen.isRecentSource && !pcGamesScreen.isFavoritesSource
+                  && pcGamesScreen.selectedGameIndex >= 0
                   ? (steam ? steam.getGame(pcGamesScreen.selectedGameIndex) : ({}))
                   : ({})
 
@@ -410,7 +465,8 @@ FocusScope {
         id: steamGameList
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && !pcGamesScreen.isMoonlightSource
-                 && !pcGamesScreen.isRecentSource && pcGamesScreen._viewMode === "list"
+                 && !pcGamesScreen.isRecentSource && !pcGamesScreen.isFavoritesSource
+                 && pcGamesScreen._viewMode === "list"
         sourceName: pcGamesScreen.selectedSourceName
         _viewMode: pcGamesScreen._viewMode
         onBack: pcGamesScreen.currentView = "sources"
@@ -443,7 +499,7 @@ FocusScope {
         id: recentlyPlayedList
         anchors.fill: parent
         visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isRecentSource
-                 && pcGamesScreen._viewMode === "list"
+                 && !pcGamesScreen.isFavoritesSource && pcGamesScreen._viewMode === "list"
         entries: pcGamesScreen._recentEntries
         _viewMode: pcGamesScreen._viewMode
         onBack: pcGamesScreen.currentView = "sources"
@@ -452,6 +508,135 @@ FocusScope {
             pcGamesScreen.currentView = "detail"
         }
         onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    // ── PC Favorites grid view ───────────────────────────────────────────────
+    RecentlyPlayedGrid {
+        id: favoritesPlayedGrid
+
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isFavoritesSource
+                 && pcGamesScreen._viewMode === "grid"
+
+        entries: pcGamesScreen._favoritesEntries
+        sourceName: "PC Favorites"
+        _viewMode: pcGamesScreen._viewMode
+
+        onBack: pcGamesScreen.currentView = "sources"
+        onGameSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    // ── PC Favorites list view ───────────────────────────────────────────────
+    RecentlyPlayedList {
+        id: favoritesPlayedList
+
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "games" && pcGamesScreen.isFavoritesSource
+                 && pcGamesScreen._viewMode === "list"
+
+        entries: pcGamesScreen._favoritesEntries
+        sourceName: "PC Favorites"
+        _viewMode: pcGamesScreen._viewMode
+
+        onBack: pcGamesScreen.currentView = "sources"
+        onGameSelected: (index) => {
+            pcGamesScreen.selectedGameIndex = index
+            pcGamesScreen.currentView = "detail"
+        }
+        onViewModeChanged: (mode) => { pcGamesScreen._viewMode = mode }
+    }
+
+    // ── PC Favorites detail view ─────────────────────────────────────────────
+    RecentlyPlayedDetail {
+        id: favoritesDetail
+
+        anchors.fill: parent
+        visible: pcGamesScreen.currentView === "detail" && pcGamesScreen.isFavoritesSource
+
+        // Load game data from the JS array when the detail view is active.
+        gameData: pcGamesScreen.currentView === "detail" && pcGamesScreen.isFavoritesSource
+                  && pcGamesScreen.selectedGameIndex >= 0
+                  && pcGamesScreen.selectedGameIndex < pcGamesScreen._favoritesEntries.length
+                  ? pcGamesScreen._favoritesEntries[pcGamesScreen.selectedGameIndex]
+                  : ({})
+
+        onBack: pcGamesScreen.currentView = "games"
+        onLaunch: (source, appId, hostAddress, appName) => {
+            if (steam) steam.launchRecentGame(source, appId, hostAddress, appName)
+        }
+        onNavigatePrev: {
+            if (pcGamesScreen.selectedGameIndex > 0) {
+                pcGamesScreen.selectedGameIndex--
+            }
+        }
+        onNavigateNext: {
+            if (pcGamesScreen.selectedGameIndex < pcGamesScreen._favoritesEntries.length - 1) {
+                pcGamesScreen.selectedGameIndex++
+            }
+        }
+    }
+
+    // ── Toast notification (shown after favorite toggle from any sub-view) ────
+    // Reusable toast — shown briefly after favorite toggle
+    Rectangle {
+        id: toastBar
+
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: root.vpx(64)
+        }
+        width: toastBarText.implicitWidth + root.vpx(32)
+        height: root.vpx(40)
+        color: "#CC000000"
+        radius: root.vpx(8)
+        opacity: 0.0
+        visible: opacity > 0
+        // Render above all sub-views
+        z: 100
+
+        Text {
+            id: toastBarText
+            anchors.centerIn: parent
+            color: "#ffffff"
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+
+        Timer {
+            id: toastBarTimer
+            interval: 2000
+            repeat: false
+            onTriggered: toastBar.opacity = 0.0
+        }
+    }
+
+    // ── Wire steam.favoriteToggled → PcGamesScreen toast ─────────────────────
+    Connections {
+        target: steam
+        function onFavoriteToggled(isFavorite) {
+            toastBarText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
+            toastBar.opacity = 1.0
+            toastBarTimer.restart()
+        }
+    }
+
+    // ── Wire moonlight.favoriteToggled → PcGamesScreen toast ─────────────────
+    Connections {
+        target: moonlight
+        function onFavoriteToggled(isFavorite) {
+            toastBarText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
+            toastBar.opacity = 1.0
+            toastBarTimer.restart()
+        }
     }
 
     Component.onCompleted: {

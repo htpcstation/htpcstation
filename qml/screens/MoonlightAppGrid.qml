@@ -82,11 +82,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — Favorite
+        Text {
+            id: favoriteHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: sortHint.left
+                right: favoriteHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -155,6 +169,9 @@ FocusScope {
             if (keys.isContext2(event)) {
                 event.accepted = true
                 sortOverlay.open()
+            } else if (keys.isContext1(event)) {
+                event.accepted = true
+                if (moonlight) moonlight.toggleFavorite(appGrid.currentIndex)
             } else if (keys.isAccept(event)) {
                 event.accepted = true
                 moonlightAppGrid.appSelected(appGrid.currentIndex)
@@ -270,6 +287,20 @@ FocusScope {
                         sourceSize.width: root.vpx(moonlightAppGrid._targetCellW)
                         sourceSize.height: root.vpx(moonlightAppGrid._cellH)
                         visible: status === Image.Ready && model.imagePath !== ""
+                    }
+
+                    // ── Favorite star indicator ──────────────────────────────
+                    Text {
+                        anchors {
+                            top: parent.top
+                            right: parent.right
+                            topMargin: root.vpx(4)
+                            rightMargin: root.vpx(4)
+                        }
+                        text: "★"
+                        color: Theme.colorPrimary
+                        font.pixelSize: root.vpx(14)
+                        visible: model.favorite === true
                     }
                 }
 

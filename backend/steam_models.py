@@ -18,3 +18,4 @@ class SteamGame:
     last_played: int  # Unix epoch seconds; 0 = never played
     size_on_disk: int # Bytes used on disk
     image_path: str   # Absolute path to poster image, or "" if not found
+    favorite: bool = False  # Whether the game is marked as a favorite

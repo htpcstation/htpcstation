@@ -99,18 +99,21 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 ```bash
 git clone https://github.com/htpcstation/htpcstation.git
 cd htpcstation
-pip install -r requirements.txt
 ```
 
-### Checking Dependencies
-
-Before your first launch, you can verify that everything is in place:
+Before installing Python dependencies, check that system prerequisites are in place:
 
 ```bash
 bash scripts/check-deps.sh
 ```
 
-This checks for Python 3.10+, required Python packages, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices.
+This checks for Python 3.10+, kernel headers (required to build `evdev`), required Python packages, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices.
+
+Then install Python packages:
+
+```bash
+pip install -r requirements.txt
+```
 
 ### Running
 

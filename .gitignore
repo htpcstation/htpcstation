@@ -32,6 +32,7 @@ node_modules/
 
 # Internal development documents
 resume-project.md
+install-failures.txt
 
 # Test overrides (developer-specific)
 tests/local_overrides.json

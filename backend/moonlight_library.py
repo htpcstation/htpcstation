@@ -21,8 +21,10 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from backend.metadata_gamelist import GameMetadata, read_gamelist, write_game_metadata
 from backend.moonlight_artwork import get_artwork_path, refresh_artwork
 from backend.moonlight_client import MoonlightLauncher, list_apps
+from backend.moonlight_config import get_moonlight_dir
 from backend.moonlight_models import MoonlightApp, MoonlightHost
 from backend.moonlight_parser import check_host_available, discover_moonlight_hosts
 from backend.moonlight_play_history import get_all_history, record_play
@@ -48,6 +50,7 @@ class MoonlightAppListModel(QAbstractListModel):
     HostUuidRole = Qt.ItemDataRole.UserRole + 2
     ImagePathRole = Qt.ItemDataRole.UserRole + 3
     LastPlayedRole = Qt.ItemDataRole.UserRole + 4
+    FavoriteRole = Qt.ItemDataRole.UserRole + 5
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -76,6 +79,8 @@ class MoonlightAppListModel(QAbstractListModel):
             return app.image_path
         if role == self.LastPlayedRole:
             return app.last_played
+        if role == self.FavoriteRole:
+            return app.favorite
         if role == Qt.ItemDataRole.DisplayRole:
             return app.name
         return None
@@ -86,6 +91,7 @@ class MoonlightAppListModel(QAbstractListModel):
             self.HostUuidRole: b"hostUuid",
             self.ImagePathRole: b"imagePath",
             self.LastPlayedRole: b"lastPlayed",
+            self.FavoriteRole: b"favorite",
         }
 
     @Slot(int, result=str)
@@ -139,6 +145,7 @@ class MoonlightLibrary(QObject):
     loadingChanged = Signal()
     processStarted = Signal()
     processFinished = Signal(int, int)
+    favoriteToggled = Signal(bool)
 
     # Internal signals to marshal results from worker thread to main thread
     _hostsDiscovered = Signal(list)          # Phase 1: (paired_hosts,)
@@ -201,6 +208,12 @@ class MoonlightLibrary(QObject):
         bool,
         fget=lambda self: self._host_online,
         notify=hostOnlineChanged,
+    )
+
+    favoriteCount = Property(
+        int,
+        fget=lambda self: sum(1 for a in self._all_apps if a.favorite),
+        notify=hostsChanged,
     )
 
     # ------------------------------------------------------------------
@@ -335,6 +348,75 @@ class MoonlightLibrary(QObject):
         self._current_sort = sort_key
         self._apply_filter_and_sort()
 
+    @Slot(result="QVariant")
+    def getFavorites(self) -> list:
+        """Return all favorited Moonlight apps sorted A-Z.
+
+        Returns a list of dicts in the same shape as getApp() plus a
+        ``source`` key set to ``"moonlight"``.  Used by the Favorites
+        source view in PcGamesScreen.
+        """
+        favorites = sorted(
+            [a for a in self._all_apps if a.favorite],
+            key=lambda a: a.name.lower(),
+        )
+        result = []
+        for app in favorites:
+            host = next(
+                (h for h in self._paired_hosts if h.uuid == app.host_uuid), None
+            )
+            result.append({
+                "name": app.name,
+                "source": "moonlight",
+                "imagePath": app.image_path,
+                "lastPlayed": app.last_played,
+                "appId": "",
+                "hostAddress": host.address if host else "",
+                "hostName": host.display_name if host else "",
+                "hostUuid": app.host_uuid,
+                "favorite": app.favorite,
+            })
+        return result
+
+    @Slot(int)
+    def toggleFavorite(self, index: int) -> None:
+        """Toggle the favorite status of the app at *index* in _current_apps.
+
+        Flips app.favorite, writes back to gamelist.xml (keyed by name),
+        emits favoriteToggled, and emits hostsChanged so main.py can update
+        the "PC Favorites" count in SteamLibrary.
+        """
+        if not (0 <= index < len(self._current_apps)):
+            logger.warning("MoonlightLibrary.toggleFavorite: index %d out of range", index)
+            return
+
+        app = self._current_apps[index]
+        new_value = not app.favorite
+        app.favorite = new_value
+
+        # _all_apps and _current_apps may not share the same objects after
+        # _apply_filter_and_sort (which does list(self._all_apps) — shallow copy).
+        # Update the matching entry in _all_apps too.
+        for a in self._all_apps:
+            if a.name == app.name and a.host_uuid == app.host_uuid:
+                a.favorite = new_value
+                break
+
+        # Write back to gamelist.xml — keyed by name (no app_id for Moonlight)
+        metadata = GameMetadata(name=app.name, favorite=new_value)
+        try:
+            write_game_metadata(get_moonlight_dir(), app.name, metadata)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "MoonlightLibrary.toggleFavorite: failed to write metadata for '%s': %s",
+                app.name,
+                exc,
+            )
+
+        self.favoriteToggled.emit(new_value)
+        # Emit hostsChanged so main.py rebuilds the sources model (PC Favorites count)
+        self.hostsChanged.emit()
+
     # ------------------------------------------------------------------
     # Internal: worker thread function (Phase 2)
     # ------------------------------------------------------------------
@@ -445,6 +527,18 @@ class MoonlightLibrary(QObject):
         """Handle Phase 2 results on the main thread."""
         self._host_availability = host_availability
         self._all_apps = apps
+
+        # Load favorites from gamelist.xml and populate favorite flag on each app
+        try:
+            favorites_cache = read_gamelist(get_moonlight_dir())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MoonlightLibrary: failed to load favorites cache: %s", exc)
+            favorites_cache = {}
+
+        for app in self._all_apps:
+            cached = favorites_cache.get(app.name)
+            if cached is not None:
+                app.favorite = cached.favorite
 
         # Determine host_online from the probe result for the selected host.
         # If host_availability is empty (no host probed), host_online stays False.

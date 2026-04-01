@@ -32,6 +32,9 @@ FocusScope {
     // JS array model — set by PcGamesScreen when this source is selected.
     property var entries: []
 
+    // Display name shown in the header bar (e.g. "Recently Played" or "PC Favorites").
+    property string sourceName: "Recently Played"
+
     // ── View mode (set by PcGamesScreen; "grid" or "list") ────────────────────
     property string _viewMode: "grid"
 
@@ -85,7 +88,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  Recently Played"
+            text: "◀  " + recentlyPlayedList.sourceName
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -561,9 +564,11 @@ FocusScope {
                 var viewKeys = ["grid", "list"]
                 var newView = viewKeys[viewOverlay._viewIndex]
                 if (newView !== recentlyPlayedList._viewMode) {
-                    // View mode is changing — hide overlay but don't grab focus locally.
-                    // PcGamesScreen will route focus to the newly visible view.
+                    // View mode is changing — hide overlay and return focus to the list
+                    // so focus is not stranded when this component becomes invisible.
+                    // PcGamesScreen.on_ViewModeChanged will re-route focus to the new view.
                     viewOverlay.visible = false
+                    gameList.forceActiveFocus()
                     if (settings) settings.setPcGamesViewMode(newView)
                     recentlyPlayedList.viewModeChanged(newView)
                 } else {

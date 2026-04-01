@@ -107,11 +107,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — Favorite
+        Text {
+            id: favoriteHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: sortHint.left
+                right: favoriteHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -302,6 +316,9 @@ FocusScope {
                 } else if (keys.isCancel(event)) {
                     event.accepted = true
                     moonlightAppList.back()
+                } else if (keys.isContext1(event)) {
+                    event.accepted = true
+                    if (moonlight) moonlight.toggleFavorite(appList.currentIndex)
                 } else if (keys.isContext2(event)) {
                     event.accepted = true
                     sortOverlay.open()

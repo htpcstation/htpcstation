@@ -97,12 +97,27 @@ FocusScope {
         } else if (keys.isCancel(event)) {
             event.accepted = true
             steamGameDetail.back()
+        } else if (keys.isContext1(event)) {
+            event.accepted = true
+            if (steam) steam.toggleFavorite(pcGamesScreen.selectedGameIndex)
         } else if (event.key === Qt.Key_Left) {
             event.accepted = true
             steamGameDetail.navigatePrev()
         } else if (event.key === Qt.Key_Right) {
             event.accepted = true
             steamGameDetail.navigateNext()
+        }
+    }
+
+    // ── Listen for favoriteToggled to show toast ──────────────────────────────
+    Connections {
+        target: steam
+        function onFavoriteToggled(isFavorite) {
+            if (steamGameDetail.activeFocus || steamGameDetail.focus) {
+                steamDetailToastText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
+                steamDetailToast.opacity = 1.0
+                steamDetailToastTimer.restart()
+            }
         }
     }
 
@@ -222,13 +237,28 @@ FocusScope {
                 elide: Text.ElideRight
             }
 
+            // ── Favorite status label ─────────────────────────────────────────
+            Text {
+                id: favoriteLabel
+
+                anchors {
+                    top: gameNameLabel.bottom
+                    left: parent.left
+                    topMargin: root.vpx(6)
+                }
+                text: steamGameDetail.gameData.favorite ? "★ Favorited" : "☆ Add to Favorites"
+                color: steamGameDetail.gameData.favorite ? Theme.colorPrimary : Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+            }
+
             // ── Metadata fields ───────────────────────────────────────────────
             Column {
                 id: metadataColumn
 
                 anchors {
-                    top: gameNameLabel.bottom
-                    topMargin: root.vpx(16)
+                    top: favoriteLabel.bottom
+                    topMargin: root.vpx(10)
                     left: parent.left
                     right: parent.right
                 }
@@ -391,11 +421,49 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Launch    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Launch    [Esc] Back"
+                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Launch    [" + keys.context1Label + "] Favorite    [" + keys.cancelLabel + "] Back"
+                  : "[←→] Prev/Next    [Enter] Launch    [F1] Favorite    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+    }
+
+    // ── Favorite toast notification ───────────────────────────────────────────
+    // Shows "★ Added to Favorites" or "Removed from Favorites" for 2 seconds.
+    // Does NOT take focus.
+    Rectangle {
+        id: steamDetailToast
+
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: actionBar.top
+            bottomMargin: root.vpx(16)
+        }
+        width: steamDetailToastText.implicitWidth + root.vpx(32)
+        height: root.vpx(40)
+        color: "#CC000000"
+        radius: root.vpx(8)
+        opacity: 0.0
+        visible: opacity > 0
+
+        Text {
+            id: steamDetailToastText
+            anchors.centerIn: parent
+            color: "#ffffff"
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+
+        Timer {
+            id: steamDetailToastTimer
+            interval: 2000
+            repeat: false
+            onTriggered: steamDetailToast.opacity = 0.0
         }
     }
 }

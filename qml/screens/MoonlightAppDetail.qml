@@ -39,12 +39,27 @@ FocusScope {
         } else if (keys.isCancel(event)) {
             event.accepted = true
             moonlightAppDetail.back()
+        } else if (keys.isContext1(event)) {
+            event.accepted = true
+            if (moonlight) moonlight.toggleFavorite(pcGamesScreen.selectedGameIndex)
         } else if (event.key === Qt.Key_Left) {
             event.accepted = true
             moonlightAppDetail.navigatePrev()
         } else if (event.key === Qt.Key_Right) {
             event.accepted = true
             moonlightAppDetail.navigateNext()
+        }
+    }
+
+    // ── Listen for favoriteToggled to show toast ──────────────────────────────
+    Connections {
+        target: moonlight
+        function onFavoriteToggled(isFavorite) {
+            if (moonlightAppDetail.activeFocus || moonlightAppDetail.focus) {
+                moonlightDetailToastText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
+                moonlightDetailToast.opacity = 1.0
+                moonlightDetailToastTimer.restart()
+            }
         }
     }
 
@@ -164,13 +179,28 @@ FocusScope {
                 elide: Text.ElideRight
             }
 
+            // ── Favorite status label ─────────────────────────────────────────
+            Text {
+                id: favoriteLabel
+
+                anchors {
+                    top: appNameLabel.bottom
+                    left: parent.left
+                    topMargin: root.vpx(6)
+                }
+                text: moonlightAppDetail.appData.favorite ? "★ Favorited" : "☆ Add to Favorites"
+                color: moonlightAppDetail.appData.favorite ? Theme.colorPrimary : Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+            }
+
             // ── Metadata fields ───────────────────────────────────────────────
             Column {
                 id: metadataColumn
 
                 anchors {
-                    top: appNameLabel.bottom
-                    topMargin: root.vpx(16)
+                    top: favoriteLabel.bottom
+                    topMargin: root.vpx(10)
                     left: parent.left
                     right: parent.right
                 }
@@ -223,11 +253,49 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Stream    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Stream    [Esc] Back"
+                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Stream    [" + keys.context1Label + "] Favorite    [" + keys.cancelLabel + "] Back"
+                  : "[←→] Prev/Next    [Enter] Stream    [F1] Favorite    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+    }
+
+    // ── Favorite toast notification ───────────────────────────────────────────
+    // Shows "★ Added to Favorites" or "Removed from Favorites" for 2 seconds.
+    // Does NOT take focus.
+    Rectangle {
+        id: moonlightDetailToast
+
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: actionBar.top
+            bottomMargin: root.vpx(16)
+        }
+        width: moonlightDetailToastText.implicitWidth + root.vpx(32)
+        height: root.vpx(40)
+        color: "#CC000000"
+        radius: root.vpx(8)
+        opacity: 0.0
+        visible: opacity > 0
+
+        Text {
+            id: moonlightDetailToastText
+            anchors.centerIn: parent
+            color: "#ffffff"
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+
+        Timer {
+            id: moonlightDetailToastTimer
+            interval: 2000
+            repeat: false
+            onTriggered: moonlightDetailToast.opacity = 0.0
         }
     }
 }

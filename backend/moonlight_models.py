@@ -39,3 +39,4 @@ class MoonlightApp:
     host_uuid: str      # UUID of the host that owns this app
     image_path: str = ""  # Local filesystem path to the artwork poster (empty if unavailable)
     last_played: str = ""  # ISO 8601 UTC timestamp of last launch (empty if never played)
+    favorite: bool = False  # Whether the app is marked as a favorite
