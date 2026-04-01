@@ -36,6 +36,15 @@ FocusScope {
     // View mode (set by WatchScreen; "grid" or "list").
     property string _viewMode: "grid"
 
+    // Title shown in the header bar. Defaults to "Continue Watching" for the
+    // on-deck view; set to "Watchlist" (or any other string) when reused for
+    // other sources.
+    property string sourceTitle: "Continue Watching"
+
+    // Model to display. Defaults to plex.onDeckModel; override to use a
+    // different PlexOnDeckModel instance (e.g. plex.watchlistModel).
+    property var model: plex ? plex.onDeckModel : null
+
     // ── Helper: format watch progress ─────────────────────────────────────────
     // Returns "X%" string when duration > 0, otherwise "".
     function _formatProgress(viewOffset, duration) {
@@ -62,7 +71,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  Continue Watching"
+            text: "◀  " + onDeckListView.sourceTitle
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -82,11 +91,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — My List
+        Text {
+            id: myListHint
+            anchors {
+                right: viewHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: viewHint.left
+                right: myListHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -297,7 +320,7 @@ FocusScope {
                 rightMargin: root.vpx(16)
             }
 
-            model: plex ? plex.onDeckModel : null
+            model: onDeckListView.model
             clip: true
             focus: true
             keyNavigationEnabled: true
@@ -316,6 +339,13 @@ FocusScope {
                     var item = onDeckList.currentItem
                     if (item) {
                         onDeckListView.itemSelected(item.ratingKeyValue)
+                    }
+                } else if (keys.isContext1(event)) {
+                    event.accepted = true
+                    var item = onDeckList.currentItem
+                    if (item) {
+                        plex.toggleMyList(item.ratingKeyValue, item.titleValue, item.itemType,
+                                          item.posterLocalValue, item.grandparentTitleValue)
                     }
                 } else if (keys.isCancel(event)) {
                     event.accepted = true

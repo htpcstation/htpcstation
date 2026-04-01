@@ -467,6 +467,7 @@ class PlexLibrary(QObject):
     onDeckModelChanged = Signal()
     artistsModelChanged = Signal()
     currentLibraryChanged = Signal(str)
+    myListChanged = Signal(bool)   # True = added, False = removed
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -512,6 +513,7 @@ class PlexLibrary(QObject):
         self._shows_model = PlexShowListModel(self)
         self._on_deck_model = PlexOnDeckModel(self)
         self._artists_model = PlexArtistListModel(self)
+        self._my_list_model = PlexOnDeckModel(self)
 
         # Thread pool for network calls
         self._executor = ThreadPoolExecutor(max_workers=2)
@@ -543,6 +545,10 @@ class PlexLibrary(QObject):
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
         self._artistsReady.connect(self._on_artists_ready)
+
+        # Load My List from file and populate model
+        items = self._load_my_list()
+        self._rebuild_my_list_model(items)
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -602,6 +608,11 @@ class PlexLibrary(QObject):
         fget=lambda self: self._artists_model,
         notify=artistsModelChanged,
     )
+    myListModel = Property(
+        QObject,
+        fget=lambda self: self._my_list_model,
+        notify=myListChanged,
+    )
     currentLibrary = Property(
         str,
         fget=lambda self: self._current_library,
@@ -646,6 +657,14 @@ class PlexLibrary(QObject):
             "sectionKey": "_livetv",
             "count": 0,
         })
+        my_list_count = len(self._my_list_model._items)
+        if my_list_count:
+            result.append({
+                "title": "My List",
+                "type": "mylist",
+                "sectionKey": "_mylist",
+                "count": my_list_count,
+            })
         return result
 
     @Slot(result="QVariant")
@@ -685,6 +704,15 @@ class PlexLibrary(QObject):
             self._current_section_type = "ondeck"
             self._current_library = "Continue Watching"
             self.currentLibraryChanged.emit("Continue Watching")
+            return
+
+        # My List data is already loaded in myListModel from file.
+        # There is no /library/sections/_mylist/all endpoint — return early.
+        if section_key == "_mylist":
+            self._current_section_key = section_key
+            self._current_section_type = "mylist"
+            self._current_library = "My List"
+            self.currentLibraryChanged.emit("My List")
             return
 
         # Find the library type from the libraries model
@@ -1294,6 +1322,43 @@ class PlexLibrary(QObject):
         self._browser_launcher.launch(url)
 
     # ------------------------------------------------------------------
+    # My List slots
+    # ------------------------------------------------------------------
+
+    @Slot(str, str, str, str, str)
+    def toggleMyList(
+        self,
+        rating_key: str,
+        title: str,
+        type_: str,
+        poster_local: str,
+        grandparent_title: str,
+    ) -> None:
+        """Toggle an item in My List. Emits myListChanged(True) when added, (False) when removed."""
+        items = self._load_my_list()
+        existing = next((i for i, x in enumerate(items) if x["ratingKey"] == rating_key), -1)
+        if existing >= 0:
+            items.pop(existing)
+            added = False
+        else:
+            items.append({
+                "ratingKey": rating_key,
+                "title": title,
+                "type": type_,
+                "posterLocal": poster_local,
+                "grandparentTitle": grandparent_title,
+            })
+            added = True
+        self._save_my_list(items)
+        self._rebuild_my_list_model(items)
+        self.myListChanged.emit(added)
+
+    @Slot(str, result=bool)
+    def isInMyList(self, rating_key: str) -> bool:
+        """Return True if the item with the given rating_key is in My List."""
+        return any(x["ratingKey"] == rating_key for x in self._load_my_list())
+
+    # ------------------------------------------------------------------
     # Internal: worker thread functions
     # ------------------------------------------------------------------
 
@@ -1559,6 +1624,38 @@ class PlexLibrary(QObject):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _load_my_list(self) -> list[dict]:
+        """Load My List items from the JSON persistence file."""
+        path = CONFIG_DIR / "plex_mylist.json"
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+    def _save_my_list(self, items: list[dict]) -> None:
+        """Persist My List items to the JSON file."""
+        path = CONFIG_DIR / "plex_mylist.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "w") as f:
+            json.dump(items, f, indent=2)
+
+    def _rebuild_my_list_model(self, items: list[dict]) -> None:
+        """Convert the JSON list to the PlexOnDeckModel item shape and update the model."""
+        model_items = [
+            {
+                "rating_key": item["ratingKey"],
+                "title": item["title"],
+                "type": item["type"],
+                "poster_local": item.get("posterLocal", ""),
+                "grandparent_title": item.get("grandparentTitle", ""),
+                "view_offset": 0,
+                "duration": 0,
+            }
+            for item in items
+        ]
+        self._my_list_model.set_items(model_items)
 
     def _artists_cache_path(self) -> Path:
         """Return the path to the artist list cache file, scoped by section key."""

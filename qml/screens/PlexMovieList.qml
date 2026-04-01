@@ -114,11 +114,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — My List
+        Text {
+            id: myListHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: sortHint.left
+                right: myListHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -368,6 +382,13 @@ FocusScope {
                     var item = movieList.currentItem
                     if (item) {
                         movieListView.movieSelected(item.ratingKeyValue, movieList.currentIndex)
+                    }
+                } else if (keys.isContext1(event)) {
+                    event.accepted = true
+                    var item = movieList.currentItem
+                    if (item) {
+                        plex.toggleMyList(item.ratingKeyValue, item.titleValue, "movie",
+                                          item.posterLocalValue, "")
                     }
                 } else if (keys.isCancel(event)) {
                     event.accepted = true

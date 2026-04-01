@@ -28,11 +28,23 @@ FocusScope {
     // View mode ("grid" or "list") — set by WatchScreen; do not overwrite in onCompleted
     property string _viewMode: "grid"
 
+    // Title shown in the header bar. Defaults to "Continue Watching" for the
+    // on-deck view; set to "Watchlist" (or any other string) when reused for
+    // other sources.
+    property string sourceTitle: "Continue Watching"
+
+    // Model to display. Defaults to plex.onDeckModel; override to use a
+    // different PlexOnDeckModel instance (e.g. plex.watchlistModel).
+    property var model: plex ? plex.onDeckModel : null
+
     // Reset to the first item whenever this grid gains focus so the
     // top-left (most recently watched) item is always highlighted on entry.
     onActiveFocusChanged: {
-        if (activeFocus && onDeckGrid.count > 0) {
-            onDeckGrid.currentIndex = 0
+        if (activeFocus) {
+            if (onDeckGrid.count > 0) {
+                onDeckGrid.currentIndex = 0
+            }
+            onDeckGrid.forceActiveFocus()
         }
     }
 
@@ -59,7 +71,7 @@ FocusScope {
                 leftMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: "◀  Continue Watching"
+            text: "◀  " + onDeckGridView.sourceTitle
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -79,11 +91,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — My List
+        Text {
+            id: myListHint
+            anchors {
+                right: viewHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: viewHint.left
+                right: myListHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -106,7 +132,7 @@ FocusScope {
             margins: root.vpx(16)
         }
 
-        model: plex ? plex.onDeckModel : null
+        model: onDeckGridView.model
         clip: true
         focus: true
 
@@ -121,6 +147,13 @@ FocusScope {
             if (keys.isContext2(event)) {
                 event.accepted = true
                 viewOverlay.open()
+            } else if (keys.isContext1(event)) {
+                event.accepted = true
+                var item = onDeckGrid.currentItem
+                if (item) {
+                    plex.toggleMyList(item.itemRatingKey, item.itemTitle, item.itemType,
+                                      item.itemPosterLocal, item.itemGrandparentTitle)
+                }
             } else if (keys.isAccept(event)) {
                 event.accepted = true
                 var item = onDeckGrid.currentItem
@@ -161,6 +194,17 @@ FocusScope {
 
             // Expose ratingKey so the key handler can read it.
             readonly property string itemRatingKey: model.ratingKey
+            // Expose additional fields for My List toggle
+            readonly property string itemTitle: model.title || ""
+            readonly property string itemType: model.type || ""
+            readonly property string itemPosterLocal: model.posterLocal || ""
+            readonly property string itemGrandparentTitle: model.grandparentTitle || ""
+
+            // Cache My List status at creation time (isInMyList reads from disk)
+            property bool _inMyList: false
+            Component.onCompleted: {
+                if (plex) _inMyList = plex.isInMyList(model.ratingKey)
+            }
 
             width: onDeckGrid.cellWidth
             height: onDeckGrid.cellHeight
@@ -318,6 +362,20 @@ FocusScope {
                     elide: Text.ElideRight
                     horizontalAlignment: Text.AlignHCenter
                     visible: model.type === "episode"
+                }
+
+                // ── My List star indicator ───────────────────────────────────
+                Text {
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        topMargin: root.vpx(4)
+                        rightMargin: root.vpx(4)
+                    }
+                    text: "★"
+                    color: Theme.colorPrimary
+                    font.pixelSize: root.vpx(14)
+                    visible: tileRoot._inMyList
                 }
 
                 // Focus ring — visible when this tile is the current item

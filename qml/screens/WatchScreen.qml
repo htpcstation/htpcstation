@@ -75,11 +75,49 @@ FocusScope {
         return filtered
     }
 
+    // Toast text for My List add/remove notifications
+    property string _toastText: ""
+
+    function _showMyListToast(added) {
+        _toastText = added ? "Added to My List" : "Removed from My List"
+        toastTimer.restart()
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2000
+        onTriggered: watchScreen._toastText = ""
+    }
+
+    Rectangle {
+        id: toastBar
+        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: root.vpx(32) }
+        width: toastLabel.width + root.vpx(32)
+        height: root.vpx(40)
+        radius: root.vpx(6)
+        color: Theme.colorSecondary
+        visible: watchScreen._toastText !== ""
+        z: 100
+
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            text: watchScreen._toastText
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+    }
+
     Connections {
         target: plex
         function onAvailableChanged() { watchScreen._availabilityKnown = true }
         function onLibrariesModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
         function onOnDeckModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
+        function onMyListChanged(added) {
+            watchScreen._libraryEntries = watchScreen._getVideoLibraries()
+            watchScreen._showMyListToast(added)
+        }
     }
 
     // Give focus to the appropriate child whenever the view changes or this
@@ -110,6 +148,9 @@ FocusScope {
             } else if (selectedLibraryType === "ondeck") {
                 if (_viewMode === "list") onDeckList.forceActiveFocus()
                 else onDeckGrid.forceActiveFocus()
+            } else if (selectedLibraryType === "mylist") {
+                if (_viewMode === "list") myListListView.forceActiveFocus()
+                else myListGridView.forceActiveFocus()
             } else {
                 contentPlaceholder.forceActiveFocus()
             }
@@ -538,7 +579,43 @@ FocusScope {
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
 
-    // ── Content placeholder (non-movie, non-show, non-ondeck libraries) ───────
+    // ── My List grid view ─────────────────────────────────────────────────────
+    PlexOnDeckGrid {
+        id: myListGridView
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "mylist"
+                 && watchScreen._viewMode === "grid"
+
+        model: plex ? plex.myListModel : null
+        sourceTitle: "My List"
+        _viewMode: watchScreen._viewMode
+
+        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onBack: watchScreen.currentView = "libraries"
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
+    }
+
+    // ── My List list view ─────────────────────────────────────────────────────
+    PlexOnDeckList {
+        id: myListListView
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "mylist"
+                 && watchScreen._viewMode === "list"
+
+        model: plex ? plex.myListModel : null
+        sourceTitle: "My List"
+        _viewMode: watchScreen._viewMode
+
+        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onBack: watchScreen.currentView = "libraries"
+        onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
+    }
+
+    // ── Content placeholder (non-movie, non-show, non-ondeck, non-mylist libraries) ───────
     FocusScope {
         id: contentPlaceholder
 
@@ -547,6 +624,7 @@ FocusScope {
                  && watchScreen.selectedLibraryType !== "movie"
                  && watchScreen.selectedLibraryType !== "show"
                  && watchScreen.selectedLibraryType !== "ondeck"
+                 && watchScreen.selectedLibraryType !== "mylist"
         focus: false
 
         Keys.onPressed: (event) => {

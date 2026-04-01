@@ -33,6 +33,15 @@ FocusScope {
         if (keys.isAccept(event)) {
             event.accepted = true
             movieDetailView.play(movieDetailView.movieData.ratingKey || "")
+        } else if (keys.isContext1(event)) {
+            event.accepted = true
+            if (plex && movieDetailView.movieData.ratingKey) {
+                plex.toggleMyList(movieDetailView.movieData.ratingKey,
+                                  movieDetailView.movieData.title || "",
+                                  "movie",
+                                  movieDetailView.movieData.posterLocal || "",
+                                  "")
+            }
         } else if (keys.isCancel(event)) {
             event.accepted = true
             movieDetailView.back()
@@ -242,6 +251,21 @@ FocusScope {
                     color: Theme.colorTextDim
                     opacity: 0.3
                 }
+
+                // ── My List status ────────────────────────────────────────────
+                Text {
+                    text: (plex && movieDetailView.movieData.ratingKey
+                           && plex.isInMyList(movieDetailView.movieData.ratingKey))
+                          ? "★ In My List"
+                          : "☆ Add to My List"
+                    color: (plex && movieDetailView.movieData.ratingKey
+                            && plex.isInMyList(movieDetailView.movieData.ratingKey))
+                           ? Theme.colorPrimary
+                           : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    visible: !!movieDetailView.movieData.ratingKey
+                }
             }
 
             // ── Tagline (italic, if present) ──────────────────────────────────
@@ -308,8 +332,8 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Play    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Play    [Esc] Back"
+                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Play    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
+                  : "[←→] Prev/Next    [Enter] Play    [F1] My List    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)

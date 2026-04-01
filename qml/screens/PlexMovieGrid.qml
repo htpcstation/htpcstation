@@ -104,11 +104,25 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
+        // X button hint — My List
+        Text {
+            id: myListHint
+            anchors {
+                right: sortHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
         // Quick scroll hint
         Text {
             id: scrollHint
             anchors {
-                right: sortHint.left
+                right: myListHint.left
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
@@ -186,6 +200,13 @@ FocusScope {
             if (keys.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.open()
+            } else if (keys.isContext1(event)) {
+                event.accepted = true
+                var item = movieGrid.currentItem
+                if (item) {
+                    plex.toggleMyList(item.itemRatingKey, item.itemTitle, "movie",
+                                      item.itemPosterLocal, "")
+                }
             } else if (keys.isAccept(event)) {
                 event.accepted = true
                 var item = movieGrid.currentItem
@@ -238,6 +259,16 @@ FocusScope {
 
             // Expose ratingKey so the key handler can read it.
             readonly property string movieRatingKey: model.ratingKey
+            // Expose additional fields for My List toggle
+            readonly property string itemRatingKey: model.ratingKey
+            readonly property string itemTitle: model.title || ""
+            readonly property string itemPosterLocal: model.posterLocal || ""
+
+            // Cache My List status at creation time (isInMyList reads from disk)
+            property bool _inMyList: false
+            Component.onCompleted: {
+                if (plex) _inMyList = plex.isInMyList(model.ratingKey)
+            }
 
             width: movieGrid.cellWidth
             height: movieGrid.cellHeight
@@ -350,6 +381,20 @@ FocusScope {
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
                     horizontalAlignment: Text.AlignHCenter
+                }
+
+                // ── My List star indicator ───────────────────────────────────
+                Text {
+                    anchors {
+                        top: parent.top
+                        right: parent.right
+                        topMargin: root.vpx(4)
+                        rightMargin: root.vpx(4)
+                    }
+                    text: "★"
+                    color: Theme.colorPrimary
+                    font.pixelSize: root.vpx(14)
+                    visible: tileRoot._inMyList
                 }
 
                 // Focus ring — visible when this tile is the current item

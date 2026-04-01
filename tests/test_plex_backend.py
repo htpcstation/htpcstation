@@ -1108,13 +1108,17 @@ class TestGetLibraryList:
     """getLibraryList() returns a JS-friendly list of dicts for QML."""
 
     def _make_lib(self, **kwargs):
+        import tempfile
+        from pathlib import Path
         from backend.plex_library import PlexLibrary
         from backend.config import Config
 
+        tmp_dir = Path(tempfile.mkdtemp())
         with patch("backend.plex_library.PlexClient"), \
              patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
-             patch("backend.config.CONFIG_DIR"):
+             patch("backend.config.CONFIG_DIR"), \
+             patch("backend.plex_library.CONFIG_DIR", tmp_dir):
             config = MagicMock(spec=Config)
             config.plex_server_id = "server123"
             config.plex_token = "tok"
@@ -3872,16 +3876,20 @@ class TestLaunchLiveTv:
 
 
 class TestGetLibraryListLiveTv:
-    """getLibraryList() always appends a 'Live TV' entry at the end."""
+    """getLibraryList() always includes a 'Live TV' entry before My List."""
 
     def _make_lib(self):
+        import tempfile
+        from pathlib import Path
         from backend.plex_library import PlexLibrary
         from backend.config import Config
 
+        tmp_dir = Path(tempfile.mkdtemp())
         with patch("backend.plex_library.PlexClient"), \
              patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
              patch("backend.config.CONFIG_FILE"), \
-             patch("backend.config.CONFIG_DIR"):
+             patch("backend.config.CONFIG_DIR"), \
+             patch("backend.plex_library.CONFIG_DIR", tmp_dir):
             config = MagicMock(spec=Config)
             config.plex_server_id = "server123"
             config.plex_token = "tok"
@@ -3894,14 +3902,15 @@ class TestGetLibraryListLiveTv:
         lib = self._make_lib()
         result = lib.getLibraryList()
 
-        live_tv = result[-1]
+        # With no My List items, Live TV is the last entry
+        live_tv = next(e for e in result if e["title"] == "Live TV")
         assert live_tv["title"] == "Live TV"
         assert live_tv["type"] == "livetv"
         assert live_tv["sectionKey"] == "_livetv"
         assert live_tv["count"] == 0
 
     def test_live_tv_entry_appears_after_libraries(self) -> None:
-        """Live TV entry appears after all library sections."""
+        """Live TV entry appears after all library sections (before My List)."""
         lib = self._make_lib()
         lib._libraries_model.set_items([
             {"title": "Movies", "type": "movie", "key": "4"},
@@ -3910,10 +3919,11 @@ class TestGetLibraryListLiveTv:
 
         result = lib.getLibraryList()
 
-        # Movies and TV Shows come first, Live TV is last
+        # Movies and TV Shows come first, Live TV appears after them
         assert result[0]["title"] == "Movies"
         assert result[1]["title"] == "TV Shows"
-        assert result[-1]["title"] == "Live TV"
+        live_tv = next(e for e in result if e["title"] == "Live TV")
+        assert live_tv is not None
 
     def test_live_tv_entry_appears_after_ondeck_and_libraries(self) -> None:
         """Live TV entry appears after Continue Watching and library sections."""
@@ -3931,8 +3941,8 @@ class TestGetLibraryListLiveTv:
 
         assert result[0]["title"] == "Continue Watching"
         assert result[1]["title"] == "Movies"
-        assert result[-1]["title"] == "Live TV"
-        assert result[-1]["type"] == "livetv"
+        live_tv = next(e for e in result if e["title"] == "Live TV")
+        assert live_tv["type"] == "livetv"
 
     def test_live_tv_entry_present_even_with_no_libraries(self) -> None:
         """Live TV entry is present even when no library sections are loaded."""

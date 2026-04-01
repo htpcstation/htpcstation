@@ -269,6 +269,21 @@ FocusScope {
                             }
                         }
                     }
+
+                    // ── My List status ────────────────────────────────────────
+                    Text {
+                        text: (plex && showDetailView.showData.ratingKey
+                               && plex.isInMyList(showDetailView.showData.ratingKey))
+                              ? "★ In My List"
+                              : "☆ Add to My List"
+                        color: (plex && showDetailView.showData.ratingKey
+                                && plex.isInMyList(showDetailView.showData.ratingKey))
+                               ? Theme.colorPrimary
+                               : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        visible: !!showDetailView.showData.ratingKey
+                    }
                 }
             }
 
@@ -668,8 +683,8 @@ FocusScope {
         Text {
             anchors.centerIn: parent
             text: keys.useGamepadLabels
-                  ? "[◀▶] Season    [▼] Episodes    [" + keys.acceptLabel + "] Play    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Season    [↓] Episodes    [Enter] Play    [Esc] Back"
+                  ? "[◀▶] Season    [▼] Episodes    [" + keys.acceptLabel + "] Play    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
+                  : "[←→] Season    [↓] Episodes    [Enter] Play    [F1] My List    [Esc] Back"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -682,6 +697,20 @@ FocusScope {
         if (activeFocus) {
             mainFlickable.contentY = 0
             seasonTabsArea.forceActiveFocus()
+        }
+    }
+
+    // ── X key handler for My List toggle ─────────────────────────────────────
+    Keys.onPressed: (event) => {
+        if (keys.isContext1(event)) {
+            event.accepted = true
+            if (plex && showDetailView.showData.ratingKey) {
+                plex.toggleMyList(showDetailView.showData.ratingKey,
+                                  showDetailView.showData.title || "",
+                                  "show",
+                                  showDetailView.showData.posterLocal || "",
+                                  "")
+            }
         }
     }
 }
