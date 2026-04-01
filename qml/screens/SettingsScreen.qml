@@ -24,6 +24,13 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
+    // ── System Cores sub-screen ───────────────────────────────────────────────
+    function showSystemCores() {
+        systemCoresScreen.systems = settings ? settings.getSystemsList() : []
+        systemCoresScreen.visible = true
+        systemCoresScreen.forceActiveFocus()
+    }
+
     // ── Settings model ────────────────────────────────────────────────────────
     // Each entry specifies the type and properties of a setting row.
     // Headers are non-focusable visual separators.
@@ -401,7 +408,7 @@ FocusScope {
                             settings.openMoonlight()
                             actionButton.statusText = "Opening..."
                         } else if (action === "systemCores") {
-                            settingsScreen._showToast("Coming soon")
+                            settingsScreen.showSystemCores()
                         } else if (action === "mapController") {
                             settingsScreen.showControllerMapping()
                         } else if (action === "resetController") {
@@ -545,6 +552,18 @@ FocusScope {
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+    }
+
+    // ── System Cores sub-screen (declared last so it renders on top) ──────────
+    SystemCoresScreen {
+        id: systemCoresScreen
+        anchors.fill: parent
+        visible: false
+
+        onBack: {
+            systemCoresScreen.visible = false
+            settingsList.forceActiveFocus()
         }
     }
 }

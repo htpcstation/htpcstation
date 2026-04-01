@@ -1,7 +1,7 @@
 """Configuration management for HTPC Station.
 
 Loads and saves a JSON config file at ~/.config/htpcstation/config.json.
-Ships built-in defaults for ~20 common retro systems.
+Ships built-in defaults for ~190 retro systems using Knulli/Batocera folder naming.
 """
 
 import json
@@ -22,26 +22,191 @@ _DEFAULT_BROWSER_COMMAND = "flatpak run com.brave.Browser"
 _DEFAULT_MOONLIGHT_COMMAND = "flatpak run com.moonlight_stream.Moonlight"
 
 SYSTEM_DEFAULTS: dict[str, dict] = {
-    "gb": {"display_name": "Game Boy", "core": "gambatte_libretro.so", "extensions": [".gb"]},
-    "gbc": {"display_name": "Game Boy Color", "core": "gambatte_libretro.so", "extensions": [".gbc"]},
-    "gba": {"display_name": "Game Boy Advance", "core": "gpsp_libretro.so", "extensions": [".gba"]},
-    "nes": {"display_name": "Nintendo Entertainment System", "core": "mesen_libretro.so", "extensions": [".nes"]},
-    "snes": {"display_name": "Super Nintendo", "core": "snes9x_libretro.so", "extensions": [".smc", ".sfc"]},
-    "n64": {"display_name": "Nintendo 64", "core": "mupen64plus_next_libretro.so", "extensions": [".n64", ".z64", ".v64"]},
-    "nds": {"display_name": "Nintendo DS", "core": "melonds_libretro.so", "extensions": [".nds"]},
-    "megadrive": {"display_name": "Sega Genesis / Mega Drive", "core": "genesis_plus_gx_libretro.so", "extensions": [".md", ".bin", ".gen"]},
-    "sega32x": {"display_name": "Sega 32X", "core": "picodrive_libretro.so", "extensions": [".32x"]},
-    "segacd": {"display_name": "Sega CD", "core": "genesis_plus_gx_libretro.so", "extensions": [".chd", ".cue"]},
-    "mastersystem": {"display_name": "Sega Master System", "core": "genesis_plus_gx_libretro.so", "extensions": [".sms"]},
-    "gamegear": {"display_name": "Sega Game Gear", "core": "genesis_plus_gx_libretro.so", "extensions": [".gg"]},
-    "psx": {"display_name": "PlayStation", "core": "mednafen_psx_hw_libretro.so", "extensions": [".chd", ".cue", ".pbp"]},
-    "pce": {"display_name": "PC Engine / TurboGrafx-16", "core": "mednafen_pce_libretro.so", "extensions": [".pce"]},
-    "ngpc": {"display_name": "Neo Geo Pocket Color", "core": "mednafen_ngp_libretro.so", "extensions": [".ngc", ".ngp"]},
-    "ngp": {"display_name": "Neo Geo Pocket", "core": "mednafen_ngp_libretro.so", "extensions": [".ngp"]},
-    "atari2600": {"display_name": "Atari 2600", "core": "stella_libretro.so", "extensions": [".a26"]},
-    "atari7800": {"display_name": "Atari 7800", "core": "prosystem_libretro.so", "extensions": [".a78"]},
-    "wonderswan": {"display_name": "WonderSwan", "core": "mednafen_wswan_libretro.so", "extensions": [".ws"]},
-    "wonderswancolor": {"display_name": "WonderSwan Color", "core": "mednafen_wswan_libretro.so", "extensions": [".wsc"]},
+    # ── Already present (do not change) ──────────────────────────────────────
+    "gb":              {"display_name": "Game Boy",                        "core": "gambatte_libretro.so",              "extensions": [".gb"]},
+    "gbc":             {"display_name": "Game Boy Color",                  "core": "gambatte_libretro.so",              "extensions": [".gbc"]},
+    "gba":             {"display_name": "Game Boy Advance",                "core": "gpsp_libretro.so",                  "extensions": [".gba"]},
+    "nes":             {"display_name": "Nintendo Entertainment System",   "core": "mesen_libretro.so",                 "extensions": [".nes"]},
+    "snes":            {"display_name": "Super Nintendo",                  "core": "snes9x_libretro.so",                "extensions": [".smc", ".sfc"]},
+    "n64":             {"display_name": "Nintendo 64",                     "core": "mupen64plus_next_libretro.so",      "extensions": [".n64", ".z64", ".v64"]},
+    "nds":             {"display_name": "Nintendo DS",                     "core": "melonds_libretro.so",               "extensions": [".nds"]},
+    "megadrive":       {"display_name": "Sega Genesis / Mega Drive",       "core": "genesis_plus_gx_libretro.so",       "extensions": [".md", ".bin", ".gen"]},
+    "sega32x":         {"display_name": "Sega 32X",                        "core": "picodrive_libretro.so",             "extensions": [".32x"]},
+    "segacd":          {"display_name": "Sega CD",                         "core": "genesis_plus_gx_libretro.so",       "extensions": [".chd", ".cue"]},
+    "mastersystem":    {"display_name": "Sega Master System",              "core": "genesis_plus_gx_libretro.so",       "extensions": [".sms"]},
+    "gamegear":        {"display_name": "Sega Game Gear",                  "core": "genesis_plus_gx_libretro.so",       "extensions": [".gg"]},
+    "psx":             {"display_name": "PlayStation",                     "core": "mednafen_psx_hw_libretro.so",       "extensions": [".chd", ".cue", ".pbp"]},
+    "pce":             {"display_name": "PC Engine / TurboGrafx-16",       "core": "mednafen_pce_libretro.so",          "extensions": [".pce"]},
+    "ngp":             {"display_name": "Neo Geo Pocket",                  "core": "mednafen_ngp_libretro.so",          "extensions": [".ngp"]},
+    "ngpc":            {"display_name": "Neo Geo Pocket Color",            "core": "mednafen_ngp_libretro.so",          "extensions": [".ngc", ".ngp"]},
+    "atari2600":       {"display_name": "Atari 2600",                      "core": "stella_libretro.so",                "extensions": [".a26"]},
+    "atari7800":       {"display_name": "Atari 7800",                      "core": "prosystem_libretro.so",             "extensions": [".a78"]},
+    "wonderswan":      {"display_name": "WonderSwan",                      "core": "mednafen_wswan_libretro.so",        "extensions": [".ws"]},
+    "wonderswancolor": {"display_name": "WonderSwan Color",                "core": "mednafen_wswan_libretro.so",        "extensions": [".wsc"]},
+
+    # ── Knulli alternate folder names for existing systems ────────────────────
+    "pcengine":        {"display_name": "PC Engine / TurboGrafx-16",       "core": "mednafen_pce_libretro.so",          "extensions": [".pce"]},
+    "pcenginecd":      {"display_name": "PC Engine CD",                    "core": "mednafen_pce_libretro.so",          "extensions": [".chd", ".cue"]},
+    "wswan":           {"display_name": "WonderSwan",                      "core": "mednafen_wswan_libretro.so",        "extensions": [".ws"]},
+    "wswanc":          {"display_name": "WonderSwan Color",                "core": "mednafen_wswan_libretro.so",        "extensions": [".wsc"]},
+
+    # ── Nintendo ──────────────────────────────────────────────────────────────
+    "fds":             {"display_name": "Famicom Disk System",             "core": "mesen_libretro.so",                 "extensions": [".fds"]},
+    "satellaview":     {"display_name": "Satellaview (BS-X)",              "core": "snes9x_libretro.so",                "extensions": [".bs"]},
+    "sufami":          {"display_name": "Sufami Turbo",                    "core": "snes9x_libretro.so",                "extensions": [".st"]},
+    "snes-msu1":       {"display_name": "Super Nintendo (MSU-1)",          "core": "snes9x_libretro.so",                "extensions": [".smc", ".sfc"]},
+    "sgb":             {"display_name": "Super Game Boy",                  "core": "mesen_libretro.so",                 "extensions": [".gb", ".gbc"]},
+    "gb2players":      {"display_name": "Game Boy (2-Player)",             "core": "gambatte_libretro.so",              "extensions": [".gb"]},
+    "gbc2players":     {"display_name": "Game Boy Color (2-Player)",       "core": "gambatte_libretro.so",              "extensions": [".gbc"]},
+    "n64dd":           {"display_name": "Nintendo 64DD",                   "core": "mupen64plus_next_libretro.so",      "extensions": [".ndd"]},
+    "n3ds":            {"display_name": "Nintendo 3DS",                    "core": "citra_libretro.so",                 "extensions": [".3ds", ".cia"]},
+    "gamecube":        {"display_name": "Nintendo GameCube",               "core": "dolphin_libretro.so",               "extensions": [".iso", ".gcm", ".rvz"]},
+    "wii":             {"display_name": "Nintendo Wii",                    "core": "dolphin_libretro.so",               "extensions": [".iso", ".wbfs", ".rvz"]},
+    "wiiu":            {"display_name": "Nintendo Wii U",                  "core": "",                                  "extensions": [".rpx", ".wud", ".wux"]},
+    "switch":          {"display_name": "Nintendo Switch",                 "core": "",                                  "extensions": [".nsp", ".xci"]},
+    "virtualboy":      {"display_name": "Nintendo Virtual Boy",            "core": "mednafen_vb_libretro.so",           "extensions": [".vb"]},
+    "gameandwatch":    {"display_name": "Nintendo Game & Watch",           "core": "gw_libretro.so",                    "extensions": [".mgw"]},
+    "pokemini":        {"display_name": "Pokémon Mini",                    "core": "pokemini_libretro.so",              "extensions": [".min"]},
+    "supergrafx":      {"display_name": "PC Engine SuperGrafx",            "core": "mednafen_supergrafx_libretro.so",   "extensions": [".pce"]},
+
+    # ── Sega ──────────────────────────────────────────────────────────────────
+    "sg1000":          {"display_name": "Sega SG-1000",                    "core": "genesis_plus_gx_libretro.so",       "extensions": [".sg"]},
+    "pico":            {"display_name": "Sega Pico",                       "core": "picodrive_libretro.so",             "extensions": [".md", ".bin"]},
+    "msu-md":          {"display_name": "Mega Drive MSU-MD",               "core": "genesis_plus_gx_libretro.so",       "extensions": [".md", ".bin"]},
+    "saturn":          {"display_name": "Sega Saturn",                     "core": "mednafen_saturn_libretro.so",       "extensions": [".chd", ".cue", ".iso"]},
+    "dreamcast":       {"display_name": "Sega Dreamcast",                  "core": "flycast_libretro.so",               "extensions": [".chd", ".cdi", ".gdi"]},
+    "naomi":           {"display_name": "Sega NAOMI",                      "core": "flycast_libretro.so",               "extensions": [".zip", ".chd"]},
+    "naomi2":          {"display_name": "Sega NAOMI 2",                    "core": "flycast_libretro.so",               "extensions": [".zip", ".chd"]},
+    "atomiswave":      {"display_name": "Sammy Atomiswave",                "core": "flycast_libretro.so",               "extensions": [".zip", ".chd"]},
+    "megaduck":        {"display_name": "Cougar Boy / Mega Duck",          "core": "sameduck_libretro.so",              "extensions": [".bin"]},
+
+    # ── Sony ──────────────────────────────────────────────────────────────────
+    "ps2":             {"display_name": "PlayStation 2",                   "core": "pcsx2_libretro.so",                 "extensions": [".iso", ".chd"]},
+    "psp":             {"display_name": "PlayStation Portable",            "core": "ppsspp_libretro.so",                "extensions": [".iso", ".cso", ".pbp"]},
+    "ps3":             {"display_name": "PlayStation 3",                   "core": "",                                  "extensions": [".iso", ".pkg"]},
+    "psvita":          {"display_name": "PlayStation Vita",                "core": "",                                  "extensions": [".vpk"]},
+
+    # ── Microsoft ─────────────────────────────────────────────────────────────
+    "xbox":            {"display_name": "Xbox",                            "core": "",                                  "extensions": [".iso", ".xbe"]},
+    "xbox360":         {"display_name": "Xbox 360",                        "core": "",                                  "extensions": [".iso", ".xex"]},
+
+    # ── Atari ─────────────────────────────────────────────────────────────────
+    "atari5200":       {"display_name": "Atari 5200",                      "core": "atari800_libretro.so",              "extensions": [".a52"]},
+    "atari800":        {"display_name": "Atari 800",                       "core": "atari800_libretro.so",              "extensions": [".atr", ".xex"]},
+    "atarilynx":       {"display_name": "Atari Lynx",                      "core": "mednafen_lynx_libretro.so",         "extensions": [".lnx"]},
+    "lynx":            {"display_name": "Atari Lynx",                      "core": "mednafen_lynx_libretro.so",         "extensions": [".lnx"]},
+    "atarist":         {"display_name": "Atari ST",                        "core": "hatari_libretro.so",                "extensions": [".st", ".stx"]},
+    "xegs":            {"display_name": "Atari XEGS",                      "core": "atari800_libretro.so",              "extensions": [".xex", ".atr"]},
+    "jaguar":          {"display_name": "Atari Jaguar",                    "core": "virtualjaguar_libretro.so",         "extensions": [".j64", ".jag"]},
+    "jaguarcd":        {"display_name": "Atari Jaguar CD",                 "core": "virtualjaguar_libretro.so",         "extensions": [".j64", ".cue"]},
+
+    # ── SNK ───────────────────────────────────────────────────────────────────
+    "neogeo":          {"display_name": "SNK Neo Geo",                     "core": "fbneo_libretro.so",                 "extensions": [".zip", ".neo"]},
+    "neogeocd":        {"display_name": "SNK Neo Geo CD",                  "core": "neocd_libretro.so",                 "extensions": [".chd", ".cue"]},
+
+    # ── Arcade ────────────────────────────────────────────────────────────────
+    "mame":            {"display_name": "MAME",                            "core": "mame_libretro.so",                  "extensions": [".zip", ".chd"]},
+    "fbneo":           {"display_name": "FinalBurn Neo",                   "core": "fbneo_libretro.so",                 "extensions": [".zip"]},
+    "daphne":          {"display_name": "Daphne (LaserDisc)",              "core": "daphne_libretro.so",                "extensions": [".daphne"]},
+
+    # ── Commodore ─────────────────────────────────────────────────────────────
+    "c64":             {"display_name": "Commodore 64",                    "core": "vice_x64_libretro.so",              "extensions": [".d64", ".t64", ".prg"]},
+    "c128":            {"display_name": "Commodore 128",                   "core": "vice_x128_libretro.so",             "extensions": [".d64", ".t64"]},
+    "c20":             {"display_name": "Commodore VIC-20",                "core": "vice_xvic_libretro.so",             "extensions": [".d64", ".prg"]},
+    "cplus4":          {"display_name": "Commodore Plus/4",                "core": "vice_xplus4_libretro.so",           "extensions": [".d64", ".prg"]},
+    "pet":             {"display_name": "Commodore PET",                   "core": "vice_xpet_libretro.so",             "extensions": [".d64", ".prg"]},
+    "amiga500":        {"display_name": "Commodore Amiga 500",             "core": "puae_libretro.so",                  "extensions": [".adf", ".hdf"]},
+    "amiga1200":       {"display_name": "Commodore Amiga 1200",            "core": "puae_libretro.so",                  "extensions": [".adf", ".hdf"]},
+    "amigacd32":       {"display_name": "Commodore Amiga CD32",            "core": "puae_libretro.so",                  "extensions": [".chd", ".cue"]},
+    "amigacdtv":       {"display_name": "Commodore CDTV",                  "core": "puae_libretro.so",                  "extensions": [".chd", ".cue"]},
+
+    # ── Sinclair / Amstrad ────────────────────────────────────────────────────
+    "zxspectrum":      {"display_name": "Sinclair ZX Spectrum",            "core": "fuse_libretro.so",                  "extensions": [".tzx", ".tap", ".z80"]},
+    "zx81":            {"display_name": "Sinclair ZX81",                   "core": "81_libretro.so",                    "extensions": [".p", ".tzx"]},
+    "amstradcpc":      {"display_name": "Amstrad CPC",                     "core": "crocods_libretro.so",               "extensions": [".dsk", ".cdt"]},
+    "gx4000":          {"display_name": "Amstrad GX4000",                  "core": "crocods_libretro.so",               "extensions": [".cpr"]},
+
+    # ── Apple ─────────────────────────────────────────────────────────────────
+    "apple2":          {"display_name": "Apple II",                        "core": "mednafen_apple2_libretro.so",       "extensions": [".dsk", ".po", ".nib"]},
+    "apple2gs":        {"display_name": "Apple IIGS",                      "core": "gsplus_libretro.so",                "extensions": [".2mg", ".po"]},
+    "macintosh":       {"display_name": "Apple Macintosh",                 "core": "minivmac_libretro.so",              "extensions": [".dsk", ".img"]},
+
+    # ── NEC ───────────────────────────────────────────────────────────────────
+    "pc88":            {"display_name": "NEC PC-8801",                     "core": "quasi88_libretro.so",               "extensions": [".d88", ".u88"]},
+    "pc98":            {"display_name": "NEC PC-9801",                     "core": "np2kai_libretro.so",                "extensions": [".hdi", ".fdi", ".d98"]},
+
+    # ── Sharp ─────────────────────────────────────────────────────────────────
+    "x68000":          {"display_name": "Sharp X68000",                    "core": "px68k_libretro.so",                 "extensions": [".dim", ".img", ".xdf"]},
+    "x1":              {"display_name": "Sharp X1",                        "core": "mame_libretro.so",                  "extensions": [".2d", ".dx1"]},
+
+    # ── Fujitsu ───────────────────────────────────────────────────────────────
+    "fm7":             {"display_name": "Fujitsu FM-7",                    "core": "mame_libretro.so",                  "extensions": [".d77", ".d88"]},
+    "fmtowns":         {"display_name": "Fujitsu FM Towns",                "core": "mame_libretro.so",                  "extensions": [".bin", ".cue"]},
+
+    # ── MSX ───────────────────────────────────────────────────────────────────
+    "msx1":            {"display_name": "MSX1",                            "core": "bluemsx_libretro.so",               "extensions": [".rom", ".dsk", ".cas"]},
+    "msx2":            {"display_name": "MSX2",                            "core": "bluemsx_libretro.so",               "extensions": [".rom", ".dsk", ".cas"]},
+    "msx2+":           {"display_name": "MSX2+",                           "core": "bluemsx_libretro.so",               "extensions": [".rom", ".dsk"]},
+    "msxturbor":       {"display_name": "MSX Turbo R",                     "core": "bluemsx_libretro.so",               "extensions": [".rom", ".dsk"]},
+    "spectravideo":    {"display_name": "Spectravideo",                    "core": "bluemsx_libretro.so",               "extensions": [".rom", ".cas"]},
+
+    # ── Mattel / Coleco / Magnavox ────────────────────────────────────────────
+    "intellivision":   {"display_name": "Mattel Intellivision",            "core": "freeintv_libretro.so",              "extensions": [".int", ".bin"]},
+    "colecovision":    {"display_name": "ColecoVision",                    "core": "bluemsx_libretro.so",               "extensions": [".col", ".rom"]},
+    "o2em":            {"display_name": "Magnavox Odyssey 2",              "core": "o2em_libretro.so",                  "extensions": [".bin"]},
+    "videopacplus":    {"display_name": "Philips Videopac+ G7400",         "core": "o2em_libretro.so",                  "extensions": [".bin"]},
+
+    # ── Philips ───────────────────────────────────────────────────────────────
+    "cdi":             {"display_name": "Philips CD-i",                    "core": "same_cdi_libretro.so",              "extensions": [".chd", ".iso"]},
+
+    # ── Acorn ─────────────────────────────────────────────────────────────────
+    "bbc":             {"display_name": "BBC Micro",                       "core": "mame_libretro.so",                  "extensions": [".ssd", ".dsd"]},
+    "electron":        {"display_name": "Acorn Electron",                  "core": "mame_libretro.so",                  "extensions": [".uef", ".ssd"]},
+    "archimedes":      {"display_name": "Acorn Archimedes",                "core": "mame_libretro.so",                  "extensions": [".adf"]},
+    "atom":            {"display_name": "Acorn Atom",                      "core": "mame_libretro.so",                  "extensions": [".atm"]},
+
+    # ── Texas Instruments / Tandy / Other home computers ─────────────────────
+    "ti99":            {"display_name": "Texas Instruments TI-99/4A",      "core": "mess_libretro.so",                  "extensions": [".rpk", ".bin"]},
+    "coco":            {"display_name": "TRS-80 Color Computer",           "core": "mess_libretro.so",                  "extensions": [".dsk", ".cas"]},
+    "thomson":         {"display_name": "Thomson MO/TO",                   "core": "theodore_libretro.so",              "extensions": [".fd", ".sap"]},
+    "dos":             {"display_name": "MS-DOS",                          "core": "dosbox_pure_libretro.so",           "extensions": [".exe", ".com", ".bat"]},
+    "scummvm":         {"display_name": "ScummVM",                         "core": "scummvm_libretro.so",               "extensions": [".scummvm"]},
+
+    # ── Handheld / portable ───────────────────────────────────────────────────
+    "supervision":     {"display_name": "Watara Supervision",              "core": "potator_libretro.so",               "extensions": [".sv"]},
+    "lcdgames":        {"display_name": "LCD Handheld Games",              "core": "gw_libretro.so",                    "extensions": [".mgw"]},
+    "gamecom":         {"display_name": "Tiger Game.com",                  "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "gmaster":         {"display_name": "Hartung Game Master",             "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "gamate":          {"display_name": "Bit Corporation Gamate",          "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "gamepock":        {"display_name": "Epoch Game Pocket Computer",      "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "gp32":            {"display_name": "GamePark GP32",                   "core": "mame_libretro.so",                  "extensions": [".smc", ".bin"]},
+    "arduboy":         {"display_name": "Arduboy",                         "core": "arduous_libretro.so",               "extensions": [".hex"]},
+    "uzebox":          {"display_name": "Uzebox",                          "core": "uzem_libretro.so",                  "extensions": [".uze"]},
+    "lowresnx":        {"display_name": "LowRes NX",                       "core": "lowresnx_libretro.so",              "extensions": [".nx"]},
+    "tic80":           {"display_name": "TIC-80",                          "core": "tic80_libretro.so",                 "extensions": [".tic"]},
+    "pico8":           {"display_name": "PICO-8",                          "core": "retro8_libretro.so",                "extensions": [".p8", ".png"]},
+    "commanderx16":    {"display_name": "Commander X16",                   "core": "x16_libretro.so",                   "extensions": [".prg", ".bin"]},
+
+    # ── Obscure / regional systems ────────────────────────────────────────────
+    "adam":            {"display_name": "Coleco Adam",                     "core": "mess_libretro.so",                  "extensions": [".dsk", ".col"]},
+    "advision":        {"display_name": "Entex Adventure Vision",          "core": "mess_libretro.so",                  "extensions": [".bin"]},
+    "apfm1000":        {"display_name": "APF M-1000",                      "core": "mess_libretro.so",                  "extensions": [".bin"]},
+    "arcadia":         {"display_name": "Emerson Arcadia 2001",            "core": "mess_libretro.so",                  "extensions": [".bin"]},
+    "astrocde":        {"display_name": "Bally Astrocade",                 "core": "mess_libretro.so",                  "extensions": [".bin"]},
+    "camplynx":        {"display_name": "Camputers Lynx",                  "core": "mame_libretro.so",                  "extensions": [".mly"]},
+    "channelf":        {"display_name": "Fairchild Channel F",             "core": "freechaf_libretro.so",              "extensions": [".bin", ".chf"]},
+    "crvision":        {"display_name": "VTech CreatiVision",              "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "laser310":        {"display_name": "VTech Laser 310",                 "core": "mame_libretro.so",                  "extensions": [".cas", ".vz"]},
+    "multivision":     {"display_name": "Othello Multivision",             "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "pv1000":          {"display_name": "Casio PV-1000",                   "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "samcoupe":        {"display_name": "SAM Coupé",                       "core": "simcoupe_libretro.so",              "extensions": [".mgt", ".dsk"]},
+    "scv":             {"display_name": "Epoch Super Cassette Vision",     "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "socrates":        {"display_name": "VTech Socrates",                  "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "supracan":        {"display_name": "Funtech Super A'Can",             "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "tutor":           {"display_name": "Tomy Tutor",                      "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "vc4000":          {"display_name": "Interton VC 4000",                "core": "mame_libretro.so",                  "extensions": [".bin"]},
+    "vectrex":         {"display_name": "GCE Vectrex",                     "core": "vecx_libretro.so",                  "extensions": [".vec", ".bin"]},
+    "vsmile":          {"display_name": "VTech V.Smile",                   "core": "mame_libretro.so",                  "extensions": [".bin"]},
 }
 
 
