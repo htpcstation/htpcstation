@@ -75,6 +75,50 @@ FocusScope {
         return filtered
     }
 
+    // ── Resume dialog state ───────────────────────────────────────────────────
+    property bool _resumeDialogVisible: false
+    property string _resumeRatingKey: ""
+    property int _resumeViewOffset: 0   // ms
+
+    function _formatDuration(ms) {
+        var s = Math.floor(ms / 1000)
+        var h = Math.floor(s / 3600)
+        var m = Math.floor((s % 3600) / 60)
+        var sec = s % 60
+        return h + ":" + (m < 10 ? "0" : "") + m + ":" + (sec < 10 ? "0" : "") + sec
+    }
+
+    function _showResumeDialog(ratingKey, viewOffsetMs) {
+        _resumeRatingKey = ratingKey
+        _resumeViewOffset = viewOffsetMs
+        _resumeDialogVisible = true
+        resumeDialog.forceActiveFocus()
+    }
+
+    function _launchMpv(ratingKey, startMs) {
+        _resumeDialogVisible = false
+        plex.playWithMpv(ratingKey, startMs)
+    }
+
+    function _playContent(ratingKey) {
+        if (!settings || (settings.plexPlayer || "mpv") === "browser") {
+            plex.launchContent(ratingKey)
+            return
+        }
+        // MPV path — check for resume position
+        var info = plex.getStreamInfo(ratingKey)
+        if (!info || !info.url) {
+            // No stream URL — fall back to browser
+            plex.launchContent(ratingKey)
+            return
+        }
+        if (info.viewOffset > 0) {
+            watchScreen._showResumeDialog(ratingKey, info.viewOffset)
+        } else {
+            watchScreen._launchMpv(ratingKey, 0)
+        }
+    }
+
     // Toast text for My List add/remove notifications
     property string _toastText: ""
 
@@ -120,6 +164,16 @@ FocusScope {
         }
     }
 
+    // Connect liveTV.channelsChanged for future use (e.g. updating channel count).
+    Connections {
+        target: liveTV
+        function onChannelsChanged() {
+            // Reserved for future use — Live TV entry in the library list
+            // does not currently show a count, but this connection is here
+            // so any future count display can be wired up without structural changes.
+        }
+    }
+
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: _routeFocus()
@@ -151,6 +205,8 @@ FocusScope {
             } else if (selectedLibraryType === "mylist") {
                 if (_viewMode === "list") myListListView.forceActiveFocus()
                 else myListGridView.forceActiveFocus()
+            } else if (selectedLibraryType === "livetv") {
+                liveTvGuide.forceActiveFocus()
             } else {
                 contentPlaceholder.forceActiveFocus()
             }
@@ -269,7 +325,9 @@ FocusScope {
                         event.accepted = true
                         if (currentItem) {
                             if (currentItem.entryType === "livetv") {
-                                plex.launchLiveTv()
+                                // Navigate to embedded Live TV guide instead of launching browser
+                                watchScreen.selectedLibraryType = "livetv"
+                                watchScreen.currentView = "content"
                             } else {
                                 watchScreen.selectedLibraryTitle = currentItem.entryTitle
                                 watchScreen.selectedSectionKey = currentItem.entrySectionKey
@@ -363,7 +421,9 @@ FocusScope {
                         onDoubleClicked: {
                             libraryList.currentIndex = index
                             if (modelData.type === "livetv") {
-                                plex.launchLiveTv()
+                                // Navigate to embedded Live TV guide instead of launching browser
+                                watchScreen.selectedLibraryType = "livetv"
+                                watchScreen.currentView = "content"
                             } else {
                                 watchScreen.selectedLibraryTitle = modelData.title
                                 watchScreen.selectedSectionKey = modelData.sectionKey
@@ -421,7 +481,7 @@ FocusScope {
         }
 
         onPlay: (ratingKey) => {
-            plex.launchContent(ratingKey)
+            watchScreen._playContent(ratingKey)
         }
 
         onNavigatePrev: {
@@ -489,7 +549,7 @@ FocusScope {
         }
 
         onPlayEpisode: (ratingKey) => {
-            plex.launchContent(ratingKey)
+            watchScreen._playContent(ratingKey)
         }
     }
 
@@ -506,7 +566,7 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onItemSelected: (ratingKey) => {
-            plex.launchContent(ratingKey)
+            watchScreen._playContent(ratingKey)
         }
 
         onBack: {
@@ -574,7 +634,7 @@ FocusScope {
 
         _viewMode: watchScreen._viewMode
 
-        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onItemSelected: (ratingKey) => { watchScreen._playContent(ratingKey) }
         onBack: watchScreen.currentView = "libraries"
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
@@ -615,7 +675,19 @@ FocusScope {
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
 
-    // ── Content placeholder (non-movie, non-show, non-ondeck, non-mylist libraries) ───────
+    // ── Live TV guide ─────────────────────────────────────────────────────────
+    LiveTvScreen {
+        id: liveTvGuide
+
+        anchors.fill: parent
+        visible: watchScreen.currentView === "content"
+                 && watchScreen.selectedLibraryType === "livetv"
+        focus: false
+
+        onBack: watchScreen.currentView = "libraries"
+    }
+
+    // ── Content placeholder (non-movie, non-show, non-ondeck, non-mylist, non-livetv libraries) ───────
     FocusScope {
         id: contentPlaceholder
 
@@ -625,6 +697,7 @@ FocusScope {
                  && watchScreen.selectedLibraryType !== "show"
                  && watchScreen.selectedLibraryType !== "ondeck"
                  && watchScreen.selectedLibraryType !== "mylist"
+                 && watchScreen.selectedLibraryType !== "livetv"
         focus: false
 
         Keys.onPressed: (event) => {
@@ -648,6 +721,106 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
+        }
+    }
+
+    // ── Resume dialog overlay (declared last for highest z-order) ─────────────
+    Rectangle {
+        id: resumeDialog
+
+        anchors.centerIn: parent
+        width: root.vpx(360)
+        height: root.vpx(160)
+        radius: root.vpx(Theme.focusRingRadius)
+        color: Theme.colorSecondary
+        border.color: Theme.colorPrimary
+        border.width: root.vpx(2)
+        visible: watchScreen._resumeDialogVisible
+        z: 200
+
+        // Track which button is focused: 0 = Resume, 1 = Start from beginning
+        property int _focusedButton: 0
+
+        Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                event.accepted = true
+                resumeDialog._focusedButton = resumeDialog._focusedButton === 0 ? 1 : 0
+            } else if (keys.isAccept(event)) {
+                event.accepted = true
+                if (resumeDialog._focusedButton === 0) {
+                    watchScreen._launchMpv(watchScreen._resumeRatingKey, watchScreen._resumeViewOffset)
+                } else {
+                    watchScreen._launchMpv(watchScreen._resumeRatingKey, 0)
+                }
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                watchScreen._resumeDialogVisible = false
+                watchScreen._routeFocus()
+            }
+        }
+
+        Column {
+            anchors {
+                fill: parent
+                margins: root.vpx(20)
+            }
+            spacing: root.vpx(12)
+
+            Text {
+                text: "Resume playback?"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                font.bold: true
+            }
+
+            // Resume button
+            Rectangle {
+                width: parent.width
+                height: root.vpx(44)
+                radius: root.vpx(Theme.focusRingRadius)
+                color: resumeDialog._focusedButton === 0
+                    ? Theme.colorPrimary
+                    : Qt.darker(Theme.colorSecondary, 1.4)
+
+                Behavior on color {
+                    ColorAnimation { duration: Theme.animDurationFast }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Resume from " + watchScreen._formatDuration(watchScreen._resumeViewOffset)
+                    color: resumeDialog._focusedButton === 0
+                        ? Theme.colorBackground
+                        : Theme.colorText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                }
+            }
+
+            // Start from beginning button
+            Rectangle {
+                width: parent.width
+                height: root.vpx(44)
+                radius: root.vpx(Theme.focusRingRadius)
+                color: resumeDialog._focusedButton === 1
+                    ? Theme.colorPrimary
+                    : Qt.darker(Theme.colorSecondary, 1.4)
+
+                Behavior on color {
+                    ColorAnimation { duration: Theme.animDurationFast }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Start from beginning"
+                    color: resumeDialog._focusedButton === 1
+                        ? Theme.colorBackground
+                        : Theme.colorText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                }
+            }
         }
     }
 }

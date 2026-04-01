@@ -551,6 +551,21 @@ class SettingsManager(QObject):
     buttonLayout = Property(str, _get_button_layout,
                             notify=buttonLayoutChanged)
 
+    # -- Plex player --------------------------------------------------
+
+    plexPlayerChanged = Signal()
+
+    def _get_plex_player(self) -> str:
+        return self._config.plex_player
+
+    plexPlayer = Property(str, fget=_get_plex_player, notify=plexPlayerChanged)
+
+    @Slot(str)
+    def setPlexPlayer(self, player: str) -> None:
+        """Set the Plex player ('mpv' or 'browser')."""
+        self._config.set_plex_player(player)
+        self.plexPlayerChanged.emit()
+
     @Slot(str)
     def setButtonLayout(self, layout: str) -> None:
         """Set the button layout ('standard' or 'alternate')."""

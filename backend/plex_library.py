@@ -26,6 +26,7 @@ from PySide6.QtCore import (
 
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config, CONFIG_DIR
+from backend.mpv_launcher import MpvLauncher
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient
 from backend.plex_models import (
@@ -546,6 +547,9 @@ class PlexLibrary(QObject):
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
         self._artistsReady.connect(self._on_artists_ready)
 
+        # MPV launcher for direct stream playback
+        self._mpv_launcher = MpvLauncher(self)
+
         # Load My List from file and populate model
         items = self._load_my_list()
         self._rebuild_my_list_model(items)
@@ -1001,6 +1005,41 @@ class PlexLibrary(QObject):
                     "posterLocal": episode.poster_local,
                 })
         return episodes
+
+    @Slot(str, result="QVariant")
+    def getStreamInfo(self, rating_key: str) -> dict:
+        """Return {"url": str, "viewOffset": int} for the given ratingKey.
+
+        viewOffset is in milliseconds. Returns {"url": "", "viewOffset": 0} on failure.
+        Runs synchronously on the calling thread — call from a worker or accept brief UI block.
+        """
+        if self._client is None:
+            return {"url": "", "viewOffset": 0}
+        url, view_offset = self._client.get_stream_url(rating_key)
+        return {"url": url, "viewOffset": view_offset}
+
+    @Slot(str, int)
+    def playWithMpv(self, rating_key: str, start_ms: int = 0) -> None:
+        """Fetch stream URL and launch MPV. start_ms=0 means start from beginning."""
+        if self._client is None:
+            logger.warning("playWithMpv: no Plex client configured")
+            return
+        url, _ = self._client.get_stream_url(rating_key)
+        if not url:
+            logger.warning("playWithMpv: no stream URL for ratingKey=%s", rating_key)
+            return
+        meta = self._client.get_metadata(rating_key)
+        title = meta.get("title", "")
+        grandparent = meta.get("grandparentTitle", "")
+        if grandparent:
+            title = f"{grandparent} — {title}"
+        logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
+        self._mpv_launcher.launch(url, title, start_ms)
+
+    @Slot(str)
+    def playWithMpvFromStart(self, rating_key: str) -> None:
+        """Launch MPV from the beginning (no resume). Convenience slot for QML."""
+        self.playWithMpv(rating_key, 0)
 
     @Slot(str, result="QVariant")
     def getArtist(self, rating_key: str) -> dict:

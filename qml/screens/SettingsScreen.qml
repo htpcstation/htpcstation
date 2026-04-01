@@ -48,6 +48,7 @@ FocusScope {
         { type: "select",  label: "Server",            settingKey: "plexServer" },
         { type: "select",  label: "User",              settingKey: "plexUser" },
         { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
+        { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
         { type: "header",  label: "Moonlight" },
@@ -286,6 +287,7 @@ FocusScope {
                     if (rowData.type === "button")  return buttonComp
                     if (rowData.type === "slider")  return sliderComp
                     if (rowData.type === "select")  return selectComp
+                    if (rowData.type === "cycle")   return cycleComp
                     return null
                 }
 
@@ -482,6 +484,102 @@ FocusScope {
 
                     onSelected: (id) => {
                         settingsScreen._setValue(rowData.settingKey, id)
+                    }
+                }
+            }
+
+            // ── Cycle component (cycles through a fixed set of values) ─────────
+            // Matches the SettingToggle layout: label on left, value pill on right.
+            Component {
+                id: cycleComp
+                FocusScope {
+                    id: cycleRoot
+
+                    implicitHeight: root.vpx(56)
+                    width: parent ? parent.width : 0
+
+                    // ── Background highlight ──────────────────────────────────
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: cycleRoot.activeFocus ? 0.8 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on opacity {
+                            NumberAnimation { duration: Theme.animDurationFast }
+                        }
+                    }
+
+                    // ── Row label ─────────────────────────────────────────────
+                    Text {
+                        anchors {
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: rowData.label
+                        color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+                    }
+
+                    // ── Value pill ────────────────────────────────────────────
+                    Rectangle {
+                        id: valuePill
+                        anchors {
+                            right: parent.right
+                            rightMargin: root.vpx(16)
+                            verticalCenter: parent.verticalCenter
+                        }
+                        width: valueLabel.implicitWidth + root.vpx(24)
+                        height: root.vpx(32)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        color: cycleRoot.activeFocus ? Theme.colorPrimary : "transparent"
+                        border.color: cycleRoot.activeFocus ? Theme.colorPrimary : Theme.colorTextDim
+                        border.width: root.vpx(1)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+                        Behavior on border.color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+
+                        Text {
+                            id: valueLabel
+                            anchors.centerIn: parent
+                            text: (settings && (settings.plexPlayer || "mpv") === "mpv")
+                                ? "MPV"
+                                : "Browser"
+                            color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+
+                            Behavior on color {
+                                ColorAnimation { duration: Theme.animDurationFast }
+                            }
+                        }
+                    }
+
+                    // ── Focus ring ────────────────────────────────────────────
+                    FocusRing {}
+
+                    // ── Key handling ──────────────────────────────────────────
+                    Keys.onPressed: (event) => {
+                        if (keys.isAccept(event)
+                                || event.key === Qt.Key_Left
+                                || event.key === Qt.Key_Right) {
+                            event.accepted = true
+                            if (settings) {
+                                settings.setPlexPlayer(
+                                    (settings.plexPlayer || "mpv") === "mpv" ? "browser" : "mpv"
+                                )
+                            }
+                        }
                     }
                 }
             }

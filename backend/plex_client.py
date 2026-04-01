@@ -166,6 +166,26 @@ class PlexClient:
             return []
         return data.get("MediaContainer", {}).get("Metadata", [])
 
+    def get_stream_url(self, rating_key: str) -> tuple[str, int]:
+        """Return (direct_stream_url, view_offset_ms) for the first media part.
+
+        view_offset_ms is 0 if no resume position is stored.
+        Returns ("", 0) if the item has no media parts or the request fails.
+        """
+        data = self.get_metadata(rating_key)
+        media = data.get("Media", [])
+        if not media:
+            return ("", 0)
+        parts = media[0].get("Part", [])
+        if not parts:
+            return ("", 0)
+        part_key = parts[0].get("key", "")
+        if not part_key:
+            return ("", 0)
+        view_offset = int(data.get("viewOffset", 0) or 0)
+        url = f"{self._server_url}{part_key}?X-Plex-Token={self._token}"
+        return (url, view_offset)
+
     def get_poster_url(self, thumb_path: str) -> str:
         """Build full authenticated poster URL from a thumb path.
 

@@ -258,6 +258,8 @@ class Config:
         self._show_listen_tab: bool = True
         # Music library selection
         self._music_library_key: str = ""
+        # Plex player selection: "mpv" or "browser"
+        self._plex_player: str = "mpv"
         # Sort preferences
         self._sort_retro_games: str = "az"
         self._sort_steam_games: str = "az"
@@ -339,6 +341,17 @@ class Config:
     def music_library_key(self) -> str:
         """Plex section key of the selected music library. Empty string if not configured."""
         return self._music_library_key
+
+    @property
+    def plex_player(self) -> str:
+        """Plex player selection: 'mpv' or 'browser'. Defaults to 'mpv'."""
+        return self._plex_player
+
+    def set_plex_player(self, player: str) -> None:
+        """Set the Plex player and persist the config."""
+        assert player in ("mpv", "browser")
+        self._plex_player = player
+        self.save()
 
     @property
     def sort_retro_games(self) -> str:
@@ -603,6 +616,7 @@ class Config:
                 "server_id": self._plex_server_id or "",
                 "user_id": self._plex_user_id or 0,
                 "music_library_key": self._music_library_key,
+                "player": self._plex_player,
             },
             "browser": {
                 "command": self._browser_command,
@@ -702,6 +716,9 @@ class Config:
             if user_id:
                 self._plex_user_id = int(user_id)
             self._music_library_key = plex.get("music_library_key", "")
+            player = plex.get("player", "mpv")
+            if player in ("mpv", "browser"):
+                self._plex_player = player
             # Backward compatibility: old configs may have server_url — ignore it gracefully
 
         # browser section

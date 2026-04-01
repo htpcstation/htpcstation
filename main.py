@@ -56,6 +56,7 @@ from backend.gamepad import GamepadManager
 from backend.keys import Keys
 from backend.launcher import Launcher
 from backend.library import GameLibrary
+from backend.live_tv_library import LiveTvLibrary
 from backend.moonlight_library import MoonlightLibrary
 from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
@@ -97,6 +98,13 @@ def main() -> None:
     # Plex library — exposed to QML as `plex`
     plex_library = PlexLibrary(config, browser_launcher)
     engine.rootContext().setContextProperty("plex", plex_library)
+
+    # Live TV library — exposed to QML as `liveTV`
+    live_tv = LiveTvLibrary(
+        plex_client_factory=lambda: plex_library._client,
+        mpv_launcher=plex_library._mpv_launcher,
+    )
+    engine.rootContext().setContextProperty("liveTV", live_tv)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary()

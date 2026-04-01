@@ -331,9 +331,18 @@ FocusScope {
 
         Text {
             anchors.centerIn: parent
-            text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Play    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Play    [F1] My List    [Esc] Back"
+            text: {
+                var playLabel = (settings && (settings.plexPlayer || "mpv") === "mpv")
+                    ? "Play"
+                    : "Play in Plex"
+                if (keys.useGamepadLabels) {
+                    return "[◀▶] Prev/Next    [" + keys.acceptLabel + "] " + playLabel
+                        + "    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
+                } else {
+                    return "[←→] Prev/Next    [Enter] " + playLabel
+                        + "    [F1] My List    [Esc] Back"
+                }
+            }
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
