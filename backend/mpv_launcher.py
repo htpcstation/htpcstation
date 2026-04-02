@@ -15,8 +15,12 @@ from PySide6.QtCore import QObject, QProcess, Signal
 
 logger = logging.getLogger(__name__)
 
+# IPC socket path for communicating with a running MPV instance.
+MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
+
+_INPUT_CONF_VERSION = "2"
 _INPUT_CONF_CONTENT = """\
-# HTPC Station MPV gamepad input config
+# HTPC Station MPV input config v2
 # Standard Linux gamepad button names (evdev/SDL)
 
 GAMEPAD_ACTION_A        cycle pause
@@ -28,8 +32,8 @@ GAMEPAD_DOWN            add volume -5
 GAMEPAD_LEFT_TRIGGER    add chapter -1
 GAMEPAD_RIGHT_TRIGGER   add chapter 1
 GAMEPAD_LEFT_SHOULDER   cycle audio
-GAMEPAD_RIGHT_SHOULDER  cycle sub
-GAMEPAD_X               cycle sub-visibility
+GAMEPAD_RIGHT_SHOULDER  show-text ${track-list} 3000
+GAMEPAD_X               script-message htpc-show-subs
 GAMEPAD_Y               show-progress
 GAMEPAD_START           quit
 """
@@ -143,6 +147,11 @@ class MpvLauncher(QObject):
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
             "--hwdec=vaapi",
+            "--hwdec-codecs=all",
+            "--gpu-api=opengl",
+            "--vd-lavc-dr=yes",
+            "--osc=no",
+            f"--input-ipc-server={MPV_IPC_SOCKET}",
             "--vo=gpu",
             "--gpu-context=x11",
             "--cache=yes",
@@ -162,6 +171,11 @@ class MpvLauncher(QObject):
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
             "--hwdec=vaapi",
+            "--hwdec-codecs=all",
+            "--gpu-api=opengl",
+            "--vd-lavc-dr=yes",
+            "--osc=no",
+            f"--input-ipc-server={MPV_IPC_SOCKET}",
             "--vo=gpu",
             "--gpu-context=x11",
             "--cache=yes",
@@ -181,18 +195,23 @@ class MpvLauncher(QObject):
         return args
 
     def _ensure_input_conf(self) -> None:
-        """Write the default MPV input.conf if it does not already exist.
-
-        Never overwrites an existing file — the user may have customised it.
-        """
+        """Write the default MPV input.conf, updating it if the version is outdated."""
         if _INPUT_CONF_PATH.exists():
-            return
+            # Check version header — overwrite if outdated
+            try:
+                first_line = _INPUT_CONF_PATH.read_text(encoding="utf-8").split("\n")[0]
+                if f"v{_INPUT_CONF_VERSION}" in first_line:
+                    return  # up to date
+            except OSError:
+                pass
+            # Outdated or unreadable — overwrite
+            logger.info("MpvLauncher: updating input.conf to v%s", _INPUT_CONF_VERSION)
         try:
             _INPUT_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
             _INPUT_CONF_PATH.write_text(_INPUT_CONF_CONTENT, encoding="utf-8")
-            logger.info("MpvLauncher: created default input.conf at %s", _INPUT_CONF_PATH)
+            logger.info("MpvLauncher: wrote input.conf at %s", _INPUT_CONF_PATH)
         except OSError as exc:
-            logger.warning("MpvLauncher: failed to create input.conf: %s", exc)
+            logger.warning("MpvLauncher: failed to write input.conf: %s", exc)
 
     def _on_started(self) -> None:
         """Handle QProcess.started — MPV process is confirmed running."""

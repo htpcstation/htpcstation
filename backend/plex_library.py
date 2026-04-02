@@ -26,6 +26,7 @@ from PySide6.QtCore import (
 
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config, CONFIG_DIR
+from backend.mpv_ipc import MpvIpc
 from backend.mpv_launcher import MpvLauncher
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient
@@ -469,6 +470,8 @@ class PlexLibrary(QObject):
     artistsModelChanged = Signal()
     currentLibraryChanged = Signal(str)
     myListChanged = Signal(bool)   # True = added, False = removed
+    mpvStarted = Signal()
+    mpvFinished = Signal()
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -549,6 +552,8 @@ class PlexLibrary(QObject):
 
         # MPV launcher for direct stream playback
         self._mpv_launcher = MpvLauncher(self)
+        self._mpv_launcher.processStarted.connect(self.mpvStarted)
+        self._mpv_launcher.processFinished.connect(lambda _: self.mpvFinished.emit())
 
         # Load My List from file and populate model
         items = self._load_my_list()
@@ -1040,6 +1045,35 @@ class PlexLibrary(QObject):
     def playWithMpvFromStart(self, rating_key: str) -> None:
         """Launch MPV from the beginning (no resume). Convenience slot for QML."""
         self.playWithMpv(rating_key, 0)
+
+    @Slot(result="QVariant")
+    def getMpvSubtitleTracks(self) -> list[dict]:
+        """Return subtitle tracks from the running MPV instance.
+
+        Returns a list of dicts: [{id, title, lang, selected, external}]
+        Returns [] if MPV is not running.
+        """
+        ipc = MpvIpc()
+        if not ipc.is_available():
+            return []
+        tracks = ipc.get_track_list()
+        result = []
+        for t in tracks:
+            if t.get("type") != "sub":
+                continue
+            result.append({
+                "id": t.get("id", 0),
+                "title": t.get("title", "") or "",
+                "lang": t.get("lang", "") or "",
+                "selected": bool(t.get("selected", False)),
+                "external": bool(t.get("external", False)),
+            })
+        return result
+
+    @Slot(int)
+    def setMpvSubtitleTrack(self, track_id: int) -> None:
+        """Select a subtitle track in the running MPV instance. 0 = disable."""
+        MpvIpc().set_subtitle_track(track_id)
 
     @Slot(str, result="QVariant")
     def getArtist(self, rating_key: str) -> dict:

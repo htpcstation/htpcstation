@@ -6,7 +6,10 @@ Covers:
   - kill() terminates the process
   - is_running() returns correct state
   - _ensure_input_conf() creates the file when absent
-  - _ensure_input_conf() does not overwrite when present
+  - _ensure_input_conf() overwrites when version header is outdated
+  - _ensure_input_conf() does not overwrite when version is current
+  - _build_args() includes new hardware acceleration and IPC args
+  - _build_live_tv_args() includes new hardware acceleration and IPC args
 """
 
 from __future__ import annotations
@@ -317,21 +320,41 @@ class TestEnsureInputConf:
         assert "GAMEPAD_ACTION_A" in content
         assert "cycle pause" in content
 
-    def test_does_not_overwrite_existing_file(self, tmp_path: Path) -> None:
-        """_ensure_input_conf() does not overwrite an existing input.conf."""
-        from backend.mpv_launcher import MpvLauncher
+    def test_overwrites_outdated_version(self, tmp_path: Path) -> None:
+        """_ensure_input_conf() overwrites an existing file with an outdated version header."""
+        from backend.mpv_launcher import MpvLauncher, _INPUT_CONF_VERSION
         import backend.mpv_launcher as mpv_mod
 
         input_conf_path = tmp_path / "mpv" / "input.conf"
         input_conf_path.parent.mkdir(parents=True, exist_ok=True)
-        custom_content = "# My custom config\nq quit\n"
-        input_conf_path.write_text(custom_content, encoding="utf-8")
+        # Write a file with an old version header (v1)
+        old_content = "# HTPC Station MPV input config v1\nq quit\n"
+        input_conf_path.write_text(old_content, encoding="utf-8")
 
         with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
-            launcher = MpvLauncher()
+            MpvLauncher()
 
-        # File should still contain the custom content
-        assert input_conf_path.read_text(encoding="utf-8") == custom_content
+        # File should have been overwritten with the current version
+        content = input_conf_path.read_text(encoding="utf-8")
+        assert f"v{_INPUT_CONF_VERSION}" in content
+        assert content != old_content
+
+    def test_does_not_overwrite_current_version(self, tmp_path: Path) -> None:
+        """_ensure_input_conf() does not overwrite a file with the current version header."""
+        from backend.mpv_launcher import MpvLauncher, _INPUT_CONF_VERSION
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        input_conf_path.parent.mkdir(parents=True, exist_ok=True)
+        # Write a file with the current version header but custom content
+        current_content = f"# HTPC Station MPV input config v{_INPUT_CONF_VERSION}\nq quit\n"
+        input_conf_path.write_text(current_content, encoding="utf-8")
+
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            MpvLauncher()
+
+        # File should still contain the custom content (not overwritten)
+        assert input_conf_path.read_text(encoding="utf-8") == current_content
 
     def test_creates_parent_directories(self, tmp_path: Path) -> None:
         """_ensure_input_conf() creates parent directories as needed."""
@@ -345,3 +368,137 @@ class TestEnsureInputConf:
             launcher = MpvLauncher()
 
         assert input_conf_path.exists()
+
+
+# ---------------------------------------------------------------------------
+# _build_args() — new hardware acceleration and IPC args
+# ---------------------------------------------------------------------------
+
+
+class TestBuildArgs:
+    def test_build_args_includes_hwdec_codecs_all(self, tmp_path: Path) -> None:
+        """_build_args() includes --hwdec-codecs=all."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_args("http://server/file.mkv", "")
+        assert "--hwdec-codecs=all" in args
+
+    def test_build_args_includes_gpu_api_opengl(self, tmp_path: Path) -> None:
+        """_build_args() includes --gpu-api=opengl."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_args("http://server/file.mkv", "")
+        assert "--gpu-api=opengl" in args
+
+    def test_build_args_includes_vd_lavc_dr(self, tmp_path: Path) -> None:
+        """_build_args() includes --vd-lavc-dr=yes."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_args("http://server/file.mkv", "")
+        assert "--vd-lavc-dr=yes" in args
+
+    def test_build_args_includes_osc_no(self, tmp_path: Path) -> None:
+        """_build_args() includes --osc=no."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_args("http://server/file.mkv", "")
+        assert "--osc=no" in args
+
+    def test_build_args_includes_ipc_server(self, tmp_path: Path) -> None:
+        """_build_args() includes --input-ipc-server with the correct socket path."""
+        from backend.mpv_launcher import MpvLauncher, MPV_IPC_SOCKET
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_args("http://server/file.mkv", "")
+        assert f"--input-ipc-server={MPV_IPC_SOCKET}" in args
+
+
+# ---------------------------------------------------------------------------
+# _build_live_tv_args() — new hardware acceleration and IPC args
+# ---------------------------------------------------------------------------
+
+
+class TestBuildLiveTvArgs:
+    def test_build_live_tv_args_includes_hwdec_codecs_all(self, tmp_path: Path) -> None:
+        """_build_live_tv_args() includes --hwdec-codecs=all."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_live_tv_args("http://server/stream")
+        assert "--hwdec-codecs=all" in args
+
+    def test_build_live_tv_args_includes_gpu_api_opengl(self, tmp_path: Path) -> None:
+        """_build_live_tv_args() includes --gpu-api=opengl."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_live_tv_args("http://server/stream")
+        assert "--gpu-api=opengl" in args
+
+    def test_build_live_tv_args_includes_vd_lavc_dr(self, tmp_path: Path) -> None:
+        """_build_live_tv_args() includes --vd-lavc-dr=yes."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_live_tv_args("http://server/stream")
+        assert "--vd-lavc-dr=yes" in args
+
+    def test_build_live_tv_args_includes_osc_no(self, tmp_path: Path) -> None:
+        """_build_live_tv_args() includes --osc=no."""
+        from backend.mpv_launcher import MpvLauncher
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_live_tv_args("http://server/stream")
+        assert "--osc=no" in args
+
+    def test_build_live_tv_args_includes_ipc_server(self, tmp_path: Path) -> None:
+        """_build_live_tv_args() includes --input-ipc-server with the correct socket path."""
+        from backend.mpv_launcher import MpvLauncher, MPV_IPC_SOCKET
+        import backend.mpv_launcher as mpv_mod
+
+        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
+            launcher = MpvLauncher()
+
+        args = launcher._build_live_tv_args("http://server/stream")
+        assert f"--input-ipc-server={MPV_IPC_SOCKET}" in args

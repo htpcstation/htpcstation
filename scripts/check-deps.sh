@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Quick dependency check for HTPC Station.
+# Checks Python, kernel headers, MPV, VA-API drivers, and Python packages.
 # Run this before launching the app to verify your system is ready.
 
 set -euo pipefail
@@ -34,6 +35,7 @@ missing_flatpaks=""
 
 echo "HTPC Station — Dependency Check"
 echo "================================"
+echo "Checks: Python, kernel headers, MPV, VA-API drivers, Python packages"
 echo ""
 
 # --- Python ---
@@ -68,6 +70,74 @@ else
         apt)     missing_sys="${missing_sys:+$missing_sys }linux-headers-$(uname -r)" ;;
         pacman)  missing_sys="${missing_sys:+$missing_sys }kernel-headers" ;;
         emerge)  missing_sys="${missing_sys:+$missing_sys }sys-kernel/linux-headers" ;;
+    esac
+fi
+
+# --- Video playback (MPV + VA-API) ---
+if command -v mpv &>/dev/null; then
+    mpv_ver=$(mpv --version 2>/dev/null | head -1 | awk '{print $2}')
+    echo -e "  $OK  mpv $mpv_ver"
+else
+    echo -e "  $FAIL  mpv not found"
+    echo -e "       Install with one of:"
+    echo -e "         Fedora/RHEL:   sudo dnf install mpv"
+    echo -e "         Debian/Ubuntu: sudo apt-get install mpv"
+    echo -e "         Arch:          sudo pacman -S mpv"
+    echo -e "         Gentoo:        sudo emerge media-video/mpv"
+    errors=$((errors + 1))
+    case "$distro" in
+        dnf)     missing_sys="${missing_sys:+$missing_sys }mpv" ;;
+        apt)     missing_sys="${missing_sys:+$missing_sys }mpv" ;;
+        pacman)  missing_sys="${missing_sys:+$missing_sys }mpv" ;;
+        emerge)  missing_sys="${missing_sys:+$missing_sys }media-video/mpv" ;;
+    esac
+fi
+
+if command -v vainfo &>/dev/null; then
+    echo -e "  $OK  vainfo (VA-API diagnostic)"
+else
+    echo -e "  $FAIL  vainfo not found (needed to verify hardware video acceleration)"
+    echo -e "       Install with one of:"
+    echo -e "         Fedora/RHEL:   sudo dnf install libva-utils"
+    echo -e "         Debian/Ubuntu: sudo apt-get install vainfo"
+    echo -e "         Arch:          sudo pacman -S libva-utils"
+    echo -e "         Gentoo:        sudo emerge media-libs/libva-utils"
+    errors=$((errors + 1))
+    case "$distro" in
+        dnf)     missing_sys="${missing_sys:+$missing_sys }libva-utils" ;;
+        apt)     missing_sys="${missing_sys:+$missing_sys }vainfo" ;;
+        pacman)  missing_sys="${missing_sys:+$missing_sys }libva-utils" ;;
+        emerge)  missing_sys="${missing_sys:+$missing_sys }media-libs/libva-utils" ;;
+    esac
+fi
+
+# Check for Intel VA-API driver (intel-media-driver for Broadwell+, i965 for older)
+va_driver_found=0
+if [ -f /usr/lib64/dri/iHD_drv_video.so ] || [ -f /usr/lib/dri/iHD_drv_video.so ] || \
+   [ -f /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so ]; then
+    echo -e "  $OK  Intel VA-API driver (intel-media-driver / iHD)"
+    va_driver_found=1
+fi
+if [ -f /usr/lib64/dri/i965_drv_video.so ] || [ -f /usr/lib/dri/i965_drv_video.so ] || \
+   [ -f /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so ]; then
+    echo -e "  $OK  Intel VA-API driver (i965)"
+    va_driver_found=1
+fi
+if [ "$va_driver_found" -eq 0 ]; then
+    echo -e "  $FAIL  Intel VA-API driver not found (hardware video decode will not work)"
+    echo -e "       For Broadwell and newer (J5005, 8th gen+):"
+    echo -e "         Fedora/RHEL:   sudo dnf install intel-media-driver"
+    echo -e "         Debian/Ubuntu: sudo apt-get install intel-media-va-driver"
+    echo -e "         Arch:          sudo pacman -S intel-media-driver"
+    echo -e "       For older Intel (Ivy Bridge, Haswell):"
+    echo -e "         Fedora/RHEL:   sudo dnf install libva-intel-driver"
+    echo -e "         Debian/Ubuntu: sudo apt-get install i965-va-driver"
+    echo -e "         Arch:          sudo pacman -S libva-intel-driver"
+    errors=$((errors + 1))
+    case "$distro" in
+        dnf)     missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
+        apt)     missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver" ;;
+        pacman)  missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
     esac
 fi
 

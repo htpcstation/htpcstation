@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia
 import ".."
 import "../components"
+import "."
 
 // Home screen with top-level section navigation (Games / Watch / Settings).
 //
@@ -65,6 +66,21 @@ FocusScope {
     // Set to true when LB/RB is pressed while focus is in the content area,
     // so onLoaded can give focus to the newly loaded content item.
     property bool _focusContentOnLoad: false
+
+    // ── MPV running state ─────────────────────────────────────────────────────
+    // True while an MPV process is active (used to gate the subtitle overlay).
+    property bool _mpvRunning: false
+
+    Connections {
+        target: plex
+        function onMpvStarted() { homeScreen._mpvRunning = true }
+        function onMpvFinished() { homeScreen._mpvRunning = false }
+    }
+
+    // Subtitle overlay window — instantiated once, shown on demand.
+    MpvSubtitleOverlay {
+        id: mpvSubtitleOverlay
+    }
 
     // ── Global music playback state ───────────────────────────────────────────
     // Index into _playbackTracks of the currently playing track (-1 = not playing).
@@ -153,6 +169,8 @@ FocusScope {
 
     // Intercept Start and X button (isContext1) at the HomeScreen level.
     // Also intercept X button (isContext1) for global play/pause when music is loaded.
+    // Also intercept Y button (isContext2) to show subtitle overlay when MPV is running
+    // on the Watch tab.
     Keys.onPressed: (event) => {
         if (keys.isMenu(event)) {
             event.accepted = true
@@ -163,6 +181,11 @@ FocusScope {
             // to child screens (e.g. Retro Games uses X for Favorite).
             event.accepted = true
             homeScreen._togglePlayPause()
+        } else if (keys.isContext2(event) && homeScreen._mpvRunning
+                   && homeScreen.tabSources[homeScreen.currentTab] === "WatchScreen.qml") {
+            // Y button subtitle overlay — only when MPV is running on the Watch tab.
+            event.accepted = true
+            mpvSubtitleOverlay.showOverlay()
         }
     }
 
