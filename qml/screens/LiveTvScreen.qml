@@ -94,7 +94,7 @@ FocusScope {
             right: parent.right
             bottom: actionBar.top
         }
-        visible: liveTV.loading && channelList.count === 0
+        visible: liveTV ? (liveTV.loading && channelList.count === 0) : false
         text: "Loading channels..."
         color: Theme.colorTextDim
         font.family: Theme.fontFamily
@@ -111,7 +111,7 @@ FocusScope {
             right: parent.right
             bottom: actionBar.top
         }
-        visible: !liveTV.loading && channelList.count === 0
+        visible: liveTV ? (!liveTV.loading && channelList.count === 0) : false
         text: "No channels available"
         color: Theme.colorTextDim
         font.family: Theme.fontFamily
@@ -131,7 +131,7 @@ FocusScope {
             bottom: actionBar.top
         }
 
-        model: liveTV.channelsModel
+        model: liveTV ? liveTV.channelsModel : null
         clip: true
         focus: true
         highlightMoveDuration: Theme.animDurationFast

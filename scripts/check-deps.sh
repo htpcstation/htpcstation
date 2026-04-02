@@ -327,45 +327,19 @@ elif [ "$errors" -eq 0 ] && [ -n "$missing_flatpaks" ]; then
     echo ""
     echo "  python3 main.py"
     echo ""
-    echo "Run this to install optional Flatpak apps:"
-    echo ""
-    echo "  flatpak install -y flathub $missing_flatpaks"
+    echo "Optional Flatpak apps not installed: $missing_flatpaks"
+    echo "See above for install instructions."
 else
     echo "$errors required dependency issue(s) found. Please fix them before running."
-    echo ""
-
-    # Build required one-liner
-    req_cmd=""
-    if [ -n "$missing_sys" ] && [ "$distro" != "unknown" ]; then
-        case "$distro" in
-            dnf)     req_cmd="sudo dnf install -y $missing_sys" ;;
-            apt)     req_cmd="sudo apt-get install -y $missing_sys" ;;
-            pacman)  req_cmd="sudo pacman -S --noconfirm $missing_sys" ;;
-            emerge)  req_cmd="sudo emerge $missing_sys" ;;
-        esac
-    fi
+    echo "See the details above for the correct install commands for your system."
     if [ -n "$missing_pip" ]; then
-        if [ -n "$req_cmd" ]; then
-            req_cmd="$req_cmd && pip install $missing_pip"
-        else
-            req_cmd="pip install $missing_pip"
-        fi
-    fi
-    # If distro unknown and only sys packages missing, req_cmd stays empty —
-    # the per-distro hint lines printed above are sufficient.
-    if [ -n "$req_cmd" ]; then
-        echo "Run this to fix required dependencies:"
         echo ""
-        echo "  $req_cmd"
+        echo "Missing Python packages: pip install $missing_pip"
     fi
-    # If req_cmd is empty but errors > 0 (e.g. Python version too old, or unknown distro
-    # with only sys packages missing), the error count message above is sufficient.
-
     if [ -n "$missing_flatpaks" ]; then
         echo ""
-        echo "Run this to install optional Flatpak apps:"
-        echo ""
-        echo "  flatpak install -y flathub $missing_flatpaks"
+        echo "Optional Flatpak apps not installed: $missing_flatpaks"
+        echo "See above for install instructions."
     fi
 
     exit 1
