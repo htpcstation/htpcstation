@@ -31,7 +31,6 @@ node_modules/
 *.DS_Store
 
 # Internal development documents
-resume-project.md
 install-failures.txt
 
 # Test overrides (developer-specific)
