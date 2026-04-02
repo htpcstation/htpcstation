@@ -111,67 +111,150 @@ else
     esac
 fi
 
-# Check for Intel VA-API driver (intel-media-driver for Broadwell+, i965 for older)
-# On Fedora, libva-intel-media-driver is the codec-restricted free version — it omits
-# H.264/HEVC decode. The full driver (intel-media-driver) requires RPM Fusion.
-va_driver_found=0
-va_driver_restricted=0
+# --- VA-API hardware video decode ---
+# Detect GPU vendor and generation to recommend the correct driver.
+# Strategy: use vainfo to check whether H.264 decode is actually available.
+# If vainfo reports no H.264 profile, the driver is missing or codec-restricted.
 
-# Check for iHD driver (Broadwell+ / J5005 / 8th gen+)
-ihd_paths="/usr/lib64/dri/iHD_drv_video.so /usr/lib/dri/iHD_drv_video.so /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so"
-for p in $ihd_paths; do
-    if [ -f "$p" ]; then
-        va_driver_found=1
-        # On Fedora, check if this is the codec-restricted free package
-        # The RPM Fusion full driver lives in dri-nonfree or dri-freeworld paths
-        # The restricted free driver is in the standard dri path only
-        if [ "$distro" = "dnf" ] && command -v rpm &>/dev/null; then
-            pkg=$(rpm -qf "$p" 2>/dev/null | head -1)
-            if echo "$pkg" | grep -q "libva-intel-media-driver"; then
-                echo -e "  $WARN  Intel VA-API driver found but codec-restricted (libva-intel-media-driver)"
-                echo -e "       H.264/HEVC/AV1 hardware decode is DISABLED — video will stutter."
-                echo -e "       Install the full driver from RPM Fusion:"
-                echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
-                echo -e "         sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing"
-                va_driver_restricted=1
-                errors=$((errors + 1))
-            else
-                echo -e "  $OK  Intel VA-API driver (iHD / intel-media-driver)"
-            fi
-        else
-            echo -e "  $OK  Intel VA-API driver (iHD)"
-        fi
-        break
+# Detect GPU vendor from lspci
+gpu_vendor="unknown"
+gpu_desc=""
+if command -v lspci &>/dev/null; then
+    gpu_line=$(lspci 2>/dev/null | grep -i "vga\|3d\|display" | head -1)
+    gpu_desc="$gpu_line"
+    if echo "$gpu_line" | grep -qi "intel"; then
+        gpu_vendor="intel"
+    elif echo "$gpu_line" | grep -qi "amd\|radeon\|ati"; then
+        gpu_vendor="amd"
+    elif echo "$gpu_line" | grep -qi "nvidia"; then
+        gpu_vendor="nvidia"
     fi
-done
-
-# Check for i965 driver (Ivy Bridge / Haswell)
-if [ "$va_driver_found" -eq 0 ]; then
-    for p in /usr/lib64/dri/i965_drv_video.so /usr/lib/dri/i965_drv_video.so /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so; do
-        if [ -f "$p" ]; then
-            echo -e "  $OK  Intel VA-API driver (i965)"
-            va_driver_found=1
-            break
-        fi
-    done
 fi
 
-if [ "$va_driver_found" -eq 0 ]; then
-    echo -e "  $FAIL  Intel VA-API driver not found (hardware video decode will not work)"
-    echo -e "       For Broadwell and newer (J5005, 8th gen+) — requires RPM Fusion on Fedora:"
-    echo -e "         Fedora/RHEL:   sudo dnf install intel-media-driver  (from RPM Fusion)"
-    echo -e "         Debian/Ubuntu: sudo apt-get install intel-media-va-driver-non-free"
-    echo -e "         Arch:          sudo pacman -S intel-media-driver"
-    echo -e "       For older Intel (Ivy Bridge, Haswell):"
-    echo -e "         Fedora/RHEL:   sudo dnf install libva-intel-driver"
-    echo -e "         Debian/Ubuntu: sudo apt-get install i965-va-driver"
-    echo -e "         Arch:          sudo pacman -S libva-intel-driver"
-    errors=$((errors + 1))
-    case "$distro" in
-        dnf)     missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
-        apt)     missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free" ;;
-        pacman)  missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
-    esac
+# Detect Intel generation from CPU model (for driver selection)
+intel_gen="modern"  # default: Broadwell+ (iHD or Mesa iris)
+if [ "$gpu_vendor" = "intel" ] && [ -f /proc/cpuinfo ]; then
+    cpu_model=$(grep "model name" /proc/cpuinfo | head -1)
+    # Sandy Bridge / Ivy Bridge / Haswell = 2nd/3rd/4th gen = use i965 driver
+    if echo "$cpu_model" | grep -qiE "i[357]-[23][0-9]{3}|i[357]-4[0-9]{3}|Celeron.*[BG][0-9]|Pentium.*[BG][0-9]"; then
+        intel_gen="legacy"
+    fi
+fi
+
+# Check if H.264 VA-API decode is actually working
+# Use --display drm to avoid hanging on Wayland display negotiation.
+# Use timeout to prevent blocking if the DRM device is unavailable.
+va_h264_ok=0
+va_driver_ok=0
+if command -v vainfo &>/dev/null; then
+    drm_dev=""
+    for d in /dev/dri/renderD128 /dev/dri/renderD129 /dev/dri/card1; do
+        [ -e "$d" ] && drm_dev="$d" && break
+    done
+    if [ -n "$drm_dev" ]; then
+        vainfo_out=$(timeout --kill-after=2 5 vainfo --display drm --device "$drm_dev" 2>&1 || true)
+    else
+        vainfo_out=$(timeout --kill-after=2 5 vainfo 2>&1 || true)
+    fi
+    if echo "$vainfo_out" | grep -q "VAProfileH264"; then
+        va_h264_ok=1
+        va_driver_ok=1
+        echo -e "  $OK  VA-API hardware decode (H.264 confirmed)"
+    elif echo "$vainfo_out" | grep -q "VAProfile"; then
+        # Driver loaded but H.264 missing — codec-restricted
+        va_driver_ok=1
+        echo -e "  $FAIL  VA-API driver loaded but H.264 decode unavailable — video will stutter"
+        errors=$((errors + 1))
+
+        if [ "$gpu_vendor" = "intel" ]; then
+            # Determine correct fix based on distro and GPU generation
+            if [ "$distro" = "dnf" ] && command -v rpm &>/dev/null; then
+                # Check which package owns the current driver
+                current_pkg=""
+                for p in /usr/lib64/dri/iHD_drv_video.so /usr/lib64/dri/i965_drv_video.so \
+                          /usr/lib64/dri/iris_drv_video.so /usr/lib64/dri/crocus_drv_video.so; do
+                    if [ -f "$p" ]; then
+                        current_pkg=$(rpm -qf "$p" 2>/dev/null | head -1)
+                        break
+                    fi
+                done
+                # Check if mesa-va-drivers (restricted) is the culprit
+                if echo "$current_pkg" | grep -q "^mesa-va-drivers-[0-9]"; then
+                    echo -e "       mesa-va-drivers (codec-restricted) is installed."
+                    echo -e "       Fix: swap for the RPM Fusion freeworld version:"
+                    echo -e ""
+                    echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+                    echo -e "         sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing"
+                    missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers-freeworld"
+                elif echo "$current_pkg" | grep -q "libva-intel-media-driver"; then
+                    echo -e "       libva-intel-media-driver (codec-restricted) is installed."
+                    echo -e "       Fix: install intel-media-driver from RPM Fusion:"
+                    echo -e ""
+                    echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+                    echo -e "         sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing"
+                    missing_sys="${missing_sys:+$missing_sys }intel-media-driver"
+                else
+                    echo -e "       Run: sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing"
+                    missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers-freeworld"
+                fi
+            elif [ "$distro" = "apt" ]; then
+                echo -e "       Fix: sudo apt-get install intel-media-va-driver-non-free"
+                missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free"
+            elif [ "$distro" = "pacman" ]; then
+                echo -e "       Fix: sudo pacman -S intel-media-driver"
+                missing_sys="${missing_sys:+$missing_sys }intel-media-driver"
+            fi
+        elif [ "$gpu_vendor" = "amd" ]; then
+            case "$distro" in
+                dnf)    echo -e "       Fix: sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing" ;;
+                apt)    echo -e "       Fix: sudo apt-get install mesa-va-drivers" ;;
+                pacman) echo -e "       Fix: sudo pacman -S libva-mesa-driver" ;;
+            esac
+        fi
+    else
+        # vainfo ran but no profiles at all — driver not found
+        echo -e "  $FAIL  VA-API driver not found — hardware video decode unavailable"
+        errors=$((errors + 1))
+        if [ "$gpu_vendor" = "intel" ]; then
+            if [ "$intel_gen" = "legacy" ]; then
+                echo -e "       Install the legacy Intel VA-API driver:"
+                case "$distro" in
+                    dnf)    echo -e "         sudo dnf install libva-intel-driver"
+                            missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
+                    apt)    echo -e "         sudo apt-get install i965-va-driver"
+                            missing_sys="${missing_sys:+$missing_sys }i965-va-driver" ;;
+                    pacman) echo -e "         sudo pacman -S libva-intel-driver"
+                            missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
+                esac
+            else
+                echo -e "       Install the Intel VA-API driver (requires RPM Fusion on Fedora):"
+                case "$distro" in
+                    dnf)    echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+                            echo -e "         sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing"
+                            missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers-freeworld" ;;
+                    apt)    echo -e "         sudo apt-get install intel-media-va-driver-non-free"
+                            missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free" ;;
+                    pacman) echo -e "         sudo pacman -S intel-media-driver"
+                            missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
+                esac
+            fi
+        elif [ "$gpu_vendor" = "amd" ]; then
+            echo -e "       Install the AMD VA-API driver:"
+            case "$distro" in
+                dnf)    echo -e "         sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing"
+                        missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers-freeworld" ;;
+                apt)    echo -e "         sudo apt-get install mesa-va-drivers"
+                        missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers" ;;
+                pacman) echo -e "         sudo pacman -S libva-mesa-driver"
+                        missing_sys="${missing_sys:+$missing_sys }libva-mesa-driver" ;;
+            esac
+        else
+            echo -e "       Install the VA-API driver for your GPU vendor."
+        fi
+    fi
+else
+    # vainfo not installed — already caught above, but handle gracefully
+    echo -e "  $WARN  Cannot check VA-API (vainfo not found)"
 fi
 
 # --- Python packages ---
