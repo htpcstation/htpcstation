@@ -71,7 +71,11 @@ htpcstation/
                                        # auto-user-select, auto-play, auto-expand mini player (~900 lines)
   qml/
     main.qml                           # ApplicationWindow, vpx(), QuitDialog
-    Theme.qml                          # Singleton: colors, fonts, animation durations
+    Theme.qml                          # Singleton: two-layer token system — _palette vars (dark palette,
+                                       # only these change between themes) + semantic tokens (colorAccent,
+                                       # colorSurface, colorOverlay, colorBadgeSteam, etc.). colorPrimary
+                                       # and colorSecondary kept as aliases. No hardcoded hex in any other
+                                       # QML file.
     qmldir                             # Singleton registration
     components/
       ClockDisplay.qml
@@ -148,6 +152,13 @@ htpcstation/
 ---
 
 ## Architecture Notes
+
+### Theme System
+- Two-layer structure: `_palette` vars (internal, only these change between themes) → semantic tokens (what QML files use)
+- Current palette: dark only. Future palette swap = change `_palette` vars only.
+- `colorPrimary` = alias for `colorAccent`, `colorSecondary` = alias for `colorSurface` — kept for backward compat, rename in 4b/4c
+- Never reference `_palette` vars directly from QML files
+- 4b/4c will: rename aliases, add theme switcher in Settings, do visual polish pass
 
 ### QML Focus Management
 - Every screen/component is a `FocusScope` with `enabled: focus`
@@ -344,6 +355,7 @@ Button Layout setting swaps both display labels AND functional mapping.
 - **CP 14** — Now Playing view, persistent background playback, global play/pause, sort persistence, tab visibility, Clear Recently Played
 - **CP 15** — Public release prep (README, MIT license, PII sanitization, requirements.txt, check-deps), list views for all tabs, LT/RT quick jump, Plex Live TV gamepad navigation
 - **CP 16** — PC Games Favorites, System Cores settings, SYSTEM_DEFAULTS expansion (~130 systems), Plex My List, MPV video player (VA-API, Wayland, resume, subtitle overlay), embedded Live TV guide (EPG + HDHomeRun), hardware-aware check-deps
+- **CP 17** — UI Refresh 4a: Theme.qml token interface (palette vars + semantic tokens), all hardcoded hex colors replaced across 26 QML files
 
 ---
 
@@ -365,3 +377,4 @@ All task briefs at `~/opencode/misc/coding-team/`:
 - `system-cores-settings/` (001), `system-defaults-expansion/` (001)
 - `plex-watchlist/` (001–002), `plex-mylist/` (001–002)
 - `mpv-player/` (001–004), `mpv-subtitle-overlay/` (001)
+- `ui-refresh-4a/` (001)
