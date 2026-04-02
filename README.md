@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-HTPC Station turns an old mini PC into a couch-friendly entertainment center. It presents a single fullscreen interface — fully navigable with a gamepad — that brings together retro game emulation, PC gaming via Steam, game streaming via Moonlight, Plex video browsing, and Plex music playback in one place. Rather than playing media or running emulators itself, HTPC Station acts as a launcher and library browser: it handles browsing, artwork, and metadata, then hands off to RetroArch, Steam, Moonlight, and Plex Web when you press Play. The interface is designed for 1080p output and runs well on low-power hardware such as Intel J5005-class mini PCs (for example, the Dell Wyse 5070).
+HTPC Station turns an old mini PC into a couch-friendly entertainment center. It presents a single fullscreen interface — fully navigable with a gamepad — that brings together retro game emulation, PC gaming via Steam, game streaming via Moonlight, Plex video browsing, and Plex music playback in one place. Rather than playing media or running emulators itself, HTPC Station acts as a launcher and library browser: it handles browsing, artwork, and metadata, then hands off to RetroArch, Steam, Moonlight, and MPV when you press Play. The interface is designed for 1080p output and runs well on low-power hardware such as Intel J5005-class mini PCs (for example, the Dell Wyse 5070).
 
 ---
 
@@ -18,6 +18,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Switch between Grid and List views from the sort menu. List view shows a preview panel with artwork, metadata, and description alongside the game list.
 - Launch any game directly into RetroArch.
 - Play stats (play count, last played, total time) are tracked automatically.
+- Configure the RetroArch core for each system individually from Settings.
 
 ### PC Games (Steam)
 
@@ -25,6 +26,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Poster artwork is downloaded automatically.
 - Rich metadata from the Steam Store: description, genre, developer, Metacritic score, and more.
 - Grid and List views available for Steam, Moonlight, and Recently Played sources.
+- Mark Steam and Moonlight games as favorites. A PC Favorites collection groups them together.
 - Sort and launch games directly.
 
 ### Game Streaming (Moonlight)
@@ -42,8 +44,11 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - TV show detail view with season tabs and per-episode watched indicators.
 - Sort by name, date, year, or rating; filter by genre.
 - Grid and List views for movies, shows, and Continue Watching.
-- Launch any title into Plex Web for playback with a single button press.
-- Live TV support via HDHomeRun tuners connected through Plex DVR. Navigate the channel guide with a gamepad: D-pad moves between channels and programs, A opens program details with Watch Now and Record options, LT/RT scroll the timeline, LB/RB switch genre tabs.
+- **My List** — a local personal playlist. Press X on any movie, show, or episode to add or remove it. My List appears at the bottom of the Watch tab library list.
+- Play any title directly in **MPV** for hardware-accelerated local playback. When resuming a partially watched title, a dialog offers to resume from where you left off or start from the beginning.
+- Press Y during MPV playback to open a subtitle track selector.
+- **Live TV** — an embedded channel guide powered by your HDHomeRun tuner and Plex DVR. Browse all channels with current and next program information. Press A to start watching a channel directly in MPV.
+- Plex Web browser launch is available as a fallback (toggle in Settings).
 - Multi-user Plex Home support, including content restrictions for managed and kids profiles.
 
 ### Listen (Plex Music)
@@ -70,8 +75,10 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 ### Settings
 
 - Configure ROM paths and RetroArch settings.
+- Set the RetroArch core for each individual system.
 - Sign in to Plex with OAuth (no manual token entry needed).
 - Select your Plex server and switch between Plex Home users.
+- Choose video player: MPV (default, hardware-accelerated) or Plex Web browser.
 - Set your Moonlight host and browser command.
 - Remap your controller or choose a button layout.
 - Toggle video snap autoplay and adjust the preview delay.
@@ -91,8 +98,10 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - **For retro games:** RetroArch installed (Flatpak recommended), plus ROMs with Batocera/Knulli/EmulationStation scraped metadata (`gamelist.xml` and artwork). HTPC Station does not scrape ROMs — prepare your library first.
 - **For Steam games:** Steam installed (Flatpak or native).
 - **For game streaming:** Moonlight installed (Flatpak recommended) and a Sunshine or Apollo host.
-- **For Plex:** A Plex account with access to a Plex Media Server. Local network direct-play is preferred. 
-- **For Plex playback:** Brave browser (Flatpak recommended). Other Chromium-based browsers may work.
+- **For Plex video playback:** MPV installed (`sudo dnf install mpv` or equivalent). Hardware acceleration requires VA-API drivers — see the dependency checker output for your specific hardware and distro.
+- **For Plex Live TV:** An HDHomeRun tuner connected through Plex DVR.
+- **For Plex music and browser fallback:** Brave browser (Flatpak recommended).
+- **For Plex:** A Plex account with access to a Plex Media Server. Local network direct-play is preferred.
 
 ### Installation
 
@@ -107,7 +116,7 @@ Before installing Python dependencies, check that system prerequisites are in pl
 bash scripts/check-deps.sh
 ```
 
-This checks for Python 3.10+, kernel headers (required to build `evdev`), required Python packages, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices.
+This checks for Python 3.10+, kernel headers, MPV, VA-API hardware decode drivers, FFmpeg codec support, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices. Each failed check prints the specific install command for your distro and hardware.
 
 Then install Python packages:
 
@@ -129,7 +138,7 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 python3 -m pytest tests/ -q
 ```
 
-The suite currently covers over 1,100 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+The suite currently covers over 1,450 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
 
 1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
 2. Replace the sample data with your real values.
@@ -161,9 +170,17 @@ The tests automatically load these overrides via `tests/local_overrides.py`, so 
 
 **Favorites (Retro Games):** Press X (or F1) on a game to toggle it as a favorite. Favorites appear in their own collection at the top of the system list.
 
+**Favorites (PC Games):** Press X on any Steam or Moonlight game to toggle it as a favorite. A PC Favorites source appears at the top of the PC Games source list.
+
+**My List (Watch):** Press X on any movie, show, or episode to add or remove it from My List. My List appears at the bottom of the Watch tab library list and launches directly in MPV.
+
+**Video playback:** By default, movies and shows play in MPV with hardware acceleration. If a title has a saved position, a dialog asks whether to resume or start from the beginning. Press Y during playback to open the subtitle track selector. To switch to Plex Web browser playback, go to Settings → Plex → Video Player.
+
+**Live TV:** Select Live TV from the Watch tab library list to open the channel guide. Each row shows the channel logo, number, and current and next program. Press A to start watching. Channels without a matching HDHomeRun tuner show "Not available."
+
 **Music playback:** Start playing music in the Listen tab, then navigate anywhere — music keeps playing in the background. Press X from any tab to pause or resume. The current track name is shown in the top-right corner.
 
-**Plex browser:** When you launch a Plex title, a browser window opens for playback. Use the gamepad to control playback (play/pause, seek, navigate menus). Press Start+Select together to close the browser and return to HTPC Station.
+**Plex browser:** When using browser playback mode, a browser window opens for playback. Use the gamepad to control playback (play/pause, seek, navigate menus). Press Start+Select together to close the browser and return to HTPC Station.
 
 **Controller mapping:** Go to Settings, then Controller, then Map Controller to remap your gamepad. The dialog walks you through each button one at a time.
 
@@ -173,6 +190,20 @@ The tests automatically load these overrides via `tests/local_overrides.py`, so 
 
 Custom images always override auto-downloaded artwork.
 
+**MPV gamepad bindings:** MPV uses a bundled `input.conf` at `~/.config/htpcstation/mpv/input.conf`. The file is created automatically on first launch and updated when new bindings are added. You can edit it manually — your changes are preserved across updates as long as the version header is current.
+
+| Button | MPV Action |
+|---|---|
+| A | Play / Pause |
+| B | Quit (return to HTPC Station) |
+| D-pad Left/Right | Seek ±10 seconds |
+| D-pad Up/Down | Volume ±5 |
+| LT / RT | Previous / Next chapter |
+| LB | Cycle audio track |
+| X | Open subtitle selector (via HTPC Station overlay) |
+| Y | Show playback progress |
+| Start | Quit |
+
 ### Controller Reference
 
 | Button | Action |
@@ -180,8 +211,8 @@ Custom images always override auto-downloaded artwork.
 | D-pad / Arrow keys | Navigate |
 | A / Enter | Select / Launch |
 | B / Escape | Back / Cancel |
-| X / F1 | Favorite (retro games) / Play-Pause (music) |
-| Y / F2 | Sort / View menu |
+| X / F1 | Favorite / My List toggle / Play-Pause (music) |
+| Y / F2 | Sort / View menu; Subtitle selector (during MPV playback) |
 | LT / RT (PgUp/PgDn) | Quick scroll (next letter or ±10 items) |
 | Start / F10 | Quit dialog |
 | Start + Select / Alt + F4 | Close Plex browser |
@@ -192,13 +223,14 @@ Custom images always override auto-downloaded artwork.
 
 - Changing which tabs are visible requires restarting the app.
 - HTPC Station does not scrape ROM metadata. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library.
-- Plex playback happens in a browser kiosk window. To exit back to HTPC Station, press Start+Select on your gamepad (or Alt+F4 on a keyboard).
+- Plex browser playback (when enabled) happens in a kiosk window. To exit back to HTPC Station, press Start+Select on your gamepad (or Alt+F4 on a keyboard).
 - Continue Watching is hidden for managed and kids Plex profiles. This is a Plex platform limitation with no known workaround.
 - Moonlight host pairing must be done through Moonlight's own interface. You can open it from Settings by pressing "Open Moonlight."
 - Large Plex music playlists (over 1,000 tracks) are hidden to avoid performance issues.
-- The Plex Live TV guide is navigable with a gamepad (browse channels, select programs, watch/record). Nested playback settings menus (e.g., transcode quality) are not yet reachable from the gamepad during Live TV playback.
-- Per-system emulator core configuration is not yet available (coming soon).
-- Only tested on Linux x86_64 with Xorg. Wayland is not yet supported.
+- Live TV requires an HDHomeRun tuner connected through Plex DVR. Channels not available on the tuner show "Not available" in the guide.
+- AV1 video content requires hardware decode support (Intel Gen 12+ / Tiger Lake or newer). On older hardware, AV1 plays via software decode and may stutter on high-bitrate files.
+- MPV gamepad bindings use standard Linux evdev button names. If your controller uses non-standard mappings, edit `~/.config/htpcstation/mpv/input.conf` manually.
+- Only tested on Linux x86_64 with Xorg and Wayland (via XWayland for the Qt app; MPV uses native Wayland context).
 
 ---
 
@@ -208,10 +240,10 @@ Custom images always override auto-downloaded artwork.
 - Tab management improvements so hiding or showing tabs does not require a restart.
 - Richer music features: shuffle, repeat, a seek bar, and volume control.
 - Metadata (descriptions, genres) for Moonlight apps pulled from Steam.
-- PC game favorites.
-- Plex watchlist and search.
+- Plex search.
+- Mark watched/unwatched in Plex.
 - First-run setup wizard.
-- Wayland support.
+- Standalone emulator support (Dolphin, PCSX2, etc.) for systems without a libretro core.
 
 ---
 
@@ -223,12 +255,13 @@ For those interested in what's under the hood:
 |---|---|
 | Application framework | Qt 6 / QML with PySide6 (Python) |
 | Target hardware | Intel J5005-class (Gemini Lake) or better |
-| Target display | 1920x1080 fullscreen, Xorg |
+| Target display | 1920x1080 fullscreen, Xorg or Wayland |
 | Emulator backend | RetroArch via Flatpak |
 | PC game launch | Steam URI protocol (`steam://rungameid/`) |
 | Game streaming | Moonlight CLI (Flatpak) |
 | Media browsing | Plex Media Server API |
-| Media playback | Plex Web via Brave browser (kiosk mode) |
+| Video playback | System MPV with VA-API hardware decode (direct Plex stream URLs) |
+| Live TV | HDHomeRun direct streams via Plex DVR + Plex cloud EPG |
 | Music playback | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Gamepad input | evdev with synthetic Qt key events |
 | Browser gamepad | Chromium extension (Manifest V3) with Gamepad API |
@@ -238,7 +271,7 @@ For those interested in what's under the hood:
 
 ## Credits and Acknowledgments
 
-HTPC Station was developed with the assistance of AI coding agents, coordinated through OpenCode. It builds on the work of many excellent open-source projects: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, Brave, Pegasus, and ES-DE. Thank you to all the developers and communities behind these tools.
+HTPC Station was developed with the assistance of AI coding agents, coordinated through OpenCode. It builds on the work of many excellent open-source projects: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, MPV, Brave, Pegasus, and ES-DE. Thank you to all the developers and communities behind these tools.
 
 ---
 
