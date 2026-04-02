@@ -73,7 +73,7 @@ else
     esac
 fi
 
-# --- Video playback (MPV + VA-API) ---
+# --- Video playback (MPV + FFmpeg + VA-API) ---
 if command -v mpv &>/dev/null; then
     mpv_ver=$(mpv --version 2>/dev/null | head -1 | awk '{print $2}')
     echo -e "  $OK  mpv $mpv_ver"
@@ -91,6 +91,20 @@ else
         pacman)  missing_sys="${missing_sys:+$missing_sys }mpv" ;;
         emerge)  missing_sys="${missing_sys:+$missing_sys }media-video/mpv" ;;
     esac
+fi
+
+# Check for full FFmpeg (codec-restricted ffmpeg-free won't decode H.264/EAC3 via hwdec)
+if [ "$distro" = "dnf" ] && command -v rpm &>/dev/null; then
+    if rpm -q ffmpeg-free &>/dev/null && ! rpm -q ffmpeg &>/dev/null; then
+        echo -e "  $FAIL  ffmpeg-free (codec-restricted) is installed — H.264 hwdec and EAC3 audio will not work"
+        echo -e "       Fix: swap for the full FFmpeg from RPM Fusion:"
+        echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+        echo -e "         sudo dnf swap ffmpeg-free ffmpeg --allowerasing"
+        errors=$((errors + 1))
+        missing_sys="${missing_sys:+$missing_sys }ffmpeg"
+    elif rpm -q ffmpeg &>/dev/null; then
+        echo -e "  $OK  ffmpeg (full codec support)"
+    fi
 fi
 
 if command -v vainfo &>/dev/null; then
