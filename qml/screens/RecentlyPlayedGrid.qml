@@ -273,13 +273,13 @@ FocusScope {
                         width: root.vpx(20)
                         height: root.vpx(20)
                         radius: root.vpx(3)
-                        color: modelData.source === "steam" ? "#1a9fff" : "#ff8c00"
+                        color: modelData.source === "steam" ? Theme.colorBadgeSteam : Theme.colorBadgeMoonlight
                         opacity: 0.92
 
                         Text {
                             anchors.centerIn: parent
                             text: modelData.source === "steam" ? "S" : "M"
-                            color: "#ffffff"
+                            color: Theme.colorOverlayText
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(11)
                             font.bold: true
@@ -352,7 +352,7 @@ FocusScope {
         // ── Backdrop ─────────────────────────────────────────────────────────
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
+            color: Theme.colorImagePlaceholder
             opacity: 0.55
         }
 
@@ -453,7 +453,7 @@ FocusScope {
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: viewOverlay._viewIndex === index
-                                   ? "#ffffff"
+                                   ? Theme.colorOverlayText
                                    : Theme.colorText
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeBody)

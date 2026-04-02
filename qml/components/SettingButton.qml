@@ -80,7 +80,7 @@ FocusScope {
         }
         text: buttonRoot.statusText
         color: buttonRoot.statusText.startsWith("Failed") || buttonRoot.statusText.startsWith("Error")
-            ? "#ff6b6b"
+            ? Theme.colorError
             : Theme.colorPrimary
         font.family: Theme.fontFamily
         font.pixelSize: root.vpx(Theme.fontSizeBody)

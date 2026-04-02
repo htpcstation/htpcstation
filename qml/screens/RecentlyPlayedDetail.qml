@@ -236,13 +236,13 @@ FocusScope {
                     height: root.vpx(28)
                     radius: root.vpx(4)
                     color: recentlyPlayedDetail.gameData.source === "steam"
-                           ? "#1a9fff"
-                           : "#ff8c00"
+                           ? Theme.colorBadgeSteam
+                           : Theme.colorBadgeMoonlight
 
                     Text {
                         anchors.centerIn: parent
                         text: recentlyPlayedDetail.gameData.source === "steam" ? "S" : "M"
-                        color: "#ffffff"
+                        color: Theme.colorOverlayText
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(14)
                         font.bold: true

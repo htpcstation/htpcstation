@@ -343,7 +343,7 @@ FocusScope {
         }
         width: toastText.implicitWidth + root.vpx(32)
         height: root.vpx(40)
-        color: "#CC000000"
+        color: Theme.colorOverlay
         radius: root.vpx(8)
         opacity: 0.0
         visible: opacity > 0
@@ -351,7 +351,7 @@ FocusScope {
         Text {
             id: toastText
             anchors.centerIn: parent
-            color: "#ffffff"
+            color: Theme.colorOverlayText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeBody)
         }

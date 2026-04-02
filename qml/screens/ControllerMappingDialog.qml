@@ -241,7 +241,7 @@ FocusScope {
     // ── Dark semi-transparent backdrop ───────────────────────────────────────
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
+        color: Theme.colorImagePlaceholder
         opacity: 0.85
     }
 
@@ -324,7 +324,7 @@ FocusScope {
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeBody)
             color: {
-                if (mappingDialog._state === "recorded") return "#44cc88"
+                if (mappingDialog._state === "recorded") return Theme.colorSuccess
                 return Theme.colorTextDim
             }
         }

@@ -37,7 +37,7 @@ FocusScope {
     // ── Dark semi-transparent backdrop ───────────────────────────────────────
     Rectangle {
         anchors.fill: parent
-        color: "#000000"
+        color: Theme.colorImagePlaceholder
         opacity: 0.7
     }
 

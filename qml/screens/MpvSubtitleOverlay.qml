@@ -39,7 +39,7 @@ Window {
     // Dark semi-transparent panel
     Rectangle {
         anchors.fill: parent
-        color: "#CC0d0d14"
+        color: Theme.colorPanelDark
         radius: 12
 
         Column {
@@ -48,7 +48,7 @@ Window {
 
             Text {
                 text: "Subtitles"
-                color: "#ffffff"
+                color: Theme.colorOverlayText
                 font.pixelSize: 20
                 font.bold: true
             }
@@ -79,7 +79,7 @@ Window {
                 delegate: Rectangle {
                     width: trackList.width
                     height: 52
-                    color: trackList.currentIndex === index ? "#44ffffff" : "transparent"
+                    color: trackList.currentIndex === index ? Theme.colorRowHighlight : "transparent"
                     radius: 6
 
                     Row {
@@ -88,12 +88,12 @@ Window {
 
                         Text {
                             text: model.selected ? "●" : "○"
-                            color: model.selected ? "#e5a00d" : "#888888"
+                            color: model.selected ? Theme.colorTrackSelected : Theme.colorTrackMuted
                             font.pixelSize: 16
                         }
                         Text {
                             text: model.label
-                            color: "#ffffff"
+                            color: Theme.colorOverlayText
                             font.pixelSize: 16
                         }
                     }

@@ -379,7 +379,7 @@ FocusScope {
         // ── Backdrop ─────────────────────────────────────────────────────────
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
+            color: Theme.colorImagePlaceholder
             opacity: 0.55
         }
 
@@ -480,7 +480,7 @@ FocusScope {
                             }
                             color: {
                                 var isFocused = sortOverlay._focusRow === 0 && sortOverlay._sortIndex === index
-                                return isFocused ? "#ffffff" : Theme.colorText
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
                             }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeBody)
@@ -546,7 +546,7 @@ FocusScope {
                             }
                             color: {
                                 var isFocused = sortOverlay._focusRow === 1 && sortOverlay._viewIndex === index
-                                return isFocused ? "#ffffff" : Theme.colorText
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
                             }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeBody)

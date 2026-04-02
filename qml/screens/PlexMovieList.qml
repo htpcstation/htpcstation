@@ -553,7 +553,7 @@ FocusScope {
         // ── Backdrop ─────────────────────────────────────────────────────────
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
+            color: Theme.colorImagePlaceholder
             opacity: 0.55
         }
 
@@ -669,7 +669,7 @@ FocusScope {
                             color: {
                                 var isFocused = sortFilterOverlay._section === 0
                                              && sortFilterOverlay._sortIndex === index
-                                return isFocused ? "#ffffff" : Theme.colorText
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
                             }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -731,7 +731,7 @@ FocusScope {
                         color: {
                             var isFocused = sortFilterOverlay._section === 1
                                          && sortFilterOverlay._genreIndex === 0
-                            return isFocused ? "#ffffff" : Theme.colorText
+                            return isFocused ? Theme.colorOverlayText : Theme.colorText
                         }
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -768,7 +768,7 @@ FocusScope {
                             color: {
                                 var isFocused = sortFilterOverlay._section === 1
                                              && sortFilterOverlay._genreIndex === (index + 1)
-                                return isFocused ? "#ffffff" : Theme.colorText
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
                             }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -838,7 +838,7 @@ FocusScope {
                             color: {
                                 var isFocused = sortFilterOverlay._section === 2
                                              && sortFilterOverlay._viewIndex === index
-                                return isFocused ? "#ffffff" : Theme.colorText
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
                             }
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeSmall)

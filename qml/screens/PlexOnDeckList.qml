@@ -267,7 +267,7 @@ FocusScope {
                     // Track (background)
                     Rectangle {
                         anchors.fill: parent
-                        color: Qt.rgba(0, 0, 0, 0.5)
+                        color: Theme.colorOverlayMid
                     }
 
                     // Fill (progress)
@@ -476,7 +476,7 @@ FocusScope {
                     // Track (background)
                     Rectangle {
                         anchors.fill: parent
-                        color: Qt.rgba(0, 0, 0, 0.5)
+                        color: Theme.colorOverlayMid
                     }
 
                     // Fill (progress)
@@ -548,7 +548,7 @@ FocusScope {
         // ── Backdrop ─────────────────────────────────────────────────────────
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
+            color: Theme.colorImagePlaceholder
             opacity: 0.55
         }
 
@@ -649,7 +649,7 @@ FocusScope {
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: viewOverlay._viewIndex === index
-                                   ? "#ffffff"
+                                   ? Theme.colorOverlayText
                                    : Theme.colorText
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeBody)

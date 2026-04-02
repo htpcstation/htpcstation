@@ -247,8 +247,8 @@ FocusScope {
                         radius: root.vpx(5)
                         anchors.verticalCenter: parent.verticalCenter
                         color: recentlyPlayedList._previewData.source === "steam"
-                               ? "#1a9fff"
-                               : "#ff8c00"
+                               ? Theme.colorBadgeSteam
+                               : Theme.colorBadgeMoonlight
                     }
 
                     Text {
@@ -356,7 +356,7 @@ FocusScope {
                     width: root.vpx(8)
                     height: root.vpx(8)
                     radius: root.vpx(4)
-                    color: modelData.source === "steam" ? "#1a9fff" : "#ff8c00"
+                    color: modelData.source === "steam" ? Theme.colorBadgeSteam : Theme.colorBadgeMoonlight
                 }
 
                 // Game name
@@ -428,7 +428,7 @@ FocusScope {
         // ── Backdrop ─────────────────────────────────────────────────────────
         Rectangle {
             anchors.fill: parent
-            color: "#000000"
+            color: Theme.colorImagePlaceholder
             opacity: 0.55
         }
 
@@ -529,7 +529,7 @@ FocusScope {
                                 return (isActive ? "✓ " : "") + modelData.label
                             }
                             color: viewOverlay._viewIndex === index
-                                   ? "#ffffff"
+                                   ? Theme.colorOverlayText
                                    : Theme.colorText
                             font.family: Theme.fontFamily
                             font.pixelSize: root.vpx(Theme.fontSizeBody)
