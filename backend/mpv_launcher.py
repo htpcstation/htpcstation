@@ -7,6 +7,7 @@ via QProcess. Only one MPV instance may be active at a time.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Optional
@@ -135,6 +136,32 @@ class MpvLauncher(QObject):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _gpu_context() -> str:
+        """Return the correct MPV gpu-context for the current display server.
+
+        On Wayland, use 'wayland'. On Xorg (or Xwayland), use 'x11'.
+        Defaults to 'x11' if the session type cannot be determined.
+        """
+        session = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
+            return "wayland"
+        return "x11"
+
+    @staticmethod
+    def _hwdec_mode() -> str:
+        """Return the appropriate hwdec mode for the current display server.
+
+        On Wayland, VA-API decoded frames cannot be directly displayed via
+        the Wayland EGL path without a copy — use 'vaapi-copy' which decodes
+        with VA-API and copies to a regular GPU surface for display.
+        On Xorg, 'vaapi' works directly.
+        """
+        session = os.environ.get("XDG_SESSION_TYPE", "").lower()
+        if session == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
+            return "vaapi-copy"
+        return "vaapi"
+
     def _build_live_tv_args(self, url: str, title: str = "") -> list[str]:
         """Build the argv list for a Live TV MPV process.
 
@@ -142,18 +169,20 @@ class MpvLauncher(QObject):
         No --http-header-fields (HDHomeRun streams need no auth).
         No --start (live streams always start from the live edge).
         """
+        gpu_ctx = self._gpu_context()
+        hwdec = self._hwdec_mode()
         args = [
             "--fullscreen",
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
-            "--hwdec=vaapi",
+            f"--hwdec={hwdec}",
             "--hwdec-codecs=all",
             "--gpu-api=opengl",
             "--vd-lavc-dr=yes",
             "--osc=no",
             f"--input-ipc-server={MPV_IPC_SOCKET}",
             "--vo=gpu",
-            "--gpu-context=x11",
+            f"--gpu-context={gpu_ctx}",
             "--cache=yes",
             "--demuxer-max-bytes=128MiB",
             "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5",
@@ -166,18 +195,20 @@ class MpvLauncher(QObject):
 
     def _build_args(self, url: str, title: str, start_ms: int = 0) -> list[str]:
         """Build the argv list for the MPV process."""
+        gpu_ctx = self._gpu_context()
+        hwdec = self._hwdec_mode()
         args = [
             "--fullscreen",
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
-            "--hwdec=vaapi",
+            f"--hwdec={hwdec}",
             "--hwdec-codecs=all",
             "--gpu-api=opengl",
             "--vd-lavc-dr=yes",
             "--osc=no",
             f"--input-ipc-server={MPV_IPC_SOCKET}",
             "--vo=gpu",
-            "--gpu-context=x11",
+            f"--gpu-context={gpu_ctx}",
             "--cache=yes",
             "--demuxer-max-bytes=50MiB",
             "--http-header-fields=X-Plex-Client-Identifier:htpcstation,X-Plex-Product:HTPC Station",

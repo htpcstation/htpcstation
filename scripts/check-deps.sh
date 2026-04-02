@@ -112,22 +112,55 @@ else
 fi
 
 # Check for Intel VA-API driver (intel-media-driver for Broadwell+, i965 for older)
+# On Fedora, libva-intel-media-driver is the codec-restricted free version — it omits
+# H.264/HEVC decode. The full driver (intel-media-driver) requires RPM Fusion.
 va_driver_found=0
-if [ -f /usr/lib64/dri/iHD_drv_video.so ] || [ -f /usr/lib/dri/iHD_drv_video.so ] || \
-   [ -f /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so ]; then
-    echo -e "  $OK  Intel VA-API driver (intel-media-driver / iHD)"
-    va_driver_found=1
+va_driver_restricted=0
+
+# Check for iHD driver (Broadwell+ / J5005 / 8th gen+)
+ihd_paths="/usr/lib64/dri/iHD_drv_video.so /usr/lib/dri/iHD_drv_video.so /usr/lib/x86_64-linux-gnu/dri/iHD_drv_video.so"
+for p in $ihd_paths; do
+    if [ -f "$p" ]; then
+        va_driver_found=1
+        # On Fedora, check if this is the codec-restricted free package
+        # The RPM Fusion full driver lives in dri-nonfree or dri-freeworld paths
+        # The restricted free driver is in the standard dri path only
+        if [ "$distro" = "dnf" ] && command -v rpm &>/dev/null; then
+            pkg=$(rpm -qf "$p" 2>/dev/null | head -1)
+            if echo "$pkg" | grep -q "libva-intel-media-driver"; then
+                echo -e "  $WARN  Intel VA-API driver found but codec-restricted (libva-intel-media-driver)"
+                echo -e "       H.264/HEVC/AV1 hardware decode is DISABLED — video will stutter."
+                echo -e "       Install the full driver from RPM Fusion:"
+                echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+                echo -e "         sudo dnf swap libva-intel-media-driver intel-media-driver --allowerasing"
+                va_driver_restricted=1
+                errors=$((errors + 1))
+            else
+                echo -e "  $OK  Intel VA-API driver (iHD / intel-media-driver)"
+            fi
+        else
+            echo -e "  $OK  Intel VA-API driver (iHD)"
+        fi
+        break
+    fi
+done
+
+# Check for i965 driver (Ivy Bridge / Haswell)
+if [ "$va_driver_found" -eq 0 ]; then
+    for p in /usr/lib64/dri/i965_drv_video.so /usr/lib/dri/i965_drv_video.so /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so; do
+        if [ -f "$p" ]; then
+            echo -e "  $OK  Intel VA-API driver (i965)"
+            va_driver_found=1
+            break
+        fi
+    done
 fi
-if [ -f /usr/lib64/dri/i965_drv_video.so ] || [ -f /usr/lib/dri/i965_drv_video.so ] || \
-   [ -f /usr/lib/x86_64-linux-gnu/dri/i965_drv_video.so ]; then
-    echo -e "  $OK  Intel VA-API driver (i965)"
-    va_driver_found=1
-fi
+
 if [ "$va_driver_found" -eq 0 ]; then
     echo -e "  $FAIL  Intel VA-API driver not found (hardware video decode will not work)"
-    echo -e "       For Broadwell and newer (J5005, 8th gen+):"
-    echo -e "         Fedora/RHEL:   sudo dnf install intel-media-driver"
-    echo -e "         Debian/Ubuntu: sudo apt-get install intel-media-va-driver"
+    echo -e "       For Broadwell and newer (J5005, 8th gen+) — requires RPM Fusion on Fedora:"
+    echo -e "         Fedora/RHEL:   sudo dnf install intel-media-driver  (from RPM Fusion)"
+    echo -e "         Debian/Ubuntu: sudo apt-get install intel-media-va-driver-non-free"
     echo -e "         Arch:          sudo pacman -S intel-media-driver"
     echo -e "       For older Intel (Ivy Bridge, Haswell):"
     echo -e "         Fedora/RHEL:   sudo dnf install libva-intel-driver"
@@ -136,7 +169,7 @@ if [ "$va_driver_found" -eq 0 ]; then
     errors=$((errors + 1))
     case "$distro" in
         dnf)     missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
-        apt)     missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver" ;;
+        apt)     missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free" ;;
         pacman)  missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
     esac
 fi

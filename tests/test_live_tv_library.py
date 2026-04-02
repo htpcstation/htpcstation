@@ -722,9 +722,9 @@ class TestMpvLauncherLiveTv:
         assert program == "/usr/bin/mpv"
         assert "--fullscreen" in args
         assert "--no-terminal" in args
-        assert "--hwdec=vaapi" in args
+        assert any(a.startswith("--hwdec=vaapi") for a in args)  # vaapi or vaapi-copy
         assert "--vo=gpu" in args
-        assert "--gpu-context=x11" in args
+        assert any(a.startswith("--gpu-context=") for a in args)  # x11 or wayland
         assert "--cache=yes" in args
         assert "--demuxer-max-bytes=128MiB" in args
         assert any("reconnect=1" in a for a in args)
