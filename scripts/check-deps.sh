@@ -131,12 +131,19 @@ if command -v lspci &>/dev/null; then
     fi
 fi
 
-# Detect Intel generation from CPU model (for driver selection)
-intel_gen="modern"  # default: Broadwell+ (iHD or Mesa iris)
+# Detect Intel generation from CPU model (for driver selection).
+# On Fedora, ALL Intel GPUs (Gen 6 through Gen 12+) use libva-intel-driver
+# from RPM Fusion for VA-API H.264/HEVC decode. The base Fedora package
+# libva-intel-media-driver is codec-restricted. mesa-va-drivers-freeworld
+# is for AMD only.
+# "legacy" = Sandy Bridge / Ivy Bridge / Haswell (Gen 6-7.5) — i965 driver only
+# "modern" = Broadwell and newer (Gen 8+) — libva-intel-driver (i965) works,
+#            intel-media-driver (iHD) also works on Gen 9+ but not in Fedora base
+intel_gen="modern"
 if [ "$gpu_vendor" = "intel" ] && [ -f /proc/cpuinfo ]; then
     cpu_model=$(grep "model name" /proc/cpuinfo | head -1)
-    # Sandy Bridge / Ivy Bridge / Haswell = 2nd/3rd/4th gen = use i965 driver
-    if echo "$cpu_model" | grep -qiE "i[357]-[23][0-9]{3}|i[357]-4[0-9]{3}|Celeron.*[BG][0-9]|Pentium.*[BG][0-9]"; then
+    # Sandy Bridge (2xxx) / Ivy Bridge (3xxx) / Haswell (4xxx)
+    if echo "$cpu_model" | grep -qiE "i[357]-[234][0-9]{3}[A-Z]?[QMU]?[HK]?[T]?\b"; then
         intel_gen="legacy"
     fi
 fi
@@ -216,28 +223,24 @@ if command -v vainfo &>/dev/null; then
         echo -e "  $FAIL  VA-API driver not found — hardware video decode unavailable"
         errors=$((errors + 1))
         if [ "$gpu_vendor" = "intel" ]; then
-            if [ "$intel_gen" = "legacy" ]; then
-                echo -e "       Install the legacy Intel VA-API driver:"
-                case "$distro" in
-                    dnf)    echo -e "         sudo dnf install libva-intel-driver"
-                            missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
-                    apt)    echo -e "         sudo apt-get install i965-va-driver"
-                            missing_sys="${missing_sys:+$missing_sys }i965-va-driver" ;;
-                    pacman) echo -e "         sudo pacman -S libva-intel-driver"
-                            missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
-                esac
-            else
-                echo -e "       Install the Intel VA-API driver (requires RPM Fusion on Fedora):"
-                case "$distro" in
-                    dnf)    echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
-                            echo -e "         sudo dnf swap mesa-va-drivers mesa-va-drivers-freeworld --allowerasing"
-                            missing_sys="${missing_sys:+$missing_sys }mesa-va-drivers-freeworld" ;;
-                    apt)    echo -e "         sudo apt-get install intel-media-va-driver-non-free"
-                            missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free" ;;
-                    pacman) echo -e "         sudo pacman -S intel-media-driver"
-                            missing_sys="${missing_sys:+$missing_sys }intel-media-driver" ;;
-                esac
-            fi
+            # On Fedora, libva-intel-driver (RPM Fusion) provides i965_drv_video.so
+            # and supports H.264/HEVC on all Intel Gen 6-12 (Sandy Bridge through
+            # Tiger Lake). The base Fedora libva-intel-media-driver is codec-restricted.
+            echo -e "       Install the Intel VA-API driver (requires RPM Fusion on Fedora):"
+            case "$distro" in
+                dnf)    echo -e "         sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-\$(rpm -E %fedora).noarch.rpm"
+                        echo -e "         sudo dnf install libva-intel-driver"
+                        missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
+                apt)    if [ "$intel_gen" = "legacy" ]; then
+                            echo -e "         sudo apt-get install i965-va-driver"
+                            missing_sys="${missing_sys:+$missing_sys }i965-va-driver"
+                        else
+                            echo -e "         sudo apt-get install intel-media-va-driver-non-free"
+                            missing_sys="${missing_sys:+$missing_sys }intel-media-va-driver-non-free"
+                        fi ;;
+                pacman) echo -e "         sudo pacman -S libva-intel-driver"
+                        missing_sys="${missing_sys:+$missing_sys }libva-intel-driver" ;;
+            esac
         elif [ "$gpu_vendor" = "amd" ]; then
             echo -e "       Install the AMD VA-API driver:"
             case "$distro" in
