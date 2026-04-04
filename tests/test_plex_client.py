@@ -451,6 +451,92 @@ class TestGetRetryLogic:
         assert result == {"MediaContainer": {"ok": True}}
         assert client._session.get.call_count == 2
 
+class TestCreatePlayQueue:
+    """Verify create_play_queue sends correct POST and handles failures."""
+
+    def test_create_play_queue_posts_correct_uri(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "MediaContainer": {
+                "playQueueID": 123,
+                "Metadata": [{"playQueueItemID": 456}],
+            }
+        }
+        mock_response.raise_for_status.return_value = None
+        client._session.post = MagicMock(return_value=mock_response)
+
+        result = client.create_play_queue("789", "abc-machine-id")
+
+        client._session.post.assert_called_once()
+        call_args = client._session.post.call_args
+        assert call_args[0][0] == "http://localhost:32400/playQueues"
+        params = call_args[1]["params"]
+        assert params["type"] == "video"
+        assert "abc-machine-id" in params["uri"]
+        assert "789" in params["uri"]
+        assert result == mock_response.json.return_value
+
+    def test_create_play_queue_returns_empty_on_failure(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.post = MagicMock(side_effect=ConnectionError("refused"))
+
+        result = client.create_play_queue("789", "abc-machine-id")
+
+        assert result == {}
+
+    def test_create_play_queue_returns_empty_without_machine_id(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.post = MagicMock()
+
+        result = client.create_play_queue("789", "")
+
+        assert result == {}
+        client._session.post.assert_not_called()
+
+    def test_report_timeline_includes_play_queue_item_id(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock()
+
+        client.report_timeline(
+            rating_key="12345",
+            state="playing",
+            time_ms=60000,
+            duration_ms=7200000,
+            session_id="sess-uuid",
+            play_queue_item_id=42,
+        )
+
+        call_args = client._session.get.call_args
+        params = call_args[1]["params"]
+        assert params["playQueueItemID"] == 42
+
+    def test_report_timeline_omits_play_queue_item_id_when_zero(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock()
+
+        client.report_timeline(
+            rating_key="12345",
+            state="playing",
+            time_ms=60000,
+            duration_ms=7200000,
+            session_id="sess-uuid",
+            play_queue_item_id=0,
+        )
+
+        call_args = client._session.get.call_args
+        params = call_args[1]["params"]
+        assert "playQueueItemID" not in params
+
+
+# ---------------------------------------------------------------------------
+# PlexClient._get — retry logic and error classification
+# ---------------------------------------------------------------------------
+
+
+class TestGetRetryLogic:
+    """Verify _get() retries transient errors and classifies error types."""
+
     @patch("backend.plex_client.time.sleep")
     def test_last_error_cleared_on_success(self, mock_sleep: MagicMock) -> None:
         """Set _last_error to AUTH, then mock returns 200; verify _last_error == NONE."""

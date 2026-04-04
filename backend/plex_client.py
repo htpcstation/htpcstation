@@ -252,6 +252,40 @@ class PlexClient:
         """
         return f"{self._server_url}{thumb_path}?X-Plex-Token={self._token}"
 
+    def create_play_queue(self, rating_key: str, machine_identifier: str) -> dict:
+        """POST /playQueues — register upcoming playback with the server.
+
+        Returns the play queue response dict, or {} on failure.
+        The caller should extract playQueueID and playQueueItemID from the result.
+
+        uri format: server://{machineIdentifier}/com.plexapp.plugins.library/library/metadata/{ratingKey}
+        """
+        if not machine_identifier:
+            return {}
+        uri = (
+            f"server://{machine_identifier}"
+            f"/com.plexapp.plugins.library"
+            f"/library/metadata/{rating_key}"
+        )
+        # Use _session.post directly — play queue creation is not retried
+        try:
+            response = self._session.post(
+                f"{self._server_url}/playQueues",
+                params={
+                    "type": "video",
+                    "uri": uri,
+                    "includeChapters": 1,
+                    "includeMarkers": 1,
+                    "includeRelated": 1,
+                },
+                timeout=_TIMEOUT,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("create_play_queue failed for ratingKey=%s: %s", rating_key, exc)
+            return {}
+
     def report_timeline(
         self,
         rating_key: str,
@@ -259,6 +293,7 @@ class PlexClient:
         time_ms: int,
         duration_ms: int,
         session_id: str,
+        play_queue_item_id: int = 0,
     ) -> None:
         """POST /:/timeline — playback heartbeat. Fire-and-forget; errors are ignored.
 
@@ -268,17 +303,20 @@ class PlexClient:
         session_id: per-session UUID (stable for the lifetime of one playback)
         """
         try:
+            params = {
+                "ratingKey": rating_key,
+                "key": f"/library/metadata/{rating_key}",
+                "state": state,
+                "time": time_ms,
+                "duration": duration_ms,
+                "identifier": "com.plexapp.plugins.library",
+                "X-Plex-Session-Identifier": session_id,
+            }
+            if play_queue_item_id:
+                params["playQueueItemID"] = play_queue_item_id
             self._session.get(
                 f"{self._server_url}/:/timeline",
-                params={
-                    "ratingKey": rating_key,
-                    "key": f"/library/metadata/{rating_key}",
-                    "state": state,
-                    "time": time_ms,
-                    "duration": duration_ms,
-                    "identifier": "com.plexapp.plugins.library",
-                    "X-Plex-Session-Identifier": session_id,
-                },
+                params=params,
                 timeout=5,
             )
         except Exception:  # noqa: BLE001

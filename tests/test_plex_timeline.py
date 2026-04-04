@@ -95,6 +95,24 @@ class TestTimelineReporterNoClient:
         # If we get here without exception, the test passes
 
 
+class TestTimelineReporterPlayQueueItemId:
+    """Verify that play_queue_item_id is passed through to report_timeline."""
+
+    def test_start_passes_play_queue_item_id_to_report(self) -> None:
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+
+        reporter.start(rating_key="123", duration_ms=100000, play_queue_item_id=42)
+        time.sleep(0.3)
+        reporter.stop()
+
+        # At least one call should have play_queue_item_id=42
+        calls = mock_client.report_timeline.call_args_list
+        assert len(calls) >= 1
+        for c in calls:
+            assert c[1]["play_queue_item_id"] == 42
+
+
 class TestTimelineReporterStopIdempotent:
     """Verify that calling stop() when not started is safe."""
 

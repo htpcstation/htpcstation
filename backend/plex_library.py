@@ -574,6 +574,8 @@ class PlexLibrary(QObject):
         self._current_play_rating_key: str = ""
         self._current_play_duration_ms: int = 0
         self._current_play_part_id: int = 0
+        self._pending_play_queue_item_id: int = 0
+        self._current_play_queue_item_id: int = 0
         self._pending_audio_id_map: dict[int, int] = {}
         self._pending_sub_id_map: dict[int, int] = {}
         self._audio_id_map: dict[int, int] = {}
@@ -1139,6 +1141,18 @@ class PlexLibrary(QObject):
             intro_start_ms = markers["intro_start_ms"]
             intro_end_ms = markers["intro_end_ms"]
             credits_start_ms = markers["credits_start_ms"]
+            # Register play queue with server (enables Plex Companion + Up Next)
+            play_queue_item_id = 0
+            machine_id = self._machine_identifier  # already cached from identity fetch
+            if machine_id:
+                pq_data = client.create_play_queue(rating_key, machine_id)
+                container = pq_data.get("MediaContainer", {})
+                # playQueueItemID is on the first item in the queue
+                items = container.get("Metadata", [])
+                if items:
+                    play_queue_item_id = int(items[0].get("playQueueItemID", 0) or 0)
+                logger.info("playWithMpv: playQueueItemID=%d", play_queue_item_id)
+            self._pending_play_queue_item_id = play_queue_item_id
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
             self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)
         self._executor.submit(_worker)
@@ -1162,6 +1176,7 @@ class PlexLibrary(QObject):
         self._current_play_rating_key = self._pending_play_rating_key
         self._current_play_duration_ms = duration_ms
         self._current_play_part_id = part_id
+        self._current_play_queue_item_id = self._pending_play_queue_item_id
         self._audio_id_map = self._pending_audio_id_map
         self._sub_id_map = self._pending_sub_id_map
         self._current_intro_start_ms = intro_start_ms
@@ -1266,6 +1281,7 @@ class PlexLibrary(QObject):
             duration_ms=self._current_play_duration_ms,
             start_ms=0,  # MPV is already at the right position
             mpv_ipc=self._mpv_ipc,
+            play_queue_item_id=self._current_play_queue_item_id,
         )
 
     def _on_mpv_finished_for_timeline(self, exit_code: int) -> None:

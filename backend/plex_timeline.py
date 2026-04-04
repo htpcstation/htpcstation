@@ -52,6 +52,7 @@ class PlexTimelineReporter:
         duration_ms: int,
         start_ms: int = 0,
         mpv_ipc=None,
+        play_queue_item_id: int = 0,
     ) -> None:
         """Begin reporting for a new playback session.
 
@@ -60,6 +61,7 @@ class PlexTimelineReporter:
         start_ms:    Resume offset in milliseconds (0 = from beginning).
         mpv_ipc:     MpvIpc instance for reading current position. If None,
                      position is estimated from elapsed time.
+        play_queue_item_id: Plex playQueueItemID for Companion/Up Next support.
         """
         self.stop()  # stop any previous session
 
@@ -69,6 +71,7 @@ class PlexTimelineReporter:
             self._session_id = str(uuid.uuid4())
             self._paused = False
             self._mpv_ipc = mpv_ipc
+            self._play_queue_item_id: int = play_queue_item_id
             self._start_ms = start_ms
             self._start_wall = time.monotonic()
 
@@ -158,6 +161,7 @@ class PlexTimelineReporter:
                 time_ms=position_ms,
                 duration_ms=duration_ms,
                 session_id=session_id,
+                play_queue_item_id=self._play_queue_item_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.debug("PlexTimelineReporter: report failed: %s", exc)
