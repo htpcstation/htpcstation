@@ -475,6 +475,7 @@ class PlexLibrary(QObject):
     mpvStarted = Signal()
     mpvFinished = Signal()
     streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
+    watchHistoryReady = Signal(list)
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -1092,6 +1093,55 @@ class PlexLibrary(QObject):
     def _on_stream_info_ready(self, rating_key: str, url: str, view_offset_ms: int) -> None:
         """Called on main thread when async stream info fetch completes."""
         self.streamInfoReady.emit(rating_key, url, view_offset_ms)
+
+    @Slot(int, result="QVariant")
+    def getWatchHistory(self, limit: int = 50) -> list:
+        """Fetch watch history. Returns list of dicts for QML consumption.
+
+        Each dict has: ratingKey, title, type, viewedAt, grandparentTitle,
+        thumb, grandparentThumb, duration.
+        Synchronous — call from a worker context or accept the brief block.
+        """
+        if self._client is None:
+            return []
+        raw = self._client.get_watch_history(limit=limit)
+        result = []
+        for item in raw:
+            result.append({
+                "ratingKey": str(item.get("ratingKey", "")),
+                "title": item.get("title", ""),
+                "type": item.get("type", ""),
+                "viewedAt": int(item.get("viewedAt", 0) or 0),
+                "grandparentTitle": item.get("grandparentTitle", ""),
+                "thumb": item.get("thumb", ""),
+                "grandparentThumb": item.get("grandparentThumb", ""),
+                "duration": int(item.get("duration", 0) or 0),
+            })
+        return result
+
+    @Slot(int)
+    def fetchWatchHistory(self, limit: int = 50) -> None:
+        """Async version of getWatchHistory. Emits watchHistoryReady when done."""
+        if self._client is None:
+            self.watchHistoryReady.emit([])
+            return
+        client = self._client
+        def _worker():
+            raw = client.get_watch_history(limit=limit)
+            result = []
+            for item in raw:
+                result.append({
+                    "ratingKey": str(item.get("ratingKey", "")),
+                    "title": item.get("title", ""),
+                    "type": item.get("type", ""),
+                    "viewedAt": int(item.get("viewedAt", 0) or 0),
+                    "grandparentTitle": item.get("grandparentTitle", ""),
+                    "thumb": item.get("thumb", ""),
+                    "grandparentThumb": item.get("grandparentThumb", ""),
+                    "duration": int(item.get("duration", 0) or 0),
+                })
+            self.watchHistoryReady.emit(result)
+        self._executor.submit(_worker)
 
     @Slot(str, int)
     def playWithMpv(self, rating_key: str, start_ms: int = 0) -> None:

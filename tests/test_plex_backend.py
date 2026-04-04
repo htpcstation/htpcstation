@@ -4100,3 +4100,76 @@ class TestPlexLibraryErrorCallback:
         lib._on_plex_error(PlexErrorType.AUTH)
 
         assert received == ["auth"]
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.getWatchHistory — Task 005 (playback history)
+# ---------------------------------------------------------------------------
+
+
+class TestGetWatchHistorySlot:
+    """getWatchHistory() returns a list of dicts with expected keys."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_get_watch_history_slot_returns_list(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_watch_history.return_value = [
+            {
+                "ratingKey": "123",
+                "title": "Test Movie",
+                "type": "movie",
+                "viewedAt": 1700000000,
+                "grandparentTitle": "",
+                "thumb": "/library/metadata/123/thumb/1",
+                "grandparentThumb": "",
+                "duration": 7200000,
+            },
+            {
+                "ratingKey": "456",
+                "title": "Pilot",
+                "type": "episode",
+                "viewedAt": 1700000100,
+                "grandparentTitle": "Test Show",
+                "thumb": "/library/metadata/456/thumb/1",
+                "grandparentThumb": "/library/metadata/200/thumb/1",
+                "duration": 2700000,
+            },
+        ]
+        lib._client = mock_client
+
+        result = lib.getWatchHistory(50)
+
+        assert len(result) == 2
+        assert result[0]["ratingKey"] == "123"
+        assert result[0]["title"] == "Test Movie"
+        assert result[0]["type"] == "movie"
+        assert result[0]["viewedAt"] == 1700000000
+        assert result[0]["grandparentTitle"] == ""
+        assert result[0]["thumb"] == "/library/metadata/123/thumb/1"
+        assert result[0]["grandparentThumb"] == ""
+        assert result[0]["duration"] == 7200000
+        assert result[1]["ratingKey"] == "456"
+        assert result[1]["grandparentTitle"] == "Test Show"
+
+    def test_get_watch_history_slot_returns_empty_without_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        result = lib.getWatchHistory(50)
+
+        assert result == []

@@ -403,6 +403,34 @@ class PlexClient:
             return ""
         return data.get("MediaContainer", {}).get("token", "")
 
+    def get_watch_history(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        account_id: int = 0,
+    ) -> list[dict]:
+        """GET /status/sessions/history/all — full watch history.
+
+        Returns items sorted by viewedAt descending (most recent first).
+        Each item has: ratingKey, title, type, viewedAt, grandparentTitle (for episodes),
+        thumb, grandparentThumb, duration.
+
+        account_id: filter to a specific home user (0 = all users / admin).
+        limit: max items to return (default 50).
+        offset: pagination offset.
+        """
+        params: dict = {
+            "sort": "viewedAt:desc",
+            "X-Plex-Container-Start": offset,
+            "X-Plex-Container-Size": limit,
+        }
+        if account_id:
+            params["accountID"] = account_id
+        data = self._get("/status/sessions/history/all", params=params)
+        if data is None:
+            return []
+        return data.get("MediaContainer", {}).get("Metadata", [])
+
     def get_markers(self, metadata: dict) -> dict:
         """Extract intro and credits marker timestamps from a metadata dict.
 

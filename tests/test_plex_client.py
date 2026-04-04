@@ -536,6 +536,61 @@ class TestCreatePlayQueue:
 
 
 # ---------------------------------------------------------------------------
+# PlexClient.get_watch_history
+# ---------------------------------------------------------------------------
+
+
+class TestGetWatchHistory:
+    """Verify get_watch_history calls the correct endpoint with correct params."""
+
+    def test_get_watch_history_returns_metadata(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {
+                "Metadata": [{"ratingKey": "1", "title": "Movie"}]
+            }
+        })
+
+        result = client.get_watch_history()
+
+        assert result == [{"ratingKey": "1", "title": "Movie"}]
+
+    def test_get_watch_history_sends_correct_params(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {"Metadata": []}
+        })
+
+        client.get_watch_history()
+
+        client._get.assert_called_once()
+        call_args = client._get.call_args
+        params = call_args[1]["params"]
+        assert params["sort"] == "viewedAt:desc"
+        assert params["X-Plex-Container-Size"] == 50
+
+    def test_get_watch_history_with_account_id(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {"Metadata": []}
+        })
+
+        client.get_watch_history(account_id=123)
+
+        call_args = client._get.call_args
+        params = call_args[1]["params"]
+        assert params["accountID"] == 123
+
+    def test_get_watch_history_returns_empty_on_failure(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value=None)
+
+        result = client.get_watch_history()
+
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
 # PlexClient._get — retry logic and error classification
 # ---------------------------------------------------------------------------
 
