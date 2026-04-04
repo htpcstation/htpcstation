@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 18)
+# HTPC Station — Resume Document (Checkpoint 19)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -7,42 +7,36 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,485 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,547 tests passing.**
 
-**What's new since Checkpoint 17:**
+**What's new since Checkpoint 18:**
 
-MPV UX overhaul:
-- Gamepad controls in MPV fixed (v3 input.conf: `GAMEPAD_ACTION_RIGHT/DOWN/DPAD_*`)
-- Loading overlay with 400ms minimum display on Play press
-- Async `fetchStreamInfo` + `playWithMpv` — no main-thread blocking
-- Resume dialog cancel restores focus to previously selected item
-- My List respects MPV/browser player setting; shows navigate to show detail
-- Sort/filter slots guard against synthetic section keys (`_mylist`, `_ondeck`)
+Backend optimizations (#17–#22):
+- `/hubs/home/continueWatching` replaces `/library/onDeck` in `PlexClient.get_on_deck()`
+- `PlexError` enum — typed error handling + exponential backoff retry in `_get()`
+- Play queue (`POST /playQueues`) created before MPV launch; `playQueueItemID` in timeline reports
+- `X-Plex-Client-Profile-Extra` header — codec capabilities sent to Plex for better direct-play decisions
+- Playback history (`GET /status/sessions/history/all`) — more reliable recently-watched source
+- Self-healing server connection — `PlexClient.set_fallback_urls()` / `try_next_connection()`, survives LAN IP changes
 
-Plex playback reporting (P0):
-- `X-Plex-Client-Identifier` stable UUID + full identity headers on every request
-- `PlexTimelineReporter` — daemon thread, `POST /:/timeline` every 10s while MPV plays
-- Track persistence: `PUT /library/parts/{partId}` syncs audio/subtitle choice to all Plex clients
-- Transient token: MPV stream URLs use short-lived delegation token
+Backend features (#23–#24):
+- `PlexEventListener` daemon thread — SSE `/:/eventsource/notifications`, triggers `refresh()` on `library.update/new/refresh.all`
+- `PlexClient.rate()` + `PlexLibrary.rate()` slot — `PUT /:/rate` for star ratings (backend only, no UI yet)
 
-Plex P1 features:
-- Mark watched/unwatched (Y button on detail screens, optimistic update)
-- Skip intro overlay (`MpvSkipIntroOverlay.qml`) — reads `Marker` array from metadata
-- `plex.skipIntro()` seeks MPV via IPC to `intro_end_ms`
+UI features (#25–#27):
+- Per-row focus memory in WatchScreen — `_focusMemory` dict replaces single `_resumeSavedIndex`
+- In-app Plex PIN login — `PlexLoginOverlay.qml` + `startPlexPinLogin()` / `cancelPlexPinLogin()` slots; `plexLoginStatus` signal; no browser launch needed
+- Loading overlay fixes — `_clearLoading()` helper with 400ms minimum display; overlay now shows correctly for Continue Watching, resume dialog, and slow network streams
 
-Poster cache improvements:
-- Dedicated `_poster_executor` (10 workers) for poster downloads
-- Pre-resolve cached posters before emitting to QML — eliminates placeholder flash on warm load
-- Skip download tasks for already-cached items
-
-Live TV overhaul:
-- Replaced Plex cloud EPG (broken per-channel filter, 19 channels, 5 with live data) with HDHomeRun guide API
-- `GET api.hdhomerun.com/api/guide?DeviceAuth=...` — 58 channels, 56 with currently-airing programs, ~2s load
-- `GET http://{host}/lineup.json` — 67 tunable channels with stream URLs
-- Accurate Unix timestamps — `StartTime <= now < EndTime` works correctly
-- Channel logos from HDHomeRun `ImageURL`
-- Single `guide_cache.json` replaces 19+ per-channel cache files
-- Warm start: instant from cache, background refresh in parallel
+Bug fixes:
+- Plex PIN code was 24 chars (removed `strong=true` from `create_pin()`) — now correct 4-char link code
+- Live TV channels with no guide data are now hidden (lineup-only channels excluded)
+- MPV gamepad input enabled (`--input-gamepad=yes`)
+- MPV input.conf v14 — correct button mapping for 8BitDo Micro D-input verified with `mpv --input-test`:
+  - A (east, evdev 304) = `GAMEPAD_ACTION_DOWN` → pause/play
+  - Start (evdev 315) = `GAMEPAD_START` → quit
+  - D-pad seek/volume, L1/R1 audio/track, X/Y progress/subtitles
+  - L2/R2 unbound (analog axis fires continuously — unusable without libmpv)
 
 ---
 
@@ -52,7 +46,7 @@ Live TV overhaul:
 |---|---|---|
 | 1 | ~~F3 — PC Games Favorites~~ | ✅ Done |
 | 2 | ~~C2 — System Cores settings~~ | ✅ Done |
-| 3 | Moonlight rich metadata | Deferred — nearly free when resumed (steam_app_id already in artwork_index.json) |
+| 3 | Moonlight rich metadata | Deferred — nearly free when resumed (`steam_app_id` already in `artwork_index.json`) |
 | 4 | ~~F4 — Plex My List~~ | ✅ Done |
 | 5 | ~~UI Refresh 4a — token interface + Theme.qml palettes~~ | ✅ Done |
 | 6 | On-screen keyboard | Needed for gamepad-only wizard text input |
@@ -65,25 +59,52 @@ Live TV overhaul:
 | 13 | GOG/Epic Games Store | Needs spike first |
 | 14 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
 | 15 | Gamepad extension: YouTube/Netflix | Browser extension work |
-| 16 | Plex token encryption / OS keyring | Security hardening |
-| 17 | `/hubs/home/continueWatching` swap | ⚡ Backend only — one-line endpoint change in `PlexClient.get_on_deck()` |
-| 18 | Typed error handling + retry (`PlexError` enum) | ⚡ Backend only — `_get()` currently returns `None` for all errors; add transient/permanent distinction + exponential backoff |
-| 19 | Plex play queue (`POST /playQueues`) | ⚡ Backend only — enables Plex Companion; improves timeline accuracy with `playQueueItemID` |
-| 20 | `X-Plex-Client-Profile-Extra` header | ⚡ Backend only — tells Plex our codec capabilities → better direct-play decisions |
-| 21 | Playback history (`GET /status/sessions/history/all`) | ⚡ Backend only — more reliable recently-watched data source |
-| 22 | Self-healing server connection | ⚡ Backend only — retry all known server addresses on failure; survives LAN IP changes |
-| 23 | Server events SSE (`/:/eventsource/notifications`) | ⚡ Backend only — reactive library refresh when Plex scan completes |
-| 24 | Rating (`PUT /:/rate`) | Minimal UI — thumbs up/down on detail screen; backend is one method |
-| 25 | Focus memory per row (WatchScreen) | UI — generalise `_resumeSavedIndex` to `_focusMemory` dict |
-| 26 | Hero/header fade on content focus | UI — `WatchScreen` header opacity animation |
-| 27 | In-app Plex login | UI — needed for first-run wizard (roadmap #7) |
-| 28 | Plex search | UI — new navigation flow |
-| 29 | Custom user-defined collections | Needs scoping |
-| 30 | GOG/Epic Games Store | Needs spike first |
-| 31 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
-| 32 | Gamepad extension: YouTube/Netflix | Browser extension work |
-| 33 | Plex token encryption / OS keyring | Security hardening (was #16) |
-| 34 | Moonlight rich metadata | Deferred — nearly free when resumed (steam_app_id already in artwork_index.json) |
+| 16 | ~~`/hubs/home/continueWatching` swap~~ | ✅ Done |
+| 17 | ~~Typed error handling + retry (`PlexError` enum)~~ | ✅ Done |
+| 18 | ~~Plex play queue (`POST /playQueues`)~~ | ✅ Done |
+| 19 | ~~`X-Plex-Client-Profile-Extra` header~~ | ✅ Done |
+| 20 | ~~Playback history (`GET /status/sessions/history/all`)~~ | ✅ Done |
+| 21 | ~~Self-healing server connection~~ | ✅ Done |
+| 22 | ~~Server events SSE (`/:/eventsource/notifications`)~~ | ✅ Done |
+| 23 | ~~Rating (`PUT /:/rate`)~~ | ✅ Done — backend only; UI binding deferred (no free face button) |
+| 24 | ~~Focus memory per row (WatchScreen)~~ | ✅ Done |
+| 25 | Hero/header fade on content focus | Deferred — UI polish |
+| 26 | ~~In-app Plex login~~ | ✅ Done — PIN overlay in Settings |
+| 27 | Plex search | UI — new navigation flow |
+| 28 | libmpv migration (python-mpv) | Replace `MpvLauncher` subprocess + `MpvIpc` socket polling with `libmpv` via `python-mpv`. Enables: push-based `time-pos` observer (replaces 10s poll), `keybind()` API (eliminates `input.conf` versioning), L2/R2 seek (axis events controllable in-process), embedded video in Qt window. See scope below. |
+| 29 | Rating UI — thumbs up/down on detail screen | Needs a free button; deferred until after libmpv migration frees up input.conf |
+| 30 | Custom user-defined collections | Needs scoping |
+| 31 | GOG/Epic Games Store | Needs spike first |
+| 32 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
+| 33 | Gamepad extension: YouTube/Netflix | Browser extension work |
+| 34 | Plex token encryption / OS keyring | Security hardening |
+| 35 | Moonlight rich metadata | Deferred |
+
+---
+
+## Roadmap Item #28 — libmpv Migration Scope
+
+**Why:** The current `MpvLauncher` subprocess + `MpvIpc` Unix socket approach has three hard limitations:
+1. `PlexTimelineReporter` polls position every 10s via IPC — push-based `time-pos` observer would be instant and eliminate the polling thread entirely.
+2. `input.conf` versioning is fragile — every button mapping change requires a version bump and file rewrite. `python-mpv`'s `keybind()` API sets bindings programmatically at runtime.
+3. L2/R2 triggers are analog axes that fire continuously while held — uncontrollable from `input.conf`. In-process, the axis value can be read and debounced properly.
+
+**What changes:**
+- `MpvLauncher` → replaced by a `python-mpv` `MPV` instance embedded in the Qt window (`wid=str(int(window.winId()))`)
+- `MpvIpc` → replaced by `player.time_pos`, `player.pause`, `player.audio`, `player.sub` properties
+- `PlexTimelineReporter` → `@player.property_observer('time-pos')` callback instead of polling thread
+- `input.conf` + `_ensure_input_conf()` → `player.keybind(name, command)` calls at startup
+- `MpvSkipIntroOverlay` seek → `player.seek(ms / 1000)` instead of IPC JSON command
+- Loading overlay: `player.wait_until_playing()` gives exact ready signal (no `processStarted` approximation)
+
+**What stays the same:**
+- All QML, all signals (`mpvStarted`, `mpvFinished`, `streamInfoReady`), all `PlexLibrary` slots
+- Live TV launch (same approach, different MPV instance or same instance reused)
+- Wayland/Xorg hwdec detection logic
+
+**Estimated scope:** 3 tasks — (1) core MPV instance + property observers, (2) keybind migration + L2/R2 fix, (3) skip intro + subtitle track selection migration.
+
+**Prerequisite:** `pip install mpv` (python-mpv). Requires `libmpv.so` on the system — already present since MPV is installed.
 
 ---
 
@@ -101,7 +122,7 @@ Live TV overhaul:
 | Browser | Brave Flatpak (music playback, MPV fallback) |
 | Gamepad | evdev → synthetic QKeyEvent injection |
 | Config | `~/.config/htpcstation/config.json` |
-| MPV config | `~/.config/htpcstation/mpv/input.conf` (versioned v3, auto-written) |
+| MPV config | `~/.config/htpcstation/mpv/input.conf` (versioned v14, auto-written) |
 | Live TV cache | `~/.config/htpcstation/livetv_cache/guide_cache.json` |
 | Poster cache | `~/.config/htpcstation/poster_cache/{sha256}.jpg` |
 
@@ -130,11 +151,11 @@ bash scripts/check-deps.sh
 | `library` | GameLibrary | ROM data, models, launch, favorites |
 | `steam` | SteamLibrary | Steam/Moonlight games, models, sort, launch, favorites |
 | `moonlight` | MoonlightLibrary | Moonlight host/app data, models, launch |
-| `plex` | PlexLibrary | Plex data, models, sort/filter, MPV/browser launch, My List, subtitle IPC, timeline reporting, track persistence, markers |
+| `plex` | PlexLibrary | Plex data, models, sort/filter, MPV/browser launch, My List, subtitle IPC, timeline reporting, track persistence, markers, SSE listener |
 | `liveTV` | LiveTvLibrary | HDHomeRun guide + streams, MPV launch, guide cache |
 | `gamepadManager` | GamepadManager | Raw mode for mapping dialog, device capabilities |
 | `networkMonitor` | NetworkMonitor | Periodic connectivity check |
-| `settings` | SettingsManager | Config read/write for settings UI, OAuth |
+| `settings` | SettingsManager | Config read/write for settings UI, OAuth, PIN login |
 
 ---
 
@@ -172,6 +193,12 @@ bash scripts/check-deps.sh
 
 **Plex EPG timestamps are unreliable** (may be ~1 year ahead of wall clock). Use HDHomeRun guide timestamps instead — they are accurate Unix seconds.
 
+**MPV gamepad key names are SDL positional, not label-based.** On the 8BitDo Micro in D-input mode (Bluetooth), verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`, Start = `GAMEPAD_START`. L2/R2 are analog axes (`GAMEPAD_LEFT/RIGHT_TRIGGER`) that fire continuously while held — do not bind seek commands to them without in-process debouncing (requires libmpv migration, roadmap #28).
+
+**`SDL_GAMECONTROLLERCONFIG` override has no effect on this device.** The 8BitDo Micro's SDL mapping is already correct in the system database. Do not attempt to override it.
+
+**MPV `input.conf` version check only rewrites on version mismatch.** If you need to force a rewrite during development, delete `~/.config/htpcstation/mpv/input.conf` before launching.
+
 ---
 
 ## Dev Machine
@@ -181,5 +208,5 @@ bash scripts/check-deps.sh
 - Steam: Flatpak, 5 games
 - Moonlight: Flatpak, 1 paired host, 7 apps
 - Plex: local server + HDHomeRun FLEX 4K tuner at `192.168.0.80`
-- Controller: 8BitDo Micro in D-input mode (D-pad as ABS_X/ABS_Y, no analog sticks)
+- Controller: 8BitDo Micro in D-input mode (Bluetooth; D-pad as ABS_HAT0X/Y hat axes; face buttons BTN_SOUTH/EAST/NORTH/WEST; triggers BTN_TL2/TR2 + ABS_BRAKE/GAS axes)
 - HDHomeRun DeviceAuth: in `discover.json` at `http://192.168.0.80/discover.json`

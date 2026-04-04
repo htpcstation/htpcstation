@@ -138,7 +138,7 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 python3 -m pytest tests/ -q
 ```
 
-The suite currently covers over 1,450 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+The suite currently covers over 1,547 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
 
 1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
 2. Replace the sample data with your real values.
@@ -192,17 +192,20 @@ Custom images always override auto-downloaded artwork.
 
 **MPV gamepad bindings:** MPV uses a bundled `input.conf` at `~/.config/htpcstation/mpv/input.conf`. The file is created automatically on first launch and updated when new bindings are added. You can edit it manually — your changes are preserved across updates as long as the version header is current.
 
+The table below uses the **wizard mapping** button names (Accept, Cancel, etc.) which correspond to the physical buttons you mapped during controller setup.
+
 | Button | MPV Action |
 |---|---|
-| A | Play / Pause |
-| B | Quit (return to HTPC Station) |
-| D-pad Left/Right | Seek ±10 seconds |
-| D-pad Up/Down | Volume ±5 |
-| LT / RT | Previous / Next chapter |
+| Accept (A on most controllers) | Play / Pause |
+| Context 1 (X) | Open subtitle selector (via HTPC Station overlay) |
+| Context 2 (Y) | Show playback progress |
+| D-pad Left / Right | Seek ±10 seconds |
+| D-pad Up / Down | Volume ±5 |
 | LB | Cycle audio track |
-| X | Open subtitle selector (via HTPC Station overlay) |
-| Y | Show playback progress |
-| Start | Quit |
+| RB | Show track list |
+| Start | Quit (return to HTPC Station) |
+
+> **Note:** The exact MPV key name for each button depends on how SDL maps your controller. If buttons seem swapped, run `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` and press each button to see what name MPV reports, then edit `input.conf` accordingly.
 
 ### Controller Reference
 
@@ -261,7 +264,7 @@ For those interested in what's under the hood:
 | Game streaming | Moonlight CLI (Flatpak) |
 | Media browsing | Plex Media Server API |
 | Video playback | System MPV with VA-API hardware decode (direct Plex stream URLs) |
-| Live TV | HDHomeRun direct streams via Plex DVR + Plex cloud EPG |
+| Live TV | HDHomeRun direct streams via Plex DVR + HDHomeRun guide API (`api.hdhomerun.com`) |
 | Music playback | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Gamepad input | evdev with synthetic Qt key events |
 | Browser gamepad | Chromium extension (Manifest V3) with Gamepad API |

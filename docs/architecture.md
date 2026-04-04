@@ -197,12 +197,13 @@ htpcstation/
 - **Poster cache:** `_poster_executor` (10 workers) separate from `_executor` (2 workers). Cached posters pre-resolved on worker thread before emitting to QML — no placeholder flash on warm load.
 
 ### MPV Architecture
-- `MpvLauncher`: subprocess MPV, auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `--hwdec=vaapi-copy --gpu-context=wayland`. Xorg → `--hwdec=vaapi --gpu-context=x11`. Versioned `input.conf` (v3) auto-written to `~/.config/htpcstation/mpv/input.conf`, overwritten when outdated. Gamepad bindings: `GAMEPAD_ACTION_RIGHT` (play/pause), `GAMEPAD_ACTION_DOWN` (quit), `GAMEPAD_DPAD_*` (seek/volume).
+- `MpvLauncher`: subprocess MPV, auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `--hwdec=vaapi-copy --gpu-context=wayland`. Xorg → `--hwdec=vaapi --gpu-context=x11`. Versioned `input.conf` (v14) auto-written to `~/.config/htpcstation/mpv/input.conf`, overwritten when outdated. `--input-gamepad=yes` required — disabled by default in MPV. Gamepad bindings verified with `mpv --input-test` on 8BitDo Micro D-input: `GAMEPAD_ACTION_DOWN` (A/east = pause/play), `GAMEPAD_DPAD_*` (seek/volume), `GAMEPAD_LEFT/RIGHT_SHOULDER` (audio/tracks), `GAMEPAD_ACTION_LEFT/UP` (subtitles/progress), `GAMEPAD_START` (quit). L2/R2 (`GAMEPAD_LEFT/RIGHT_TRIGGER`) are unbound — they are analog axes that fire continuously while held, uncontrollable from `input.conf` alone.
 - `MpvIpc`: Unix socket client for `--input-ipc-server=/tmp/htpcstation-mpv.sock`. Used for subtitle track list query, selection, and position polling (timeline reporter).
 - `MpvSubtitleOverlay.qml`: always-on-top `Window`, shown when X pressed during MPV playback. Calls `plex.getMpvSubtitleTracks()` / `plex.setMpvSubtitleTrack()` / `plex.persistTrackSelection()`.
 - `MpvSkipIntroOverlay.qml`: always-on-top `Window`, shown bottom-right when `plex.markersReady` fires with `intro_end_ms > 0`. Calls `plex.skipIntro()` which seeks via IPC.
 - `PlexTimelineReporter` (`backend/plex_timeline.py`): daemon thread started on `processStarted`, stopped on `processFinished`. POSTs to `/:/timeline` every 10s with current position from MpvIpc. Sends `"stopped"` on exit. Session identified by per-play `uuid4()`.
 - Stream URLs use transient token (`GET /security/token?type=delegation&scope=all`) — long-lived token never passed to MPV process.
+- **Planned migration (roadmap #28):** Replace subprocess + IPC with `python-mpv` (libmpv ctypes binding). Enables push-based `time-pos` observer (eliminates 10s poll), `keybind()` API (eliminates `input.conf` versioning), in-process axis debouncing (fixes L2/R2), and `wait_until_playing()` for exact loading overlay timing.
 
 ### Live TV Architecture
 - `LiveTvLibrary`: fetches HDHomeRun host from Plex `/livetv/dvrs`, then uses HDHomeRun's own APIs for all guide data. No Plex cloud EPG calls.
@@ -305,7 +306,11 @@ htpcstation/
 - **Wayland needs `vaapi-copy`** — `vaapi` direct display path doesn't work without a copy step on Wayland EGL.
 - **Fedora codec-restricted packages** — `ffmpeg-free` causes `libopenh264` to win H.264 decoder selection over VA-API. Swap for `ffmpeg` from RPM Fusion. `libva-intel-media-driver` → `libva-intel-driver` (RPM Fusion).
 - **AV1 requires Gen 12+ hardware** — Kaby Lake (UHD 620) has no AV1 hardware decode.
-- **Gamepad button names are MPV-specific** — Use `GAMEPAD_ACTION_RIGHT/DOWN/LEFT/UP` and `GAMEPAD_DPAD_*`, not SDL names like `GAMEPAD_ACTION_A`. Verify with `mpv --input-keylist | grep GAMEPAD`.
+- **`--input-gamepad=yes` is required** — MPV disables gamepad input by default. Without this flag, no `GAMEPAD_*` bindings fire.
+- **Gamepad button names are SDL positional, not label-based** — The 8BitDo Micro uses `hint:!SDL_GAMECONTROLLER_USE_BUTTON_LABELS` in its SDL mapping. Verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`. Always verify with `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` on the actual device — do not rely on SDL mapping documentation.
+- **`SDL_GAMECONTROLLERCONFIG` override is ignored** — The 8BitDo Micro's mapping is already in the system SDL database and cannot be overridden via env var on this device.
+- **L2/R2 are analog axes, not buttons** — `GAMEPAD_LEFT/RIGHT_TRIGGER` fires continuously while held (axis stays at 255). `{no-repeat}` in `input.conf` has no effect on axis-held state. Do not bind seek commands to them. Fix requires libmpv migration (roadmap #28).
+- **`input.conf` version check only rewrites on mismatch** — Delete `~/.config/htpcstation/mpv/input.conf` to force a rewrite during development.
 - **`_mpvLaunchReady` carries 8 args** — `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`. All test mocks must pass all 8 or use default values.
 - **`QProcess.start()` must be called on the main thread** — Use `Qt.ConnectionType.QueuedConnection` for any signal that triggers `MpvLauncher.launch()` from a worker thread.
 
@@ -387,6 +392,7 @@ Button Layout setting swaps both display labels AND functional mapping.
 - **CP 16** — PC Games Favorites, System Cores settings, SYSTEM_DEFAULTS expansion (~130 systems), Plex My List, MPV video player (VA-API, Wayland, resume, subtitle overlay), embedded Live TV guide (EPG + HDHomeRun), hardware-aware check-deps
 - **CP 17** — UI Refresh 4a: Theme.qml token interface (palette vars + semantic tokens), all hardcoded hex colors replaced across 26 QML files
 - **CP 18** — MPV UX overhaul (gamepad controls, loading overlay, async playback, resume focus restore, My List fixes); Plex P0 (timeline heartbeat, client identity, track persistence); Plex P1 (mark watched/unwatched, transient token, skip intro overlay); poster cache parallelism (10-worker executor, pre-resolve cached); Live TV overhaul (HDHomeRun guide API replaces Plex cloud EPG — 58 channels, 56 with live data, ~2s load)
+- **CP 19** — Backend optimizations #17–#22 (continueWatching endpoint, PlexError enum + retry, play queue, codec profile header, playback history, self-healing server connection); SSE library event listener; rating backend; per-row focus memory; in-app Plex PIN login overlay; loading overlay fixes; MPV gamepad input enabled + correct button mapping for 8BitDo Micro D-input; Live TV channels with no guide data hidden; Plex PIN code fix (4-char)
 
 ---
 
