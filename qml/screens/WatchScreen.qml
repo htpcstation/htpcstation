@@ -213,7 +213,7 @@ FocusScope {
         }
     }
 
-    // Connect liveTV.channelsChanged for future use (e.g. updating channel count).
+    // Connect liveTV signals for channel list updates and loading overlay.
     Connections {
         target: liveTV
         function onChannelsChanged() {
@@ -221,6 +221,8 @@ FocusScope {
             // does not currently show a count, but this connection is here
             // so any future count display can be wired up without structural changes.
         }
+        function onMpvPlaybackReady() { watchScreen._clearLoading() }
+        function onMpvFinished()      { watchScreen._clearLoading() }
     }
 
     // Give focus to the appropriate child whenever the view changes or this
@@ -774,6 +776,11 @@ FocusScope {
         focus: false
 
         onBack: watchScreen.currentView = "libraries"
+        onPlaybackLoading: {
+            watchScreen._isLoadingContent = true
+            watchScreen._loadingOverlayVisible = true
+            loadingOverlayTimer.restart()
+        }
     }
 
     // ── Content placeholder (non-movie, non-show, non-ondeck, non-mylist, non-livetv libraries) ───────

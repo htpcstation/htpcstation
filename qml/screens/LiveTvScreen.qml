@@ -18,6 +18,9 @@ FocusScope {
     id: liveTvScreen
 
     signal back()
+    // Emitted just before liveTV.playChannel() is called so WatchScreen can show
+    // the loading overlay while MPV buffers the live stream.
+    signal playbackLoading()
 
     // Only process input when this screen is active.
     enabled: focus
@@ -173,6 +176,7 @@ FocusScope {
                 var ch = channelList.currentItem
                 if (ch && ch.channelStreamUrl !== "") {
                     if (!settings || (settings.plexPlayer || "mpv") === "mpv") {
+                        liveTvScreen.playbackLoading()
                         liveTV.playChannel(ch.channelVcn)
                     } else {
                         liveTV.playChannelBrowser(ch.channelVcn)
@@ -445,6 +449,7 @@ FocusScope {
                     channelList.currentIndex = index
                     if (model.streamUrl !== "") {
                         if (!settings || (settings.plexPlayer || "mpv") === "mpv") {
+                            liveTvScreen.playbackLoading()
                             liveTV.playChannel(model.vcn)
                         } else {
                             liveTV.playChannelBrowser(model.vcn)

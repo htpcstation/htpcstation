@@ -170,6 +170,10 @@ class LiveTvLibrary(QObject):
 
     channelsChanged = Signal()
     loadingChanged = Signal(bool)
+    # Emitted when the Live TV stream's first frame is ready (mirrors plex.mpvPlaybackReady)
+    mpvPlaybackReady = Signal()
+    # Emitted when Live TV playback ends for any reason (mirrors plex.mpvFinished)
+    mpvFinished = Signal()
 
     # Internal signals used to marshal results from worker threads to main thread
     _channelsReady = Signal(list)
@@ -198,6 +202,10 @@ class LiveTvLibrary(QObject):
         # Connect internal signals (worker -> main thread)
         self._channelsReady.connect(self._on_channels_ready)
         self._loadingUpdate.connect(self._on_loading_update)
+
+        # Forward MPV player signals to QML
+        self._mpv_launcher.mpvPlaybackStarted.connect(self.mpvPlaybackReady)
+        self._mpv_launcher.processFinished.connect(self._on_mpv_finished)
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -258,6 +266,11 @@ class LiveTvLibrary(QObject):
         Subclasses or callers may override this behaviour.
         """
         logger.info("LiveTvLibrary.playChannelBrowser: vcn=%s (browser fallback not wired)", vcn)
+
+    @Slot(int)
+    def _on_mpv_finished(self, _exit_code: int) -> None:
+        """Forward MPV processFinished to the public mpvFinished signal."""
+        self.mpvFinished.emit()
 
     # ------------------------------------------------------------------
     # Internal helpers

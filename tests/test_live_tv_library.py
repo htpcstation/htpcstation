@@ -486,6 +486,55 @@ class TestPlayChannel:
 
 
 # ---------------------------------------------------------------------------
+# LiveTvLibrary MPV playback signals
+# ---------------------------------------------------------------------------
+
+
+class TestMpvPlaybackSignals:
+    def test_mpv_playback_ready_signal_connected_to_launcher(self) -> None:
+        """LiveTvLibrary connects mpv_launcher.mpvPlaybackStarted to mpvPlaybackReady."""
+        from backend.live_tv_library import LiveTvLibrary
+
+        mock_launcher = MagicMock()
+        lib = LiveTvLibrary(
+            plex_client_factory=lambda: None,
+            mpv_launcher=mock_launcher,
+        )
+
+        # Verify that connect() was called on mpvPlaybackStarted with lib.mpvPlaybackReady
+        mock_launcher.mpvPlaybackStarted.connect.assert_called_once_with(lib.mpvPlaybackReady)
+
+    def test_mpv_finished_signal_connected_to_launcher(self) -> None:
+        """LiveTvLibrary connects mpv_launcher.processFinished to _on_mpv_finished."""
+        from backend.live_tv_library import LiveTvLibrary
+
+        mock_launcher = MagicMock()
+        lib = LiveTvLibrary(
+            plex_client_factory=lambda: None,
+            mpv_launcher=mock_launcher,
+        )
+
+        # Verify that connect() was called on processFinished
+        mock_launcher.processFinished.connect.assert_called_once_with(lib._on_mpv_finished)
+
+    def test_on_mpv_finished_emits_mpv_finished_signal(self) -> None:
+        """_on_mpv_finished() emits the public mpvFinished signal."""
+        from backend.live_tv_library import LiveTvLibrary
+
+        mock_launcher = MagicMock()
+        lib = LiveTvLibrary(
+            plex_client_factory=lambda: None,
+            mpv_launcher=mock_launcher,
+        )
+
+        emitted: list[bool] = []
+        lib.mpvFinished.connect(lambda: emitted.append(True))
+        lib._on_mpv_finished(0)
+
+        assert emitted == [True]
+
+
+# ---------------------------------------------------------------------------
 # Guide cache
 # ---------------------------------------------------------------------------
 
