@@ -118,7 +118,11 @@ FocusScope {
 
     function _launchMpv(ratingKey, startMs) {
         _resumeDialogVisible = false
+        _isLoadingContent = true
+        _loadingOverlayVisible = true
+        loadingOverlayTimer.restart()
         plex.playWithMpv(ratingKey, startMs)
+        // Overlay cleared by onMpvStarted → _clearLoading()
     }
 
     function _playContent(ratingKey, knownViewOffset) {
