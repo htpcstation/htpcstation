@@ -137,7 +137,7 @@ class PlexAccount:
         }
         try:
             response = requests.post(
-                url, params={"strong": "true"}, headers=headers, timeout=_TIMEOUT
+                url, headers=headers, timeout=_TIMEOUT
             )
             response.raise_for_status()
             data = response.json()

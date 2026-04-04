@@ -487,30 +487,8 @@ class LiveTvLibrary(QObject):
                 next_synopsis=next_synopsis,
             ))
 
-        # Add lineup-only channels (tunable but no guide data)
-        for vcn, entry in lineup.items():
-            if vcn in guide_vcns:
-                continue
-            guide_name = entry.get("GuideName", vcn)
-            stream_url = entry.get("URL", f"http://{host}:5004/auto/v{vcn}")
-            channels.append(LiveTvChannel(
-                channel_id=0,
-                vcn=vcn,
-                title=f"{vcn} {guide_name}",
-                call_sign=guide_name,
-                thumb="",
-                grid_key="",
-                stream_url=stream_url,
-                current_program="",
-                current_start=0,
-                current_end=0,
-                current_thumb="",
-                next_program="",
-                next_start=0,
-                next_end=0,
-                next_thumb="",
-                on_air=False,
-            ))
+        # Lineup-only channels (tunable but absent from the guide API) are intentionally
+        # excluded — they have no programme data and would appear as blank rows in the UI.
 
         # Sort numerically by VCN
         def _vcn_sort_key(ch: LiveTvChannel) -> tuple:

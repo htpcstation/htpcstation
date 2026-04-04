@@ -355,8 +355,8 @@ class TestBuildChannelsFromGuide:
         assert channels[0].title == "7.1 WKBWDT"
         assert channels[0].affiliate == ""
 
-    def test_lineup_only_channel_added(self) -> None:
-        """Channel in lineup but not guide appears with no program data."""
+    def test_lineup_only_channel_excluded(self) -> None:
+        """Channel in lineup but not in guide API response is excluded (no programme data)."""
         lib, _, _ = _make_library()
 
         now = _NOW
@@ -371,12 +371,10 @@ class TestBuildChannelsFromGuide:
         with patch("backend.live_tv_library.time.time", return_value=now):
             channels = lib._build_channels_from_guide(guide_data, lineup, "192.168.0.80")
 
-        assert len(channels) == 2
-        extra = [ch for ch in channels if ch.vcn == "99.1"][0]
-        assert extra.title == "99.1 EXTRA"
-        assert extra.current_program == ""
-        assert extra.on_air is False
-        assert extra.stream_url == "http://192.168.0.80:5004/auto/v99.1"
+        # Only the guide channel is included; the lineup-only channel is hidden
+        assert len(channels) == 1
+        assert channels[0].vcn == "7.1"
+        assert all(ch.vcn != "99.1" for ch in channels)
 
     def test_channels_sorted_by_vcn(self) -> None:
         """Result is sorted numerically by VCN."""

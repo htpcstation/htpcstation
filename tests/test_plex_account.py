@@ -513,7 +513,7 @@ class TestCreatePin:
 
         assert result == (12345, "abc123xyz")
 
-    def test_calls_correct_url_with_strong_param(self) -> None:
+    def test_calls_correct_url_without_strong_param(self) -> None:
         from backend.plex_account import PlexAccount
 
         mock_response = MagicMock()
@@ -525,8 +525,9 @@ class TestCreatePin:
         mock_post.assert_called_once()
         call_url = mock_post.call_args[0][0]
         assert call_url == "https://plex.tv/api/v2/pins"
-        call_params = mock_post.call_args[1].get("params", {})
-        assert call_params.get("strong") == "true"
+        # strong=true must NOT be sent — it produces a 24-char token, not a 4-char link code
+        call_params = mock_post.call_args[1].get("params", {}) or {}
+        assert "strong" not in call_params
 
     def test_sends_correct_headers_without_token(self) -> None:
         from backend.plex_account import PlexAccount
