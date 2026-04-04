@@ -28,3 +28,6 @@ class LiveTvChannel:
     next_end: int
     next_thumb: str
     on_air: bool              # True if currently airing
+    affiliate: str = ""       # e.g. "ABC" (from HDHomeRun guide)
+    current_synopsis: str = ""  # synopsis of currently airing program
+    next_synopsis: str = ""   # synopsis of next program
