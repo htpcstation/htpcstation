@@ -72,6 +72,8 @@ class PlexClient:
         )
         self._last_error: PlexErrorType = PlexErrorType.NONE
         self._on_error: Optional[Callable[[PlexErrorType], None]] = None
+        self._fallback_urls: list[str] = []   # alternative server URLs to try on connection failure
+        self._fallback_index: int = 0         # next fallback to try
 
         # Increase connection pool size to handle parallel EPG page fetches
         # (default is 10; Live TV fetches up to 10 pages concurrently).
@@ -85,6 +87,40 @@ class PlexClient:
         Called on the worker thread — callback must be thread-safe (e.g. emit a Qt signal).
         """
         self._on_error = callback
+
+    def set_fallback_urls(self, urls: list[str]) -> None:
+        """Set the ordered list of fallback server URLs to try on connection failure.
+
+        The primary URL (self._server_url) is not included in this list.
+        URLs are tried in order when a NETWORK error occurs.
+        """
+        self._fallback_urls = [u for u in urls if u and u != self._server_url]
+        self._fallback_index = 0
+
+    def try_next_connection(self) -> bool:
+        """Try the next fallback URL. Returns True if a working connection was found.
+
+        On success, updates self._server_url to the working URL.
+        Called by PlexLibrary when a NETWORK error is detected.
+        """
+        while self._fallback_index < len(self._fallback_urls):
+            url = self._fallback_urls[self._fallback_index]
+            self._fallback_index += 1
+            logger.info("PlexClient: trying fallback URL %s", url)
+            try:
+                # Probe with a lightweight endpoint
+                probe_url = f"{url}/identity"
+                response = self._session.get(probe_url, timeout=5)
+                if response.status_code < 400:
+                    logger.info("PlexClient: switched to %s", url)
+                    self._server_url = url
+                    self._fallback_index = 0  # reset so we can cycle again if needed
+                    return True
+            except Exception:  # noqa: BLE001
+                logger.debug("PlexClient: fallback %s unreachable", url)
+                continue
+        logger.warning("PlexClient: all fallback URLs exhausted")
+        return False
 
     # ------------------------------------------------------------------
     # Public API

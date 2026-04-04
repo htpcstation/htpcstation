@@ -595,7 +595,7 @@ class TestGetWatchHistory:
 # ---------------------------------------------------------------------------
 
 
-class TestGetRetryLogic:
+class TestGetRetryLogicExtra:
     """Verify _get() retries transient errors and classifies error types."""
 
     @patch("backend.plex_client.time.sleep")
@@ -615,3 +615,84 @@ class TestGetRetryLogic:
 
         assert result == {"MediaContainer": {}}
         assert client._last_error == PlexErrorType.NONE
+
+
+# ---------------------------------------------------------------------------
+# PlexClient — self-healing connection (fallback URLs)
+# ---------------------------------------------------------------------------
+
+
+class TestSetFallbackUrls:
+    """Verify set_fallback_urls filters and stores URLs correctly."""
+
+    def test_set_fallback_urls_excludes_primary(self) -> None:
+        """set_fallback_urls excludes the primary URL from the fallback list."""
+        client = PlexClient("http://primary:32400", "test-token")
+        client.set_fallback_urls([
+            "http://primary:32400",
+            "http://fallback1:32400",
+            "http://fallback2:32400",
+        ])
+        assert client._fallback_urls == ["http://fallback1:32400", "http://fallback2:32400"]
+        assert client._fallback_index == 0
+
+
+class TestTryNextConnection:
+    """Verify try_next_connection probes fallback URLs and updates state."""
+
+    def test_try_next_connection_succeeds(self) -> None:
+        """Mock _session.get to return 200 for fallback URL; verify _server_url updated."""
+        client = PlexClient("http://primary:32400", "test-token")
+        client.set_fallback_urls(["http://fallback1:32400"])
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        client._session.get = MagicMock(return_value=resp_200)
+
+        result = client.try_next_connection()
+
+        assert result is True
+        assert client._server_url == "http://fallback1:32400"
+        client._session.get.assert_called_once_with("http://fallback1:32400/identity", timeout=5)
+
+    def test_try_next_connection_skips_unreachable(self) -> None:
+        """First fallback raises ConnectionError, second returns 200; verify second URL is used."""
+        client = PlexClient("http://primary:32400", "test-token")
+        client.set_fallback_urls(["http://bad:32400", "http://good:32400"])
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        client._session.get = MagicMock(
+            side_effect=[ConnectionError("refused"), resp_200]
+        )
+
+        result = client.try_next_connection()
+
+        assert result is True
+        assert client._server_url == "http://good:32400"
+
+    def test_try_next_connection_returns_false_when_exhausted(self) -> None:
+        """All fallbacks fail; verify returns False, _server_url unchanged."""
+        client = PlexClient("http://primary:32400", "test-token")
+        client.set_fallback_urls(["http://bad1:32400", "http://bad2:32400"])
+
+        client._session.get = MagicMock(side_effect=ConnectionError("refused"))
+
+        result = client.try_next_connection()
+
+        assert result is False
+        assert client._server_url == "http://primary:32400"
+
+    def test_try_next_connection_resets_index_on_success(self) -> None:
+        """After success, _fallback_index is 0 so we can cycle again."""
+        client = PlexClient("http://primary:32400", "test-token")
+        client.set_fallback_urls(["http://fallback1:32400", "http://fallback2:32400"])
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        client._session.get = MagicMock(return_value=resp_200)
+
+        result = client.try_next_connection()
+
+        assert result is True
+        assert client._fallback_index == 0

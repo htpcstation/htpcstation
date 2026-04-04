@@ -4173,3 +4173,113 @@ class TestGetWatchHistorySlot:
         result = lib.getWatchHistory(50)
 
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._setup_client — passes fallback URLs (Task 006)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupClientPassesFallbackUrls:
+    """_setup_client passes all known server URLs as fallbacks to PlexClient."""
+
+    def test_setup_client_passes_fallback_urls(self) -> None:
+        """After _setup_client, client._fallback_urls is set from _all_server_urls."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                    {"uri": "https://external.example.com:32400", "local": False, "relay": False, "protocol": "https"},
+                    {"uri": "https://relay.plex.tv/server", "local": False, "relay": True, "protocol": "https"},
+                ],
+            }
+        ]
+        mock_account.switch_user.return_value = None
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        # The primary URL is the best connection (local direct IP)
+        assert lib._server_url == "http://192.168.0.2:32400"
+        # _all_server_urls should contain all connection URIs
+        assert len(lib._all_server_urls) == 3
+        # The client's fallback list should exclude the primary URL
+        assert lib._client is not None
+        assert "http://192.168.0.2:32400" not in lib._client._fallback_urls
+        assert len(lib._client._fallback_urls) == 2
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._on_plex_error — triggers reconnect on NETWORK (Task 006)
+# ---------------------------------------------------------------------------
+
+
+class TestOnPlexErrorTriggersReconnect:
+    """_on_plex_error calls try_next_connection on NETWORK errors."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_on_plex_error_triggers_reconnect_on_network(self) -> None:
+        """_on_plex_error calls try_next_connection when error is NETWORK."""
+        from backend.plex_client import PlexErrorType
+
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.try_next_connection.return_value = True
+        lib._client = mock_client
+
+        lib._on_plex_error(PlexErrorType.NETWORK)
+
+        mock_client.try_next_connection.assert_called_once()
+
+    def test_on_plex_error_does_not_reconnect_on_auth(self) -> None:
+        """_on_plex_error does NOT call try_next_connection for AUTH errors."""
+        from backend.plex_client import PlexErrorType
+
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        lib._client = mock_client
+
+        lib._on_plex_error(PlexErrorType.AUTH)
+
+        mock_client.try_next_connection.assert_not_called()
+
+    def test_on_plex_error_does_not_reconnect_when_no_client(self) -> None:
+        """_on_plex_error does NOT call try_next_connection when _client is None."""
+        from backend.plex_client import PlexErrorType
+
+        lib = self._make_lib()
+        lib._client = None
+
+        # Should not raise
+        lib._on_plex_error(PlexErrorType.NETWORK)

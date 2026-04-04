@@ -29,7 +29,7 @@ from backend.config import Config, CONFIG_DIR
 from backend.mpv_ipc import MpvIpc
 from backend.mpv_launcher import MpvLauncher
 from backend.plex_account import PlexAccount
-from backend.plex_client import PlexClient
+from backend.plex_client import PlexClient, PlexErrorType
 from backend.plex_timeline import PlexTimelineReporter
 from backend.plex_models import (
     PlexArtist,
@@ -544,6 +544,9 @@ class PlexLibrary(QObject):
         self._cached_user_id: Optional[int] = None
         self._cached_user_token: str = ""
         self._cached_user_title: str = ""
+
+        # All known server connection URLs (populated by _resolve_server_url)
+        self._all_server_urls: list[str] = []
 
         # Build Plex client if config is available
         self._client: Optional[PlexClient] = None
@@ -1710,6 +1713,10 @@ class PlexLibrary(QObject):
     def _on_plex_error(self, error_type) -> None:
         """Called on worker thread when a Plex API request fails."""
         self.plexError.emit(error_type.value)
+        # On network errors, try the next known server connection
+        if error_type == PlexErrorType.NETWORK and self._client is not None:
+            if self._client.try_next_connection():
+                logger.info("PlexLibrary: reconnected to server via fallback URL")
 
     # ------------------------------------------------------------------
     # Internal: worker thread functions
@@ -2135,9 +2142,12 @@ class PlexLibrary(QObject):
             return (tier, plex_direct_pref, https_pref)
 
         sorted_conns = sorted(connections, key=_conn_priority)
+        # Store all URIs for self-healing fallback
+        self._all_server_urls = [c.get("uri", "") for c in sorted_conns if c.get("uri")]
         best = sorted_conns[0]
         uri = best.get("uri", "")
-        logger.info("PlexLibrary: resolved server URL: %s", uri)
+        logger.info("PlexLibrary: resolved server URL: %s (%d connections available)",
+                    uri, len(self._all_server_urls))
         return uri or None
 
     def _setup_client(self) -> None:
@@ -2204,6 +2214,9 @@ class PlexLibrary(QObject):
         self._active_token = user_token
         self._client = PlexClient(server_url, token, client_id=self._config.plex_client_id)
         self._client.set_error_callback(self._on_plex_error)
+        # Pass all known server URLs for self-healing on connection failure
+        fallbacks = [u for u in self._all_server_urls if u != server_url]
+        self._client.set_fallback_urls(fallbacks)
         logger.info("PlexLibrary: client configured for %s", server_url)
 
     def _ensure_account(self) -> PlexAccount | None:
