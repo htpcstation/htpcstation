@@ -487,31 +487,6 @@ class PlexClient:
             return []
         return data.get("MediaContainer", {}).get("Metadata", [])
 
-    def get_markers(self, metadata: dict) -> dict:
-        """Extract intro and credits marker timestamps from a metadata dict.
-
-        Returns:
-            {
-                "intro_start_ms": int,   # 0 if no intro marker
-                "intro_end_ms": int,     # 0 if no intro marker
-                "credits_start_ms": int, # 0 if no credits marker
-            }
-        Marker timestamps from Plex are in milliseconds.
-        Marker types: "intro", "credits", "commercial", "bookmark", "resume".
-        """
-        result = {"intro_start_ms": 0, "intro_end_ms": 0, "credits_start_ms": 0}
-        markers = metadata.get("Marker", [])
-        for marker in markers:
-            marker_type = marker.get("type", "")
-            start = int(marker.get("startTimeOffset", 0) or 0)
-            end = int(marker.get("endTimeOffset", 0) or 0)
-            if marker_type == "intro":
-                result["intro_start_ms"] = start
-                result["intro_end_ms"] = end
-            elif marker_type == "credits":
-                result["credits_start_ms"] = start
-        return result
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

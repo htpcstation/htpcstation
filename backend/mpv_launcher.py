@@ -19,15 +19,15 @@ logger = logging.getLogger(__name__)
 # IPC socket path for communicating with a running MPV instance.
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
-_INPUT_CONF_VERSION = "14"
+_INPUT_CONF_VERSION = "15"
 _INPUT_CONF_CONTENT = """\
-# HTPC Station MPV input config v14
+# HTPC Station MPV input config v15
 # Verified with mpv --input-test (user confirmed, no SDL override needed):
 #   A (east,  evdev 304) -> GAMEPAD_ACTION_DOWN   = wizard accept = pause
 #   B (south, evdev 305) -> GAMEPAD_ACTION_RIGHT  (unbound)
-#   X (north, evdev 307) -> GAMEPAD_ACTION_UP
-#   Y (west,  evdev 308) -> GAMEPAD_ACTION_LEFT
-#   Start (evdev 315)    -> GAMEPAD_START
+#   X (north, evdev 307) -> GAMEPAD_ACTION_UP     = show-progress
+#   Y (west,  evdev 308) -> GAMEPAD_ACTION_LEFT   (unbound)
+#   Start (evdev 315)    -> GAMEPAD_START          = quit
 # L2/R2 are unbound — analog axis fires continuously while held, unusable.
 
 GAMEPAD_ACTION_DOWN     cycle pause
@@ -37,7 +37,6 @@ GAMEPAD_DPAD_UP         add volume 5
 GAMEPAD_DPAD_DOWN       add volume -5
 GAMEPAD_LEFT_SHOULDER   cycle audio
 GAMEPAD_RIGHT_SHOULDER  show-text ${track-list} 3000
-GAMEPAD_ACTION_LEFT     cycle sub
 GAMEPAD_ACTION_UP       show-progress
 GAMEPAD_START           quit
 """

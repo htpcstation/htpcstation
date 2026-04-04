@@ -486,8 +486,7 @@ class PlexLibrary(QObject):
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
     _artistsReady = Signal(list, int)  # (artists, total_size)
-    _mpvLaunchReady = Signal(str, str, int, int, int, int, int, int)  # url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms
-    markersReady = Signal(int, int, int)  # intro_start_ms, intro_end_ms, credits_start_ms
+    _mpvLaunchReady = Signal(str, str, int, int, int)  # url, title, start_ms, duration_ms, part_id
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
 
     def __init__(
@@ -581,13 +580,7 @@ class PlexLibrary(QObject):
         self._current_play_part_id: int = 0
         self._pending_play_queue_item_id: int = 0
         self._current_play_queue_item_id: int = 0
-        self._pending_audio_id_map: dict[int, int] = {}
-        self._pending_sub_id_map: dict[int, int] = {}
-        self._audio_id_map: dict[int, int] = {}
-        self._sub_id_map: dict[int, int] = {}
-        self._current_intro_start_ms: int = 0
-        self._current_intro_end_ms: int = 0
-        self._current_credits_start_ms: int = 0
+
 
         # Connect MPV lifecycle to the timeline reporter
         self._mpv_launcher.processStarted.connect(self._on_mpv_started_for_timeline)
@@ -1169,7 +1162,7 @@ class PlexLibrary(QObject):
                 if main_token and main_token in url:
                     url = url.replace(main_token, transient)
 
-            meta = client.get_metadata(rating_key, include_markers=True)
+            meta = client.get_metadata(rating_key)
             title = meta.get("title", "")
             grandparent = meta.get("grandparentTitle", "")
             if grandparent:
@@ -1183,19 +1176,6 @@ class PlexLibrary(QObject):
                 parts = media[0].get("Part", [])
                 if parts:
                     part_id = int(parts[0].get("id", 0) or 0)
-            # Build MPV-track-id → Plex-stream-id mapping
-            streams = parts[0].get("Stream", []) if parts else []
-            audio_streams = [s for s in streams if s.get("streamType") == 2]
-            sub_streams = [s for s in streams if s.get("streamType") == 3]
-            audio_id_map = {i + 1: int(s.get("id", 0)) for i, s in enumerate(audio_streams)}
-            sub_id_map = {i + 1: int(s.get("id", 0)) for i, s in enumerate(sub_streams)}
-            self._pending_audio_id_map = audio_id_map
-            self._pending_sub_id_map = sub_id_map
-            # Extract markers
-            markers = client.get_markers(meta)
-            intro_start_ms = markers["intro_start_ms"]
-            intro_end_ms = markers["intro_end_ms"]
-            credits_start_ms = markers["credits_start_ms"]
             # Register play queue with server (enables Plex Companion + Up Next)
             play_queue_item_id = 0
             machine_id = self._machine_identifier  # already cached from identity fetch
@@ -1209,7 +1189,7 @@ class PlexLibrary(QObject):
                 logger.info("playWithMpv: playQueueItemID=%d", play_queue_item_id)
             self._pending_play_queue_item_id = play_queue_item_id
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
-            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)
+            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id)
         self._executor.submit(_worker)
 
     def _on_mpv_launch_ready(
@@ -1219,9 +1199,6 @@ class PlexLibrary(QObject):
         start_ms: int,
         duration_ms: int,
         part_id: int,
-        intro_start_ms: int = 0,
-        intro_end_ms: int = 0,
-        credits_start_ms: int = 0,
     ) -> None:
         """Launch MPV on the main thread after worker fetched stream info."""
         if not url:
@@ -1232,13 +1209,7 @@ class PlexLibrary(QObject):
         self._current_play_duration_ms = duration_ms
         self._current_play_part_id = part_id
         self._current_play_queue_item_id = self._pending_play_queue_item_id
-        self._audio_id_map = self._pending_audio_id_map
-        self._sub_id_map = self._pending_sub_id_map
-        self._current_intro_start_ms = intro_start_ms
-        self._current_intro_end_ms = intro_end_ms
-        self._current_credits_start_ms = credits_start_ms
         self._mpv_launcher.launch(url, title, start_ms)
-        self.markersReady.emit(intro_start_ms, intro_end_ms, credits_start_ms)
 
     @Slot(str)
     def playWithMpvFromStart(self, rating_key: str) -> None:
@@ -1271,72 +1242,6 @@ class PlexLibrary(QObject):
             return
         client = self._client
         self._executor.submit(client.rate, rating_key, rating)
-
-    @Slot()
-    def skipIntro(self) -> None:
-        """Seek MPV past the intro. Called from the skip intro overlay."""
-        if self._current_intro_end_ms > 0:
-            self._mpv_ipc.command("seek", self._current_intro_end_ms / 1000, "absolute")
-
-    @Slot(result="QVariant")
-    def getMpvSubtitleTracks(self) -> list[dict]:
-        """Return subtitle tracks from the running MPV instance.
-
-        Returns a list of dicts: [{id, title, lang, selected, external}]
-        Returns [] if MPV is not running.
-        """
-        ipc = MpvIpc()
-        if not ipc.is_available():
-            return []
-        tracks = ipc.get_track_list()
-        result = []
-        for t in tracks:
-            if t.get("type") != "sub":
-                continue
-            result.append({
-                "id": t.get("id", 0),
-                "title": t.get("title", "") or "",
-                "lang": t.get("lang", "") or "",
-                "selected": bool(t.get("selected", False)),
-                "external": bool(t.get("external", False)),
-            })
-        return result
-
-    @Slot(int)
-    def setMpvSubtitleTrack(self, track_id: int) -> None:
-        """Select a subtitle track in the running MPV instance. 0 = disable."""
-        MpvIpc().set_subtitle_track(track_id)
-
-    @Slot(int, str)
-    def persistTrackSelection(self, mpv_track_id: int, track_type: str) -> None:
-        """Persist the user's track selection to Plex. Called from MpvSubtitleOverlay.
-
-        mpv_track_id: MPV's track ID (1-based, per type)
-        track_type: 'audio' or 'subtitle'
-        """
-        if self._client is None or not self._current_play_part_id:
-            return
-        client = self._client
-        part_id = self._current_play_part_id
-
-        if track_type == "audio":
-            plex_id = self._audio_id_map.get(mpv_track_id, 0)
-            if plex_id:
-                self._executor.submit(
-                    client.persist_stream_selection, part_id, plex_id, None
-                )
-        elif track_type == "subtitle":
-            if mpv_track_id == 0:
-                # Disabled — send subtitleStreamID=0
-                self._executor.submit(
-                    client.persist_stream_selection, part_id, None, 0
-                )
-            else:
-                plex_id = self._sub_id_map.get(mpv_track_id, 0)
-                if plex_id:
-                    self._executor.submit(
-                        client.persist_stream_selection, part_id, None, plex_id
-                    )
 
     def _on_mpv_started_for_timeline(self) -> None:
         """Start timeline reporting when MPV begins playing."""

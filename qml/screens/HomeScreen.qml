@@ -77,28 +77,6 @@ FocusScope {
         function onMpvFinished() { homeScreen._mpvRunning = false }
     }
 
-    // Subtitle overlay window — instantiated once, shown on demand.
-    MpvSubtitleOverlay {
-        id: mpvSubtitleOverlay
-    }
-
-    // Skip intro overlay window — instantiated once, shown when intro markers are present.
-    MpvSkipIntroOverlay {
-        id: skipIntroOverlay
-    }
-
-    Connections {
-        target: plex
-        function onMarkersReady(introStartMs, introEndMs, creditsStartMs) {
-            if (introEndMs > 0) {
-                skipIntroOverlay.showForIntro(introStartMs, introEndMs)
-            }
-        }
-        function onMpvFinished() {
-            skipIntroOverlay.hideOverlay()
-        }
-    }
-
     // ── Global music playback state ───────────────────────────────────────────
     // Index into _playbackTracks of the currently playing track (-1 = not playing).
     property int _playingIndex: -1
@@ -198,11 +176,6 @@ FocusScope {
             // to child screens (e.g. Retro Games uses X for Favorite).
             event.accepted = true
             homeScreen._togglePlayPause()
-        } else if (keys.isContext2(event) && homeScreen._mpvRunning
-                   && homeScreen.tabSources[homeScreen.currentTab] === "WatchScreen.qml") {
-            // Y button subtitle overlay — only when MPV is running on the Watch tab.
-            event.accepted = true
-            mpvSubtitleOverlay.showOverlay()
         }
     }
 
