@@ -393,6 +393,25 @@ class PlexClient:
         except Exception as exc:  # noqa: BLE001
             logger.warning("persist_stream_selection failed for part %d: %s", part_id, exc)
 
+    def rate(self, rating_key: str, rating: float) -> None:
+        """PUT /:/rate — set user star rating for an item.
+
+        rating: 0.0–10.0 (0.0 clears the rating).
+        Fire-and-forget; errors are logged but never raised.
+        """
+        try:
+            self._session.put(
+                f"{self._server_url}/:/rate",
+                params={
+                    "key": rating_key,
+                    "identifier": "com.plexapp.plugins.library",
+                    "rating": rating,
+                },
+                timeout=_TIMEOUT,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("rate failed for ratingKey=%s: %s", rating_key, exc)
+
     def mark_played(self, rating_key: str) -> None:
         """PUT /:/scrobble — mark item as watched.
 

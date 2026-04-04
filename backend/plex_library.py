@@ -1261,6 +1261,17 @@ class PlexLibrary(QObject):
         client = self._client
         self._executor.submit(client.mark_unplayed, rating_key)
 
+    @Slot(str, float)
+    def rate(self, rating_key: str, rating: float) -> None:
+        """Set a star rating (0.0–10.0) for a library item. 0.0 clears the rating.
+
+        Fire-and-forget — dispatched to the worker thread pool.
+        """
+        if self._client is None or not rating_key:
+            return
+        client = self._client
+        self._executor.submit(client.rate, rating_key, rating)
+
     @Slot()
     def skipIntro(self) -> None:
         """Seek MPV past the intro. Called from the skip intro overlay."""

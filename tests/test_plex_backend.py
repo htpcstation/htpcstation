@@ -4385,3 +4385,56 @@ class TestEventListenerIntegration:
             lib = PlexLibrary(config)
 
         assert lib._event_listener is None
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.rate — Task 008
+# ---------------------------------------------------------------------------
+
+
+class TestRateSlot:
+    """rate() slot dispatches to executor and is a no-op when _client is None."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_rate_slot_dispatches_to_executor(self) -> None:
+        """rate() submits client.rate to the executor with correct args."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        lib._client = mock_client
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib.rate("123", 7.0)
+
+        assert len(submitted) == 1
+        fn, args = submitted[0]
+        assert fn == mock_client.rate
+        assert args == ("123", 7.0)
+
+    def test_rate_slot_no_op_without_client(self) -> None:
+        """rate() is a no-op when _client is None — no error raised."""
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        # Should not raise
+        lib.rate("123", 7.0)
+
+        assert len(submitted) == 0

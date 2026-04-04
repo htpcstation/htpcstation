@@ -191,6 +191,41 @@ class TestMarkPlayed:
         client.mark_unplayed("12345")
 
 
+class TestRate:
+    """Verify rate() sends correct PUT request and never raises."""
+
+    def test_rate_sends_correct_params(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.put = MagicMock()
+
+        client.rate("123", 8.0)
+
+        client._session.put.assert_called_once()
+        call_args = client._session.put.call_args
+        assert call_args[0][0] == "http://localhost:32400/:/rate"
+        params = call_args[1]["params"]
+        assert params["key"] == "123"
+        assert params["rating"] == 8.0
+        assert params["identifier"] == "com.plexapp.plugins.library"
+
+    def test_rate_zero_clears_rating(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.put = MagicMock()
+
+        client.rate("123", 0.0)
+
+        call_args = client._session.put.call_args
+        params = call_args[1]["params"]
+        assert params["rating"] == 0.0
+
+    def test_rate_never_raises(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.put = MagicMock(side_effect=ConnectionError("refused"))
+
+        # Should not raise
+        client.rate("123", 8.0)
+
+
 class TestTransientToken:
     """Verify get_transient_token returns token or empty string."""
 
