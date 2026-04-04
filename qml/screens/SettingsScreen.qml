@@ -404,8 +404,9 @@ FocusScope {
                                 actionButton.statusText = ok ? "Connected!" : "Failed"
                             })
                         } else if (action === "plexSignIn") {
-                            actionButton.statusText = "Opening browser..."
-                            settings.signInWithPlex()
+                            plexLoginOverlay.visible = true
+                            plexLoginOverlay.forceActiveFocus()
+                            settings.startPlexPinLogin()
                         } else if (action === "openMoonlight") {
                             settings.openMoonlight()
                             actionButton.statusText = "Opening..."
@@ -663,5 +664,44 @@ FocusScope {
             systemCoresScreen.visible = false
             settingsList.forceActiveFocus()
         }
+    }
+
+    // ── Plex PIN login: signal connections ────────────────────────────────────
+    Connections {
+        target: settings
+        function onPlexLoginStatus(status) {
+            if (status.startsWith("waiting:")) {
+                plexLoginOverlay._pinCode = status.substring(8)
+                plexLoginOverlay._status = "waiting"
+            } else if (status === "success") {
+                plexLoginOverlay._status = "success"
+                plexLoginDismissTimer.start()
+            } else if (status === "timeout") {
+                plexLoginOverlay._status = "timeout"
+                plexLoginDismissTimer.start()
+            } else if (status === "error") {
+                plexLoginOverlay._status = "error"
+                plexLoginDismissTimer.start()
+            } else if (status === "cancelled") {
+                plexLoginOverlay.visible = false
+                settingsList.forceActiveFocus()
+            }
+        }
+    }
+
+    // ── Plex PIN login: auto-dismiss after success / timeout / error ──────────
+    Timer {
+        id: plexLoginDismissTimer
+        interval: 2000
+        onTriggered: {
+            plexLoginOverlay.visible = false
+            settingsList.forceActiveFocus()
+        }
+    }
+
+    // ── Plex PIN login overlay (declared last so it renders on top) ───────────
+    PlexLoginOverlay {
+        id: plexLoginOverlay
+        anchors.fill: parent
     }
 }
