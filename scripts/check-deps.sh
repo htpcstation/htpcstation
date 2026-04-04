@@ -73,7 +73,7 @@ else
     esac
 fi
 
-# --- Video playback (MPV + FFmpeg + VA-API) ---
+# --- Video playback (MPV + libmpv + FFmpeg + VA-API) ---
 if command -v mpv &>/dev/null; then
     mpv_ver=$(mpv --version 2>/dev/null | head -1 | awk '{print $2}')
     echo -e "  $OK  mpv $mpv_ver"
@@ -90,6 +90,35 @@ else
         apt)     missing_sys="${missing_sys:+$missing_sys }mpv" ;;
         pacman)  missing_sys="${missing_sys:+$missing_sys }mpv" ;;
         emerge)  missing_sys="${missing_sys:+$missing_sys }media-video/mpv" ;;
+    esac
+fi
+
+# libmpv shared library — required for in-process video playback (python-mpv)
+libmpv_found=0
+for soname in libmpv.so.2 libmpv.so.1 libmpv.so; do
+    if ldconfig -p 2>/dev/null | grep -q "$soname"; then
+        libmpv_found=1
+        break
+    fi
+    # Also check common paths directly
+    for dir in /usr/lib64 /usr/lib /usr/local/lib64 /usr/local/lib; do
+        [ -f "$dir/$soname" ] && libmpv_found=1 && break 2
+    done
+done
+if [ "$libmpv_found" -eq 1 ]; then
+    echo -e "  $OK  libmpv (shared library for in-process playback)"
+else
+    echo -e "  $FAIL  libmpv shared library not found"
+    echo -e "       HTPC Station uses libmpv directly for video playback."
+    echo -e "       Install with one of:"
+    echo -e "         Fedora/RHEL:   sudo dnf install mpv-libs"
+    echo -e "         Debian/Ubuntu: sudo apt-get install libmpv2"
+    echo -e "         Arch:          (included with mpv)"
+    echo -e "         Gentoo:        (included with media-video/mpv)"
+    errors=$((errors + 1))
+    case "$distro" in
+        dnf)    missing_sys="${missing_sys:+$missing_sys }mpv-libs" ;;
+        apt)    missing_sys="${missing_sys:+$missing_sys }libmpv2" ;;
     esac
 fi
 
@@ -275,7 +304,7 @@ else
 fi
 
 # --- Python packages ---
-for pkg in PySide6 evdev requests; do
+for pkg in PySide6 evdev requests mpv; do
     if python3 -c "import $pkg" &>/dev/null; then
         echo -e "  $OK  Python package: $pkg"
     else

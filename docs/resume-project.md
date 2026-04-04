@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 19)
+# HTPC Station — Resume Document (Checkpoint 20)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -7,36 +7,21 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,547 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,536 tests passing.**
 
-**What's new since Checkpoint 18:**
+**What's new since Checkpoint 19:**
 
-Backend optimizations (#17–#22):
-- `/hubs/home/continueWatching` replaces `/library/onDeck` in `PlexClient.get_on_deck()`
-- `PlexError` enum — typed error handling + exponential backoff retry in `_get()`
-- Play queue (`POST /playQueues`) created before MPV launch; `playQueueItemID` in timeline reports
-- `X-Plex-Client-Profile-Extra` header — codec capabilities sent to Plex for better direct-play decisions
-- Playback history (`GET /status/sessions/history/all`) — more reliable recently-watched source
-- Self-healing server connection — `PlexClient.set_fallback_urls()` / `try_next_connection()`, survives LAN IP changes
-
-Backend features (#23–#24):
-- `PlexEventListener` daemon thread — SSE `/:/eventsource/notifications`, triggers `refresh()` on `library.update/new/refresh.all`
-- `PlexClient.rate()` + `PlexLibrary.rate()` slot — `PUT /:/rate` for star ratings (backend only, no UI yet)
-
-UI features (#25–#27):
-- Per-row focus memory in WatchScreen — `_focusMemory` dict replaces single `_resumeSavedIndex`
-- In-app Plex PIN login — `PlexLoginOverlay.qml` + `startPlexPinLogin()` / `cancelPlexPinLogin()` slots; `plexLoginStatus` signal; no browser launch needed
-- Loading overlay fixes — `_clearLoading()` helper with 400ms minimum display; overlay now shows correctly for Continue Watching, resume dialog, and slow network streams
-
-Bug fixes:
-- Plex PIN code was 24 chars (removed `strong=true` from `create_pin()`) — now correct 4-char link code
-- Live TV channels with no guide data are now hidden (lineup-only channels excluded)
-- MPV gamepad input enabled (`--input-gamepad=yes`)
-- MPV input.conf v14 — correct button mapping for 8BitDo Micro D-input verified with `mpv --input-test`:
-  - A (east, evdev 304) = `GAMEPAD_ACTION_DOWN` → pause/play
-  - Start (evdev 315) = `GAMEPAD_START` → quit
-  - D-pad seek/volume, L1/R1 audio/track, X/Y progress/subtitles
-  - L2/R2 unbound (analog axis fires continuously — unusable without libmpv)
+libmpv migration (roadmap #28) — complete:
+- `MpvLauncher` (QProcess subprocess) → `LibMpvPlayer` (python-mpv/libmpv in-process)
+- MPV renders inside the Qt window via `wid` — no window hide/show on playback
+- Gamepad bindings via `player.keybind()` at startup — no `input.conf` file written to disk
+- Loading overlay hides on `wait_until_playing()` (first frame ready), not on process start
+- L2/R2: `on_key_press` callback with 0.5s debounce — one seek per tap, no runaway
+- Y button: subtitle picker overlay restored as in-process `FocusScope` (was broken as separate `Window`)
+- `PlexTimelineReporter` push-based via `@property_observer('time-pos')` — no 10s IPC poll
+- `MpvIpc` deleted entirely
+- `mpv-libs` + `mpv>=1.0.8` (python-mpv) added as dependencies
+- License: MIT retained — libmpv/python-mpv used under LGPLv2.1 via dynamic ctypes linking
 
 ---
 
@@ -82,39 +67,13 @@ Bug fixes:
 
 ---
 
-## Roadmap Item #28 — libmpv Migration Scope
-
-**Why:** The current `MpvLauncher` subprocess + `MpvIpc` Unix socket approach has three hard limitations:
-1. `PlexTimelineReporter` polls position every 10s via IPC — push-based `time-pos` observer would be instant and eliminate the polling thread entirely.
-2. `input.conf` versioning is fragile — every button mapping change requires a version bump and file rewrite. `python-mpv`'s `keybind()` API sets bindings programmatically at runtime.
-3. L2/R2 triggers are analog axes that fire continuously while held — uncontrollable from `input.conf`. In-process, the axis value can be read and debounced properly.
-
-**What changes:**
-- `MpvLauncher` → replaced by a `python-mpv` `MPV` instance embedded in the Qt window (`wid=str(int(window.winId()))`)
-- `MpvIpc` → replaced by `player.time_pos`, `player.pause`, `player.audio`, `player.sub` properties
-- `PlexTimelineReporter` → `@player.property_observer('time-pos')` callback instead of polling thread
-- `input.conf` + `_ensure_input_conf()` → `player.keybind(name, command)` calls at startup
-- `MpvSkipIntroOverlay` seek → `player.seek(ms / 1000)` instead of IPC JSON command
-- Loading overlay: `player.wait_until_playing()` gives exact ready signal (no `processStarted` approximation)
-
-**What stays the same:**
-- All QML, all signals (`mpvStarted`, `mpvFinished`, `streamInfoReady`), all `PlexLibrary` slots
-- Live TV launch (same approach, different MPV instance or same instance reused)
-- Wayland/Xorg hwdec detection logic
-
-**Estimated scope:** 3 tasks — (1) core MPV instance + property observers, (2) keybind migration + L2/R2 fix, (3) skip intro + subtitle track selection migration.
-
-**Prerequisite:** `pip install mpv` (python-mpv). Requires `libmpv.so` on the system — already present since MPV is installed.
-
----
-
 ## Stack
 
 | | |
 |---|---|
 | Framework | Qt 6 / QML + PySide6 (Python 3.10+) |
 | Target | Linux x86_64, Xorg or Wayland, Intel J5005-class or better |
-| Video playback | System MPV (`/usr/bin/mpv`), VA-API hwdec, direct Plex stream URLs (transient token) |
+| Video playback | libmpv in-process via python-mpv, VA-API hwdec, direct Plex stream URLs (transient token) |
 | Live TV | HDHomeRun direct streams + SiliconDust guide API (`api.hdhomerun.com`) |
 | Emulator | RetroArch via Flatpak |
 | PC games | Steam URI (`steam://rungameid/`), Moonlight CLI (Flatpak) |
@@ -122,7 +81,7 @@ Bug fixes:
 | Browser | Brave Flatpak (music playback, MPV fallback) |
 | Gamepad | evdev → synthetic QKeyEvent injection |
 | Config | `~/.config/htpcstation/config.json` |
-| MPV config | `~/.config/htpcstation/mpv/input.conf` (versioned v14, auto-written) |
+| MPV config | No `input.conf` — bindings registered via `player.keybind()` at startup |
 | Live TV cache | `~/.config/htpcstation/livetv_cache/guide_cache.json` |
 | Poster cache | `~/.config/htpcstation/poster_cache/{sha256}.jpg` |
 
@@ -173,7 +132,7 @@ bash scripts/check-deps.sh
 
 **Plex managed user tokens get 401 from the media server.** Always use the admin token for server API calls. User token is only for browser deep links.
 
-**MPV on Wayland needs `--hwdec=vaapi-copy` and `--gpu-context=wayland`.** On Xorg use `--hwdec=vaapi` and `--gpu-context=x11`. `MpvLauncher._gpu_context()` and `_hwdec_mode()` auto-detect from `XDG_SESSION_TYPE`.
+**MPV on Wayland needs `hwdec=vaapi-copy` and `gpu_context=wayland`.** On Xorg use `hwdec=vaapi` and `gpu_context=x11`. `LibMpvPlayer._gpu_context()` and `_hwdec_mode()` auto-detect from `XDG_SESSION_TYPE`. These are passed as kwargs to `mpv.MPV()`, not as CLI flags.
 
 **Fedora ships codec-restricted packages.** `ffmpeg-free` → swap for `ffmpeg` (RPM Fusion). `libva-intel-media-driver` → swap for `libva-intel-driver` (RPM Fusion). `check-deps.sh` detects and reports these.
 
@@ -185,19 +144,21 @@ bash scripts/check-deps.sh
 
 **`PlexOnDeckGrid` and `PlexOnDeckList` expose `currentIndex` as a writable property** (not readonly). Writing to it from WatchScreen sets `_suppressIndexReset = true` first to prevent the `onActiveFocusChanged` handler from resetting to 0.
 
-**`PlexTimelineReporter` uses a daemon thread.** It is started in `_on_mpv_started_for_timeline` and stopped in `_on_mpv_finished_for_timeline`. `PlexLibrary.shutdown()` also calls `stop()`. Position is updated via push-based `time-pos` property observer (registered in `PlexLibrary.set_wid()`); no IPC polling.
+**`PlexTimelineReporter` uses a daemon thread.** Started in `_on_mpv_started_for_timeline`, stopped in `_on_mpv_finished_for_timeline`. `PlexLibrary.shutdown()` also calls `stop()`. Position updated via push-based `@property_observer('time-pos')` registered in `PlexLibrary.set_wid()` — no IPC polling.
 
-**`_mpvLaunchReady` signal carries 8 args** `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`. All test mocks must pass all 8.
+**`_mpvLaunchReady` signal carries 5 args** `(url, title, start_ms, duration_ms, part_id)`. All test mocks must match this signature.
 
 **HDHomeRun guide API uses `DeviceAuth` token** from `http://{host}/discover.json`, not the Plex token. The guide endpoint is `https://api.hdhomerun.com/api/guide?DeviceAuth={token}`. The Plex cloud EPG grid endpoint (`/{epg_key}/grid`) ignores `channelGridKey` filter — do not use it for per-channel data.
 
 **Plex EPG timestamps are unreliable** (may be ~1 year ahead of wall clock). Use HDHomeRun guide timestamps instead — they are accurate Unix seconds.
 
-**MPV gamepad key names are SDL positional, not label-based.** On the 8BitDo Micro in D-input mode (Bluetooth), verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`, Start = `GAMEPAD_START`. L2/R2 are analog axes (`GAMEPAD_LEFT/RIGHT_TRIGGER`) that fire continuously while held — do not bind seek commands to them without in-process debouncing (requires libmpv migration, roadmap #28).
+**MPV gamepad key names are SDL positional, not label-based.** On the 8BitDo Micro in D-input mode (Bluetooth), verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`, Start = `GAMEPAD_START`. L2/R2 use `on_key_press("GAMEPAD_LEFT/RIGHT_TRIGGER")` callbacks with 0.5s debounce in `LibMpvPlayer`.
 
 **`SDL_GAMECONTROLLERCONFIG` override has no effect on this device.** The 8BitDo Micro's SDL mapping is already correct in the system database. Do not attempt to override it.
 
-**MPV `input.conf` version check only rewrites on version mismatch.** If you need to force a rewrite during development, delete `~/.config/htpcstation/mpv/input.conf` before launching.
+**python-mpv callbacks run on the mpv event thread.** Never call Qt UI methods directly from a property observer or `on_key_press` callback. Always use `QMetaObject.invokeMethod` with `Qt.ConnectionType.QueuedConnection`.
+
+**`LibMpvPlayer.set_wid()` must be called after `window.showFullScreen()`.** `winId()` is only valid after the window is mapped. In `main.py`, call `plex_library.set_wid(int(window.winId()))` after `showFullScreen()`.
 
 ---
 

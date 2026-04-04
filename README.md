@@ -98,7 +98,7 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - **For retro games:** RetroArch installed (Flatpak recommended), plus ROMs with Batocera/Knulli/EmulationStation scraped metadata (`gamelist.xml` and artwork). HTPC Station does not scrape ROMs — prepare your library first.
 - **For Steam games:** Steam installed (Flatpak or native).
 - **For game streaming:** Moonlight installed (Flatpak recommended) and a Sunshine or Apollo host.
-- **For Plex video playback:** MPV installed (`sudo dnf install mpv` or equivalent). Hardware acceleration requires VA-API drivers — see the dependency checker output for your specific hardware and distro.
+- **For Plex video playback:** MPV and its shared library installed (`sudo dnf install mpv mpv-libs` on Fedora, `sudo apt-get install mpv libmpv2` on Debian/Ubuntu). Hardware acceleration requires VA-API drivers — see the dependency checker output for your specific hardware and distro.
 - **For Plex Live TV:** An HDHomeRun tuner connected through Plex DVR.
 - **For Plex music and browser fallback:** Brave browser (Flatpak recommended).
 - **For Plex:** A Plex account with access to a Plex Media Server. Local network direct-play is preferred.
@@ -138,7 +138,7 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 python3 -m pytest tests/ -q
 ```
 
-The suite currently covers over 1,547 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+The suite currently covers over 1,536 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
 
 1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
 2. Replace the sample data with your real values.
@@ -197,15 +197,15 @@ The table below uses the **wizard mapping** button names (Accept, Cancel, etc.) 
 | Button | MPV Action |
 |---|---|
 | Accept (A on most controllers) | Play / Pause |
-| Context 1 (X) | Open subtitle selector (via HTPC Station overlay) |
-| Context 2 (Y) | Show playback progress |
+| Context 1 (X) | Show playback progress |
+| Context 2 (Y) | Open subtitle track selector |
 | D-pad Left / Right | Seek ±10 seconds |
 | D-pad Up / Down | Volume ±5 |
 | LB | Cycle audio track |
 | RB | Show track list |
 | Start | Quit (return to HTPC Station) |
 
-> **Note:** The exact MPV key name for each button depends on how SDL maps your controller. If buttons seem swapped, run `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` and press each button to see what name MPV reports, then edit `input.conf` accordingly.
+> **Note:** Gamepad bindings are registered programmatically at startup — no `input.conf` file is written. If buttons seem swapped, run `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` and press each button to see what name MPV reports, then open an issue.
 
 ### Controller Reference
 
@@ -263,7 +263,7 @@ For those interested in what's under the hood:
 | PC game launch | Steam URI protocol (`steam://rungameid/`) |
 | Game streaming | Moonlight CLI (Flatpak) |
 | Media browsing | Plex Media Server API |
-| Video playback | System MPV with VA-API hardware decode (direct Plex stream URLs) |
+| Video playback | libmpv (in-process, via python-mpv) with VA-API hardware decode (direct Plex stream URLs) |
 | Live TV | HDHomeRun direct streams via Plex DVR + HDHomeRun guide API (`api.hdhomerun.com`) |
 | Music playback | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Gamepad input | evdev with synthetic Qt key events |
@@ -287,3 +287,5 @@ Report bugs via [GitHub Issues](https://github.com/htpcstation/htpcstation/issue
 ## License
 
 HTPC Station is released under the [MIT License](LICENSE).
+
+**Dependency licensing note:** HTPC Station uses [python-mpv](https://github.com/jaseg/python-mpv) and [libmpv](https://mpv.io/), which are available under LGPLv2.1 or later (or GPLv2 or later at the user's option). HTPC Station links against libmpv dynamically via ctypes — this is dynamic linking, which is compatible with the LGPL. HTPC Station's own source code remains under the MIT License. If you distribute a build that statically links libmpv, the GPL terms apply to that build.
