@@ -68,6 +68,12 @@ ASSETS_DIR = Path(__file__).parent / "assets"
 
 
 def main() -> None:
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
     config = Config()  # loads/creates ~/.config/htpcstation/config.json
 
     app = QGuiApplication(sys.argv)
@@ -105,6 +111,7 @@ def main() -> None:
         mpv_launcher=plex_library._mpv_launcher,
     )
     engine.rootContext().setContextProperty("liveTV", live_tv)
+    app.aboutToQuit.connect(live_tv.shutdown)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary()

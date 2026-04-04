@@ -45,6 +45,20 @@ FocusScope {
     // different PlexOnDeckModel instance (e.g. plex.watchlistModel).
     property var model: plex ? plex.onDeckModel : null
 
+    // Guard flag — when true, the next onActiveFocusChanged will NOT reset
+    // currentIndex to 0.  Used by WatchScreen to restore focus after the
+    // resume dialog is cancelled.
+    property bool _suppressIndexReset: false
+
+    // Expose the current item's viewOffset so WatchScreen can pass it to
+    // _playContent without changing the itemSelected signal signature.
+    readonly property int currentViewOffset: onDeckList.currentItem ? (onDeckList.currentItem.viewOffsetValue || 0) : 0
+    property int currentIndex: 0
+    onCurrentIndexChanged: {
+        if (onDeckList.currentIndex !== currentIndex)
+            onDeckList.currentIndex = currentIndex
+    }
+
     // ── Helper: format watch progress ─────────────────────────────────────────
     // Returns "X%" string when duration > 0, otherwise "".
     function _formatProgress(viewOffset, duration) {
@@ -325,12 +339,17 @@ FocusScope {
             focus: true
             keyNavigationEnabled: true
 
+            onCurrentIndexChanged: onDeckListView.currentIndex = currentIndex
+
             // Smooth highlight movement
             highlightMoveDuration: Theme.animDurationFast
 
-            // Reset to first item whenever this list gains focus.
+            // Reset to first item whenever this list gains focus (unless suppressed).
             onActiveFocusChanged: {
-                if (activeFocus && count > 0) currentIndex = 0
+                if (activeFocus) {
+                    if (!onDeckListView._suppressIndexReset && count > 0) currentIndex = 0
+                    onDeckListView._suppressIndexReset = false
+                }
             }
 
             Keys.onPressed: (event) => {

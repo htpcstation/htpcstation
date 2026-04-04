@@ -19,23 +19,24 @@ logger = logging.getLogger(__name__)
 # IPC socket path for communicating with a running MPV instance.
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
-_INPUT_CONF_VERSION = "2"
+_INPUT_CONF_VERSION = "3"
 _INPUT_CONF_CONTENT = """\
-# HTPC Station MPV input config v2
-# Standard Linux gamepad button names (evdev/SDL)
+# HTPC Station MPV input config v3
+# MPV gamepad key names (mpv --input-keylist | grep GAMEPAD)
+# Button layout: A=East (Accept/Play), B=South (Cancel/Quit)
 
-GAMEPAD_ACTION_A        cycle pause
-GAMEPAD_ACTION_B        quit
-GAMEPAD_LEFT            seek -10
-GAMEPAD_RIGHT           seek 10
-GAMEPAD_UP              add volume 5
-GAMEPAD_DOWN            add volume -5
+GAMEPAD_ACTION_RIGHT    cycle pause
+GAMEPAD_ACTION_DOWN     quit
+GAMEPAD_DPAD_LEFT       seek -10
+GAMEPAD_DPAD_RIGHT      seek 10
+GAMEPAD_DPAD_UP         add volume 5
+GAMEPAD_DPAD_DOWN       add volume -5
 GAMEPAD_LEFT_TRIGGER    add chapter -1
 GAMEPAD_RIGHT_TRIGGER   add chapter 1
 GAMEPAD_LEFT_SHOULDER   cycle audio
 GAMEPAD_RIGHT_SHOULDER  show-text ${track-list} 3000
-GAMEPAD_X               script-message htpc-show-subs
-GAMEPAD_Y               show-progress
+GAMEPAD_ACTION_LEFT     script-message htpc-show-subs
+GAMEPAD_ACTION_UP       show-progress
 GAMEPAD_START           quit
 """
 

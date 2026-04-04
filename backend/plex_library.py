@@ -472,6 +472,7 @@ class PlexLibrary(QObject):
     myListChanged = Signal(bool)   # True = added, False = removed
     mpvStarted = Signal()
     mpvFinished = Signal()
+    streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -482,6 +483,8 @@ class PlexLibrary(QObject):
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
     _artistsReady = Signal(list, int)  # (artists, total_size)
+    _mpvLaunchReady = Signal(str, str, int)  # url, title, start_ms
+    _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
 
     def __init__(
         self,
@@ -549,6 +552,8 @@ class PlexLibrary(QObject):
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
         self._artistsReady.connect(self._on_artists_ready)
+        self._mpvLaunchReady.connect(self._on_mpv_launch_ready, Qt.ConnectionType.QueuedConnection)
+        self._streamInfoReady.connect(self._on_stream_info_ready, Qt.ConnectionType.QueuedConnection)
 
         # MPV launcher for direct stream playback
         self._mpv_launcher = MpvLauncher(self)
@@ -782,6 +787,8 @@ class PlexLibrary(QObject):
         """
         if self._client is None or not self._current_section_key:
             return
+        if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
+            return
         api_sort = self._SORT_MAP.get(sort_key, "")
         self._current_sort = api_sort
         self._movies_total = 0
@@ -799,6 +806,8 @@ class PlexLibrary(QObject):
     def filterByGenre(self, genre_key: str) -> None:
         """Re-fetch movies filtered by genre. Empty string clears the filter."""
         if self._client is None or not self._current_section_key:
+            return
+        if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         self._current_genre = genre_key
         self._movies_total = 0
@@ -839,6 +848,8 @@ class PlexLibrary(QObject):
         """
         if self._client is None or not self._current_section_key:
             return
+        if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
+            return
         api_sort = self._SORT_MAP.get(sort_key, "")
         self._shows_sort = api_sort
         self._shows_total = 0
@@ -871,6 +882,8 @@ class PlexLibrary(QObject):
     def filterShowsByGenre(self, genre_key: str) -> None:
         """Re-fetch shows filtered by genre. Empty string clears the filter."""
         if self._client is None or not self._current_section_key:
+            return
+        if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         self._shows_genre = genre_key
         self._shows_total = 0
@@ -1024,21 +1037,53 @@ class PlexLibrary(QObject):
         return {"url": url, "viewOffset": view_offset}
 
     @Slot(str, int)
+    def fetchStreamInfo(self, rating_key: str, known_view_offset: int = 0) -> None:
+        """Async version of getStreamInfo. Emits streamInfoReady when done.
+
+        known_view_offset: if > 0, skip the server viewOffset and use this value directly.
+        The url is still fetched from the server.
+        """
+        if self._client is None:
+            self._streamInfoReady.emit(rating_key, "", 0)
+            return
+        client = self._client
+        def _worker():
+            url, server_offset = client.get_stream_url(rating_key)
+            effective_offset = known_view_offset if known_view_offset > 0 else server_offset
+            self._streamInfoReady.emit(rating_key, url, effective_offset)
+        self._executor.submit(_worker)
+
+    def _on_stream_info_ready(self, rating_key: str, url: str, view_offset_ms: int) -> None:
+        """Called on main thread when async stream info fetch completes."""
+        self.streamInfoReady.emit(rating_key, url, view_offset_ms)
+
+    @Slot(str, int)
     def playWithMpv(self, rating_key: str, start_ms: int = 0) -> None:
-        """Fetch stream URL and launch MPV. start_ms=0 means start from beginning."""
+        """Fetch stream URL and launch MPV. Dispatches HTTP calls to thread pool."""
         if self._client is None:
             logger.warning("playWithMpv: no Plex client configured")
             return
-        url, _ = self._client.get_stream_url(rating_key)
+        client = self._client
+        def _worker():
+            url, _ = client.get_stream_url(rating_key)
+            if not url:
+                self._mpvLaunchReady.emit("", "", 0)
+                return
+            meta = client.get_metadata(rating_key)
+            title = meta.get("title", "")
+            grandparent = meta.get("grandparentTitle", "")
+            if grandparent:
+                title = f"{grandparent} — {title}"
+            logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
+            self._mpvLaunchReady.emit(url, title, start_ms)
+        self._executor.submit(_worker)
+
+    def _on_mpv_launch_ready(self, url: str, title: str, start_ms: int) -> None:
+        """Launch MPV on the main thread after worker fetched stream info."""
         if not url:
-            logger.warning("playWithMpv: no stream URL for ratingKey=%s", rating_key)
+            logger.warning("playWithMpv: no stream URL — cannot launch")
+            self.mpvFinished.emit()  # clear loading state in QML
             return
-        meta = self._client.get_metadata(rating_key)
-        title = meta.get("title", "")
-        grandparent = meta.get("grandparentTitle", "")
-        if grandparent:
-            title = f"{grandparent} — {title}"
-        logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
         self._mpv_launcher.launch(url, title, start_ms)
 
     @Slot(str)
@@ -1430,6 +1475,15 @@ class PlexLibrary(QObject):
     def isInMyList(self, rating_key: str) -> bool:
         """Return True if the item with the given rating_key is in My List."""
         return any(x["ratingKey"] == rating_key for x in self._load_my_list())
+
+    @Slot(str, result=str)
+    def getMyListItemType(self, rating_key: str) -> str:
+        """Return the type ('movie', 'show', 'episode') of a My List item, or '' if not found."""
+        items = self._load_my_list()
+        for item in items:
+            if item.get("ratingKey") == rating_key:
+                return item.get("type", "")
+        return ""
 
     # ------------------------------------------------------------------
     # Internal: worker thread functions

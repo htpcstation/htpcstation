@@ -37,13 +37,28 @@ FocusScope {
     // different PlexOnDeckModel instance (e.g. plex.watchlistModel).
     property var model: plex ? plex.onDeckModel : null
 
+    // Guard flag — when true, the next onActiveFocusChanged will NOT reset
+    // currentIndex to 0.  Used by WatchScreen to restore focus after the
+    // resume dialog is cancelled.
+    property bool _suppressIndexReset: false
+
+    // Expose the current item's viewOffset so WatchScreen can pass it to
+    // _playContent without changing the itemSelected signal signature.
+    readonly property int currentViewOffset: onDeckGrid.currentItem ? (onDeckGrid.currentItem.itemViewOffset || 0) : 0
+    property int currentIndex: 0
+    onCurrentIndexChanged: {
+        if (onDeckGrid.currentIndex !== currentIndex)
+            onDeckGrid.currentIndex = currentIndex
+    }
+
     // Reset to the first item whenever this grid gains focus so the
     // top-left (most recently watched) item is always highlighted on entry.
     onActiveFocusChanged: {
         if (activeFocus) {
-            if (onDeckGrid.count > 0) {
+            if (!_suppressIndexReset && onDeckGrid.count > 0) {
                 onDeckGrid.currentIndex = 0
             }
+            _suppressIndexReset = false
             onDeckGrid.forceActiveFocus()
         }
     }
@@ -136,6 +151,8 @@ FocusScope {
         clip: true
         focus: true
 
+        onCurrentIndexChanged: onDeckGridView.currentIndex = currentIndex
+
         readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(onDeckGridView._targetCellW + onDeckGridView._cellSpacing)))
         cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(onDeckGridView._targetCellW + onDeckGridView._cellSpacing)
         cellHeight: root.vpx(onDeckGridView._cellH + onDeckGridView._cellSpacing)
@@ -199,6 +216,8 @@ FocusScope {
             readonly property string itemType: model.type || ""
             readonly property string itemPosterLocal: model.posterLocal || ""
             readonly property string itemGrandparentTitle: model.grandparentTitle || ""
+            // Expose viewOffset so the grid can provide currentViewOffset
+            readonly property int itemViewOffset: model.viewOffset || 0
 
             // Cache My List status at creation time (isInMyList reads from disk)
             property bool _inMyList: false

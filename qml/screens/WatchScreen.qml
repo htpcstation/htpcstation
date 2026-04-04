@@ -79,6 +79,7 @@ FocusScope {
     property bool _resumeDialogVisible: false
     property string _resumeRatingKey: ""
     property int _resumeViewOffset: 0   // ms
+    property int _resumeSavedIndex: -1
 
     function _formatDuration(ms) {
         var s = Math.floor(ms / 1000)
@@ -89,6 +90,20 @@ FocusScope {
     }
 
     function _showResumeDialog(ratingKey, viewOffsetMs) {
+        // Save current index so cancel can restore it
+        _resumeSavedIndex = -1
+        if (currentView === "content") {
+            if (selectedLibraryType === "movie") {
+                _resumeSavedIndex = (_viewMode === "list") ? movieList.currentIndex : movieGrid.currentIndex
+            } else if (selectedLibraryType === "ondeck") {
+                _resumeSavedIndex = (_viewMode === "list") ? onDeckList.currentIndex : onDeckGrid.currentIndex
+            } else if (selectedLibraryType === "mylist") {
+                _resumeSavedIndex = (_viewMode === "list") ? myListListView.currentIndex : myListGridView.currentIndex
+            }
+        } else if (currentView === "detail" && selectedLibraryType === "show") {
+            _resumeSavedIndex = showDetail.episodeCurrentIndex
+        }
+
         _resumeRatingKey = ratingKey
         _resumeViewOffset = viewOffsetMs
         _resumeDialogVisible = true
@@ -100,24 +115,21 @@ FocusScope {
         plex.playWithMpv(ratingKey, startMs)
     }
 
-    function _playContent(ratingKey) {
+    function _playContent(ratingKey, knownViewOffset) {
         if (!settings || (settings.plexPlayer || "mpv") === "browser") {
             plex.launchContent(ratingKey)
             return
         }
-        // MPV path — check for resume position
-        var info = plex.getStreamInfo(ratingKey)
-        if (!info || !info.url) {
-            // No stream URL — fall back to browser
-            plex.launchContent(ratingKey)
-            return
-        }
-        if (info.viewOffset > 0) {
-            watchScreen._showResumeDialog(ratingKey, info.viewOffset)
-        } else {
-            watchScreen._launchMpv(ratingKey, 0)
-        }
+        _isLoadingContent = true
+        _loadingOverlayVisible = true
+        loadingOverlayTimer.restart()
+        plex.fetchStreamInfo(ratingKey, knownViewOffset || 0)
+        // Response arrives via plex.streamInfoReady signal — handled in Connections below
     }
+
+    // Loading state for content playback
+    property bool _isLoadingContent: false
+    property bool _loadingOverlayVisible: false
 
     // Toast text for My List add/remove notifications
     property string _toastText: ""
@@ -131,6 +143,16 @@ FocusScope {
         id: toastTimer
         interval: 2000
         onTriggered: watchScreen._toastText = ""
+    }
+
+    Timer {
+        id: loadingOverlayTimer
+        interval: 400
+        onTriggered: {
+            if (!watchScreen._isLoadingContent) {
+                watchScreen._loadingOverlayVisible = false
+            }
+        }
     }
 
     Rectangle {
@@ -566,7 +588,7 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onItemSelected: (ratingKey) => {
-            watchScreen._playContent(ratingKey)
+            watchScreen._playContent(ratingKey, onDeckGrid.currentViewOffset)
         }
 
         onBack: {
@@ -634,7 +656,7 @@ FocusScope {
 
         _viewMode: watchScreen._viewMode
 
-        onItemSelected: (ratingKey) => { watchScreen._playContent(ratingKey) }
+        onItemSelected: (ratingKey) => { watchScreen._playContent(ratingKey, onDeckList.currentViewOffset) }
         onBack: watchScreen.currentView = "libraries"
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
@@ -652,7 +674,16 @@ FocusScope {
         sourceTitle: "My List"
         _viewMode: watchScreen._viewMode
 
-        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onItemSelected: (ratingKey) => {
+            var itemType = plex.getMyListItemType(ratingKey)
+            if (itemType === "show") {
+                watchScreen.selectedShowRatingKey = ratingKey
+                watchScreen.selectedLibraryType = "show"
+                watchScreen.currentView = "detail"
+            } else {
+                watchScreen._playContent(ratingKey, myListGridView.currentViewOffset)
+            }
+        }
         onBack: watchScreen.currentView = "libraries"
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
@@ -670,7 +701,16 @@ FocusScope {
         sourceTitle: "My List"
         _viewMode: watchScreen._viewMode
 
-        onItemSelected: (ratingKey) => { plex.launchContent(ratingKey) }
+        onItemSelected: (ratingKey) => {
+            var itemType = plex.getMyListItemType(ratingKey)
+            if (itemType === "show") {
+                watchScreen.selectedShowRatingKey = ratingKey
+                watchScreen.selectedLibraryType = "show"
+                watchScreen.currentView = "detail"
+            } else {
+                watchScreen._playContent(ratingKey, myListListView.currentViewOffset)
+            }
+        }
         onBack: watchScreen.currentView = "libraries"
         onViewModeChanged: (mode) => { watchScreen._viewMode = mode }
     }
@@ -755,6 +795,33 @@ FocusScope {
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 watchScreen._resumeDialogVisible = false
+                // Restore previously focused index (set suppress flag to prevent onActiveFocusChanged reset)
+                if (watchScreen._resumeSavedIndex >= 0) {
+                    if (watchScreen.currentView === "content") {
+                        if (watchScreen.selectedLibraryType === "movie") {
+                            if (watchScreen._viewMode === "list") movieList.currentIndex = watchScreen._resumeSavedIndex
+                            else movieGrid.currentIndex = watchScreen._resumeSavedIndex
+                        } else if (watchScreen.selectedLibraryType === "ondeck") {
+                            if (watchScreen._viewMode === "list") {
+                                onDeckList._suppressIndexReset = true
+                                onDeckList.currentIndex = watchScreen._resumeSavedIndex
+                            } else {
+                                onDeckGrid._suppressIndexReset = true
+                                onDeckGrid.currentIndex = watchScreen._resumeSavedIndex
+                            }
+                        } else if (watchScreen.selectedLibraryType === "mylist") {
+                            if (watchScreen._viewMode === "list") {
+                                myListListView._suppressIndexReset = true
+                                myListListView.currentIndex = watchScreen._resumeSavedIndex
+                            } else {
+                                myListGridView._suppressIndexReset = true
+                                myListGridView.currentIndex = watchScreen._resumeSavedIndex
+                            }
+                        }
+                    } else if (watchScreen.currentView === "detail" && watchScreen.selectedLibraryType === "show") {
+                        showDetail.episodeCurrentIndex = watchScreen._resumeSavedIndex
+                    }
+                }
                 watchScreen._routeFocus()
             }
         }
@@ -820,6 +887,53 @@ FocusScope {
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                 }
+            }
+        }
+    }
+
+    // ── MPV started handler — clear loading state ─────────────────────────────
+    Connections {
+        target: plex
+        function onMpvStarted() { watchScreen._isLoadingContent = false }
+    }
+
+    // ── Stream info ready handler — async response from fetchStreamInfo ──────
+    Connections {
+        target: plex
+        function onStreamInfoReady(ratingKey, url, viewOffsetMs) {
+            if (!watchScreen._isLoadingContent) return  // cancelled or stale
+            if (!url) {
+                watchScreen._isLoadingContent = false
+                plex.launchContent(ratingKey)
+                return
+            }
+            if (viewOffsetMs > 0) {
+                watchScreen._isLoadingContent = false
+                watchScreen._showResumeDialog(ratingKey, viewOffsetMs)
+            } else {
+                watchScreen._launchMpv(ratingKey, 0)
+                // _isLoadingContent cleared by onMpvStarted
+            }
+        }
+    }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    Rectangle {
+        anchors.fill: parent
+        color: Theme.colorOverlay
+        visible: watchScreen._loadingOverlayVisible
+        z: 150
+
+        Column {
+            anchors.centerIn: parent
+            spacing: root.vpx(16)
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "Loading..."
+                color: Theme.colorOverlayText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
             }
         }
     }

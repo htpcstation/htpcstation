@@ -35,12 +35,11 @@ FocusScope {
         return h + ":" + (m < 10 ? "0" : "") + m + " " + ampm
     }
 
-    // Trigger a refresh when this screen gains focus (if no channels loaded yet).
+    // Trigger a refresh when this screen gains focus.
+    // The warm-start path serves cache instantly, then background-refreshes.
     onActiveFocusChanged: {
         if (activeFocus) {
-            if (liveTV.channelsModel.rowCount() === 0) {
-                liveTV.refresh()
-            }
+            liveTV.refresh()
             channelList.forceActiveFocus()
         }
     }
@@ -67,6 +66,35 @@ FocusScope {
             color: Theme.colorText
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
+
+        // Background refresh indicator
+        Text {
+            anchors {
+                left: parent.left
+                leftMargin: root.vpx(200)
+                verticalCenter: parent.verticalCenter
+            }
+            visible: liveTV ? (liveTV.loading && channelList.count > 0) : false
+            text: "Refreshing..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
+        // Y button / F2 refresh hint
+        Text {
+            anchors {
+                right: scrollHint.left
+                rightMargin: root.vpx(16)
+                verticalCenter: parent.verticalCenter
+            }
+            text: keys.useGamepadLabels
+                  ? keys.context2Label + "  Refresh"
+                  : "F2  Refresh"
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeSmall)
         }
 
         // PgUp/PgDn scroll hint
@@ -158,6 +186,9 @@ FocusScope {
                 event.accepted = true
                 channelList.currentIndex = Math.max(0,
                     channelList.currentIndex - 10)
+            } else if (keys.isContext2(event)) {
+                event.accepted = true
+                liveTV.forceRefresh()
             }
         }
 

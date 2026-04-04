@@ -249,6 +249,48 @@ class TestIsInMyList:
 
 
 # ---------------------------------------------------------------------------
+# getMyListItemType
+# ---------------------------------------------------------------------------
+
+
+class TestGetMyListItemType:
+    """getMyListItemType returns the type of a My List item by ratingKey."""
+
+    def test_returns_movie_type(self, tmp_path: Path) -> None:
+        """Returns 'movie' for a movie item."""
+        lib = _make_lib(tmp_path)
+        lib.toggleMyList("123", "Dune", "movie", "", "")
+
+        assert lib.getMyListItemType("123") == "movie"
+
+    def test_returns_show_type(self, tmp_path: Path) -> None:
+        """Returns 'show' for a show item."""
+        lib = _make_lib(tmp_path)
+        lib.toggleMyList("456", "The Bear", "show", "", "")
+
+        assert lib.getMyListItemType("456") == "show"
+
+    def test_returns_episode_type(self, tmp_path: Path) -> None:
+        """Returns 'episode' for an episode item."""
+        lib = _make_lib(tmp_path)
+        lib.toggleMyList("789", "Pilot", "episode", "", "The Bear")
+
+        assert lib.getMyListItemType("789") == "episode"
+
+    def test_returns_empty_for_unknown_key(self, tmp_path: Path) -> None:
+        """Returns '' for a ratingKey not in My List."""
+        lib = _make_lib(tmp_path)
+
+        assert lib.getMyListItemType("nonexistent") == ""
+
+    def test_returns_empty_for_empty_list(self, tmp_path: Path) -> None:
+        """Returns '' when My List is empty."""
+        lib = _make_lib(tmp_path)
+
+        assert lib.getMyListItemType("any") == ""
+
+
+# ---------------------------------------------------------------------------
 # _rebuild_my_list_model
 # ---------------------------------------------------------------------------
 

@@ -42,6 +42,14 @@ FocusScope {
     property var episodes: []
     property int currentSeasonIndex: 0
 
+    // Plain writable property — WatchScreen sets this to restore focus after resume dialog cancel.
+    // Updated imperatively when the episode list index changes.
+    property int episodeCurrentIndex: 0
+    onEpisodeCurrentIndexChanged: {
+        if (episodeList.currentIndex !== episodeCurrentIndex)
+            episodeList.currentIndex = episodeCurrentIndex
+    }
+
     // ── Load data when showRatingKey changes ──────────────────────────────────
     onShowRatingKeyChanged: {
         if (showRatingKey !== "") {
@@ -510,6 +518,8 @@ FocusScope {
                 }
 
                 onCurrentIndexChanged: {
+                    // Keep the external episodeCurrentIndex property in sync
+                    showDetailView.episodeCurrentIndex = currentIndex
                     // Scroll main flickable to keep current episode visible
                     var itemY = episodeList.y + currentIndex * root.vpx(56)
                     var visibleBottom = mainFlickable.contentY + mainFlickable.height

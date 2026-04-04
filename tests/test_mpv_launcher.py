@@ -317,7 +317,7 @@ class TestEnsureInputConf:
 
         assert input_conf_path.exists()
         content = input_conf_path.read_text(encoding="utf-8")
-        assert "GAMEPAD_ACTION_A" in content
+        assert "GAMEPAD_ACTION_RIGHT" in content
         assert "cycle pause" in content
 
     def test_overwrites_outdated_version(self, tmp_path: Path) -> None:

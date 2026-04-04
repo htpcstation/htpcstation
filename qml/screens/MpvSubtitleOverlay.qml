@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Window
+import ".."
 
 Window {
     id: subtitleOverlay

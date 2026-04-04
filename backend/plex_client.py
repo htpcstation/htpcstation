@@ -33,6 +33,11 @@ class PlexClient:
                 "Accept": "application/json",
             }
         )
+        # Increase connection pool size to handle parallel EPG page fetches
+        # (default is 10; Live TV fetches up to 10 pages concurrently).
+        adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=12)
+        self._session.mount("https://", adapter)
+        self._session.mount("http://", adapter)
 
     # ------------------------------------------------------------------
     # Public API

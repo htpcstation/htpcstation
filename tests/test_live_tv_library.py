@@ -9,10 +9,12 @@ Covers:
   - Graceful handling of DVR fetch failure (stream_url = "" for all channels)
   - Pagination: fetches all pages when totalSize > page_size
   - MpvLauncher.launch_live_tv builds correct args (reconnect, no http-header-fields)
+  - EPG cache: cold start saves, warm start loads, clear, force refresh
 """
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -40,7 +42,11 @@ def _make_program(
     on_air: bool = False,
     prog_thumb: str = "",
 ) -> dict:
-    """Build a fake EPG grid item (Metadata entry)."""
+    """Build a fake EPG grid item (Metadata entry).
+
+    Callers pass seconds-epoch timestamps. The Plex EPG API returns timestamps
+    in seconds (not milliseconds), so no conversion is applied here.
+    """
     media: dict = {
         "channelIdentifier": channel_identifier,
         "channelVcn": channel_vcn,
@@ -219,8 +225,8 @@ class TestFetchHdhomerunHost:
 
 
 class TestBuildChannels:
-    def test_current_program_identified_by_timestamp(self) -> None:
-        """Program with beginsAt <= now < endsAt is the current program."""
+    def test_current_program_identified_by_on_air_flag_with_next(self) -> None:
+        """Program with onAir=True is current; first non-onAir after it is next."""
         lib, _, _ = _make_library()
 
         now = _NOW
@@ -230,6 +236,7 @@ class TestBuildChannels:
                 "Current Show",
                 begins_at=now - 1800,
                 ends_at=now + 1800,
+                on_air=True,
             ),
             _make_program(
                 "ch1", "7.1", "ABC", "", "gk1", 1,
@@ -290,8 +297,8 @@ class TestBuildChannels:
         assert ch.current_program == ""
         assert ch.on_air is False
 
-    def test_next_program_is_first_after_now(self) -> None:
-        """next_program is the first program that starts after now."""
+    def test_next_program_is_first_non_on_air_after_current(self) -> None:
+        """next_program is the first non-onAir program after the current one."""
         lib, _, _ = _make_library()
 
         now = _NOW
@@ -301,6 +308,7 @@ class TestBuildChannels:
                 "Current Show",
                 begins_at=now - 1800,
                 ends_at=now + 1800,
+                on_air=True,
             ),
             _make_program(
                 "ch1", "7.1", "ABC", "", "gk1", 1,
@@ -386,6 +394,205 @@ class TestBuildChannels:
         vcns = {ch.vcn for ch in channels}
         assert vcns == {"7.1", "4.1"}
 
+    def test_channel_identifier_fallback_to_vcn(self) -> None:
+        """Channels with empty channelIdentifier fall back to channelVcn for grouping."""
+        lib, _, _ = _make_library()
+
+        now = _NOW
+        # Build items where channelIdentifier is empty but channelVcn is set
+        items = [
+            {
+                "title": "Show A",
+                "thumb": "",
+                "Media": [{
+                    "channelIdentifier": "",
+                    "channelVcn": "7.1",
+                    "channelTitle": "ABC",
+                    "channelThumb": "",
+                    "gridKey": "gk1",
+                    "channelID": 1,
+                    "beginsAt": now - 1800,
+                    "endsAt": now + 1800,
+                }],
+            },
+            {
+                "title": "Show B",
+                "thumb": "",
+                "Media": [{
+                    "channelIdentifier": "",
+                    "channelVcn": "4.1",
+                    "channelTitle": "NBC",
+                    "channelThumb": "",
+                    "gridKey": "gk2",
+                    "channelID": 2,
+                    "beginsAt": now - 900,
+                    "endsAt": now + 2700,
+                }],
+            },
+        ]
+
+        channels = lib._build_channels(items, "192.168.0.80", now)
+
+        # Should produce 2 channels (grouped by VCN), not 0 (skipped) or 1 (merged into "")
+        assert len(channels) == 2
+        vcns = {ch.vcn for ch in channels}
+        assert vcns == {"7.1", "4.1"}
+
+    def test_items_with_no_identifier_and_no_vcn_are_skipped(self) -> None:
+        """Items with both channelIdentifier and channelVcn empty are skipped."""
+        lib, _, _ = _make_library()
+
+        now = _NOW
+        items = [
+            {
+                "title": "Orphan Show",
+                "thumb": "",
+                "Media": [{
+                    "channelIdentifier": "",
+                    "channelVcn": "",
+                    "channelTitle": "Unknown",
+                    "channelThumb": "",
+                    "gridKey": "gk1",
+                    "channelID": 0,
+                    "beginsAt": now - 1800,
+                    "endsAt": now + 1800,
+                }],
+            },
+        ]
+
+        channels = lib._build_channels(items, "192.168.0.80", now)
+
+        assert len(channels) == 0
+
+    def test_hub_on_air_overrides_grid_onair(self) -> None:
+        """Channel with hub entry gets current_program from hub even if grid has no onAir=True."""
+        lib, _, _ = _make_library()
+
+        now = _NOW
+        # Grid items: no onAir flag set
+        items = [
+            _make_program(
+                "ch1", "7.1", "ABC", "", "gk1", 1,
+                "Grid Show",
+                begins_at=now - 1800,
+                ends_at=now + 1800,
+            ),
+            _make_program(
+                "ch1", "7.1", "ABC", "", "gk1", 1,
+                "Grid Next",
+                begins_at=now + 1800,
+                ends_at=now + 5400,
+            ),
+        ]
+
+        # Hub data: different program title, with beginsAt matching grid current
+        on_air_by_vcn = {
+            "7.1": {
+                "title": "Hub Current Show",
+                "thumb": "http://hub.example.com/show.png",
+                "Media": [{
+                    "channelVcn": "7.1",
+                    "channelTitle": "ABC",
+                    "channelThumb": "",
+                    "channelID": 1,
+                    "beginsAt": now - 1800,
+                    "endsAt": now + 1800,
+                }],
+            },
+        }
+
+        channels = lib._build_channels(items, "192.168.0.80", now, on_air_by_vcn)
+
+        assert len(channels) == 1
+        ch = channels[0]
+        assert ch.current_program == "Hub Current Show"
+        assert ch.current_thumb == "http://hub.example.com/show.png"
+        assert ch.on_air is True
+        assert ch.next_program == "Grid Next"
+
+    def test_hub_only_channel_added(self) -> None:
+        """Channel in hub but not in grid items appears in result with on_air=True."""
+        lib, _, _ = _make_library()
+
+        now = _NOW
+        # Grid items: only channel 7.1
+        items = [
+            _make_program(
+                "ch1", "7.1", "ABC", "", "gk1", 1,
+                "Grid Show",
+                begins_at=now - 1800,
+                ends_at=now + 1800,
+                on_air=True,
+            ),
+        ]
+
+        # Hub data: includes 7.1 (in grid) and 51.1 (NOT in grid)
+        on_air_by_vcn = {
+            "7.1": {
+                "title": "Hub Show 7.1",
+                "thumb": "",
+                "Media": [{
+                    "channelVcn": "7.1",
+                    "channelTitle": "ABC",
+                    "channelThumb": "",
+                    "channelID": 1,
+                    "beginsAt": now - 1800,
+                    "endsAt": now + 1800,
+                }],
+            },
+            "51.1": {
+                "title": "Hub Only Show",
+                "thumb": "http://hub.example.com/51.png",
+                "Media": [{
+                    "channelVcn": "51.1",
+                    "channelTitle": "BUZZR",
+                    "channelCallSign": "BUZZR",
+                    "channelThumb": "http://thumb.example.com/buzzr.png",
+                    "gridKey": "gk51",
+                    "channelID": 51,
+                    "beginsAt": now - 900,
+                    "endsAt": now + 2700,
+                }],
+            },
+        }
+
+        channels = lib._build_channels(items, "192.168.0.80", now, on_air_by_vcn)
+
+        assert len(channels) == 2
+        vcns = {ch.vcn for ch in channels}
+        assert vcns == {"7.1", "51.1"}
+
+        hub_only = [ch for ch in channels if ch.vcn == "51.1"][0]
+        assert hub_only.current_program == "Hub Only Show"
+        assert hub_only.on_air is True
+        assert hub_only.title == "BUZZR"
+        assert hub_only.call_sign == "BUZZR"
+        assert hub_only.thumb == "http://thumb.example.com/buzzr.png"
+        assert hub_only.stream_url == "http://192.168.0.80:5004/auto/v51.1"
+        assert hub_only.next_program == ""
+
+    def test_channels_sorted_by_vcn(self) -> None:
+        """Result is sorted numerically by VCN (7.1 before 7.2 before 13.1 before 49.4)."""
+        lib, _, _ = _make_library()
+
+        now = _NOW
+        # Items in non-sorted order
+        items = [
+            _make_program("ch4", "49.4", "ION", "", "gk4", 4, "Show D",
+                          begins_at=now - 1800, ends_at=now + 1800),
+            _make_program("ch2", "7.2", "Bounce", "", "gk2", 2, "Show B",
+                          begins_at=now - 1800, ends_at=now + 1800),
+            _make_program("ch3", "13.1", "FOX", "", "gk3", 3, "Show C",
+                          begins_at=now - 1800, ends_at=now + 1800),
+            _make_program("ch1", "7.1", "ABC", "", "gk1", 1, "Show A",
+                          begins_at=now - 1800, ends_at=now + 1800),
+        ]
+
+        channels = lib._build_channels(items, "192.168.0.80", now)
+
+        vcns = [ch.vcn for ch in channels]
+        assert vcns == ["7.1", "7.2", "13.1", "49.4"]
+
     def test_channel_metadata_fields_populated(self) -> None:
         """Channel metadata fields are correctly populated from EPG data."""
         lib, _, _ = _make_library()
@@ -397,6 +604,7 @@ class TestBuildChannels:
                 "Show",
                 begins_at=now - 1800,
                 ends_at=now + 1800,
+                on_air=True,
                 prog_thumb="http://prog.example.com/show.png",
             ),
         ]
@@ -415,17 +623,18 @@ class TestBuildChannels:
 
 
 # ---------------------------------------------------------------------------
-# LiveTvLibrary._fetch_channels — pagination
+# LiveTvLibrary._fetch_and_cache_channel_list — discovery + cache
 # ---------------------------------------------------------------------------
 
 
-class TestFetchChannelsParallel:
-    def test_discovery_then_per_channel_fetch(self) -> None:
-        """_fetch_channels does a discovery request then per-channel requests in parallel."""
+class TestFetchAndCacheChannelList:
+    def test_discovery_returns_channel_metas(self, tmp_path: Path) -> None:
+        """_fetch_and_cache_channel_list discovers channels and returns metas."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
         now = _NOW
 
-        # Discovery page returns 2 channels
         discovery_items = [
             _make_program("ch1", "7.1", "ABC", "", "gk1", 1, "Show A",
                           begins_at=now - 1800, ends_at=now + 1800),
@@ -433,46 +642,41 @@ class TestFetchChannelsParallel:
                           begins_at=now - 900, ends_at=now + 2700),
         ]
 
-        def fake_get(path, params=None):
-            if params and "channelGridKey" in params:
-                gk = params["channelGridKey"]
-                if gk == "gk1":
-                    return _make_grid_response([discovery_items[0]], total_size=1)
-                if gk == "gk2":
-                    return _make_grid_response([discovery_items[1]], total_size=1)
-                return _make_grid_response([], total_size=0)
-            # Discovery request
-            return _make_grid_response(discovery_items, total_size=2)
+        client._get.return_value = _make_grid_response(discovery_items, total_size=2)
 
-        client._get.side_effect = fake_get
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
+            metas = lib._fetch_and_cache_channel_list(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
 
-        with patch("backend.live_tv_library.time.time", return_value=now):
-            channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
+        assert len(metas) == 2
+        grid_keys = {m["grid_key"] for m in metas}
+        assert grid_keys == {"gk1", "gk2"}
 
-        assert len(channels) == 2
-        vcns = {ch.vcn for ch in channels}
-        assert "7.1" in vcns
-        assert "7.2" in vcns
-
-    def test_returns_empty_when_discovery_fails(self) -> None:
+    def test_returns_empty_when_discovery_fails(self, tmp_path: Path) -> None:
         """Returns [] when the discovery request fails."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
         client._get.return_value = None
 
-        with patch("backend.live_tv_library.time.time", return_value=_NOW):
-            channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=_NOW):
+            metas = lib._fetch_and_cache_channel_list(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
 
-        assert channels == []
+        assert metas == []
 
-    def test_returns_empty_when_discovery_has_no_items(self) -> None:
+    def test_returns_empty_when_discovery_has_no_items(self, tmp_path: Path) -> None:
         """Returns [] when the discovery page has no items."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
         client._get.return_value = _make_grid_response([], total_size=0)
 
-        with patch("backend.live_tv_library.time.time", return_value=_NOW):
-            channels = lib._fetch_channels(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=_NOW):
+            metas = lib._fetch_and_cache_channel_list(client, "tv.plex.providers.epg.cloud:2", "192.168.0.80")
 
-        assert channels == []
+        assert metas == []
 
 
 # ---------------------------------------------------------------------------
@@ -533,8 +737,10 @@ class TestPlayChannel:
 
 
 class TestWorkerRefreshDvrFailure:
-    def test_stream_url_empty_when_dvr_fetch_fails(self) -> None:
+    def test_stream_url_empty_when_dvr_fetch_fails(self, tmp_path: Path) -> None:
         """When DVR fetch fails, all channels have stream_url = ""."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
 
         now = _NOW
@@ -556,15 +762,18 @@ class TestWorkerRefreshDvrFailure:
 
         client._get.side_effect = fake_get
 
-        with patch("backend.live_tv_library.time.time", return_value=now):
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
             lib._worker_refresh(client)
 
         # Check that channels were stored with empty stream_url
-        assert len(lib._channels) == 1
+        assert len(lib._channels) >= 1
         assert lib._channels[0].stream_url == ""
 
-    def test_stream_url_empty_when_dvr_raises_exception(self) -> None:
+    def test_stream_url_empty_when_dvr_raises_exception(self, tmp_path: Path) -> None:
         """When DVR fetch raises, all channels have stream_url = ""."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
 
         now = _NOW
@@ -586,11 +795,12 @@ class TestWorkerRefreshDvrFailure:
 
         client._get.side_effect = fake_get
 
-        with patch("backend.live_tv_library.time.time", return_value=now):
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
             lib._worker_refresh(client)
 
         # Check that channels were stored with empty stream_url
-        assert len(lib._channels) == 1
+        assert len(lib._channels) >= 1
         assert lib._channels[0].stream_url == ""
 
 
@@ -600,8 +810,10 @@ class TestWorkerRefreshDvrFailure:
 
 
 class TestWorkerRefreshIntegration:
-    def test_refresh_parses_epg_grid_into_channels(self) -> None:
+    def test_refresh_parses_epg_grid_into_channels(self, tmp_path: Path) -> None:
         """_worker_refresh correctly parses EPG grid response into channels."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
 
         now = _NOW
@@ -631,7 +843,8 @@ class TestWorkerRefreshIntegration:
 
         client._get.side_effect = fake_get
 
-        with patch("backend.live_tv_library.time.time", return_value=now):
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
             lib._worker_refresh(client)
 
         # Check stored channels directly (signal emission is async in Qt event loop)
@@ -644,8 +857,10 @@ class TestWorkerRefreshIntegration:
         assert ch.on_air is True
         assert ch.stream_url == "http://192.168.0.80:5004/auto/v7.1"
 
-    def test_refresh_emits_loading_false_on_success(self) -> None:
+    def test_refresh_emits_loading_false_on_success(self, tmp_path: Path) -> None:
         """_worker_refresh emits loadingUpdate(False) after successful fetch."""
+        import backend.live_tv_library as mod
+
         lib, client, _ = _make_library()
 
         now = _NOW
@@ -670,7 +885,8 @@ class TestWorkerRefreshIntegration:
         loading_updates = []
         lib._loadingUpdate.connect(lambda v: loading_updates.append(v))
 
-        with patch("backend.live_tv_library.time.time", return_value=now):
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
             lib._worker_refresh(client)
 
         # The _channelsReady signal triggers _on_channels_ready which emits False
@@ -920,3 +1136,222 @@ class TestLiveTvChannelModel:
             self._make_channel("4.1", "NBC", 2),
         ])
         assert model.rowCount() == 2
+
+
+# ---------------------------------------------------------------------------
+# LiveTvLibrary EPG cache
+# ---------------------------------------------------------------------------
+
+
+class TestLiveTvCache:
+    """Tests for the per-channel EPG cache (cold start, warm start, clear, force refresh)."""
+
+    def test_cold_start_saves_channels_json(self, tmp_path: Path) -> None:
+        """After _fetch_and_cache_channel_list, channels.json exists with correct structure."""
+        import backend.live_tv_library as mod
+
+        lib, client, _ = _make_library()
+        now = _NOW
+
+        items = [
+            _make_program("ch1", "7.1", "ABC", "http://thumb/abc.png", "gk1", 10,
+                          "Show A", begins_at=now - 1800, ends_at=now + 1800),
+            _make_program("ch2", "4.1", "NBC", "http://thumb/nbc.png", "gk2", 20,
+                          "Show B", begins_at=now - 900, ends_at=now + 2700),
+        ]
+        client._get.return_value = _make_grid_response(items, total_size=2)
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
+            metas = lib._fetch_and_cache_channel_list(
+                client, "tv.plex.providers.epg.cloud:2", "192.168.0.80"
+            )
+
+        # channels.json should exist
+        channels_file = tmp_path / "channels.json"
+        assert channels_file.exists()
+
+        data = json.loads(channels_file.read_text(encoding="utf-8"))
+        assert isinstance(data, list)
+        assert len(data) == 2
+
+        # Check structure of first entry
+        entry = data[0]
+        assert "grid_key" in entry
+        assert "channel_identifier" in entry
+        assert "vcn" in entry
+        assert "channel_title" in entry
+        assert "channel_thumb" in entry
+        assert "channel_id" in entry
+        assert "hdhomerun_host" in entry
+
+    def test_cold_start_saves_per_channel_json(self, tmp_path: Path) -> None:
+        """After _refresh_channel_schedules, {grid_key}.json exists for each channel."""
+        import backend.live_tv_library as mod
+
+        lib, client, _ = _make_library()
+        now = _NOW
+
+        channel_metas = [
+            {"grid_key": "gk1", "channel_identifier": "ch1", "vcn": "7.1",
+             "channel_title": "ABC", "channel_thumb": "", "channel_id": 1,
+             "hdhomerun_host": "192.168.0.80"},
+            {"grid_key": "gk2", "channel_identifier": "ch2", "vcn": "4.1",
+             "channel_title": "NBC", "channel_thumb": "", "channel_id": 2,
+             "hdhomerun_host": "192.168.0.80"},
+        ]
+
+        items_gk1 = [
+            _make_program("ch1", "7.1", "ABC", "", "gk1", 1, "Show A",
+                          begins_at=now - 1800, ends_at=now + 1800),
+        ]
+        items_gk2 = [
+            _make_program("ch2", "4.1", "NBC", "", "gk2", 2, "Show B",
+                          begins_at=now - 900, ends_at=now + 2700),
+        ]
+
+        def fake_get(path, params=None):
+            if params and "channelGridKey" in params:
+                gk = params["channelGridKey"]
+                if gk == "gk1":
+                    return _make_grid_response(items_gk1)
+                if gk == "gk2":
+                    return _make_grid_response(items_gk2)
+            return _make_grid_response([])
+
+        client._get.side_effect = fake_get
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch("backend.live_tv_library.time.time", return_value=now):
+            lib._refresh_channel_schedules(
+                client, "tv.plex.providers.epg.cloud:2", channel_metas, "192.168.0.80"
+            )
+
+        assert (tmp_path / "gk1.json").exists()
+        assert (tmp_path / "gk2.json").exists()
+
+        gk1_data = json.loads((tmp_path / "gk1.json").read_text(encoding="utf-8"))
+        assert isinstance(gk1_data, list)
+        assert len(gk1_data) == 1
+        assert gk1_data[0]["title"] == "Show A"
+
+    def test_warm_start_loads_from_cache(self, tmp_path: Path) -> None:
+        """Pre-populated cache files are loaded without any HTTP calls."""
+        import backend.live_tv_library as mod
+
+        lib, client, _ = _make_library()
+        now = _NOW
+
+        # Pre-populate channels.json
+        channel_metas = [
+            {"grid_key": "gk1", "channel_identifier": "ch1", "vcn": "7.1",
+             "channel_title": "ABC", "channel_thumb": "", "channel_id": 1,
+             "hdhomerun_host": "192.168.0.80"},
+        ]
+        (tmp_path / "channels.json").write_text(
+            json.dumps(channel_metas), encoding="utf-8"
+        )
+
+        # Pre-populate gk1.json
+        items = [
+            _make_program("ch1", "7.1", "ABC", "", "gk1", 1, "Cached Show",
+                          begins_at=now - 1800, ends_at=now + 1800, on_air=True),
+        ]
+        (tmp_path / "gk1.json").write_text(json.dumps(items), encoding="utf-8")
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path):
+            loaded_metas = lib._load_channel_cache()
+            assert len(loaded_metas) == 1
+            assert loaded_metas[0]["grid_key"] == "gk1"
+
+            with patch("backend.live_tv_library.time.time", return_value=now):
+                channels = lib._build_channels_from_cache(loaded_metas, "192.168.0.80")
+
+        assert len(channels) == 1
+        assert channels[0].vcn == "7.1"
+        assert channels[0].current_program == "Cached Show"
+        # No HTTP calls were made
+        client._get.assert_not_called()
+
+    def test_clear_cache_removes_files(self, tmp_path: Path) -> None:
+        """_clear_cache() removes all files in the cache directory."""
+        import backend.live_tv_library as mod
+
+        lib, _, _ = _make_library()
+
+        # Populate cache dir with files
+        (tmp_path / "channels.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "gk1.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "gk2.json").write_text("[]", encoding="utf-8")
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path):
+            lib._clear_cache()
+
+        # All files should be gone
+        remaining = list(tmp_path.iterdir())
+        assert remaining == []
+
+    def test_on_air_cache_saved_and_loaded(self, tmp_path: Path) -> None:
+        """_save_on_air / _load_on_air round-trip."""
+        import backend.live_tv_library as mod
+
+        lib, _, _ = _make_library()
+
+        on_air_data = {
+            "7.1": {
+                "title": "Current Show",
+                "thumb": "http://example.com/show.png",
+                "Media": [{
+                    "channelVcn": "7.1",
+                    "channelTitle": "ABC",
+                    "channelID": 1,
+                    "beginsAt": _NOW - 1800,
+                    "endsAt": _NOW + 1800,
+                }],
+            },
+            "4.1": {
+                "title": "Another Show",
+                "thumb": "",
+                "Media": [{
+                    "channelVcn": "4.1",
+                    "channelTitle": "NBC",
+                    "channelID": 2,
+                    "beginsAt": _NOW - 900,
+                    "endsAt": _NOW + 2700,
+                }],
+            },
+        }
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path):
+            lib._save_on_air(on_air_data)
+            assert (tmp_path / "on_air.json").exists()
+
+            loaded = lib._load_on_air()
+
+        assert len(loaded) == 2
+        assert "7.1" in loaded
+        assert "4.1" in loaded
+        assert loaded["7.1"]["title"] == "Current Show"
+        assert loaded["4.1"]["title"] == "Another Show"
+
+    def test_force_refresh_clears_and_refetches(self, tmp_path: Path) -> None:
+        """forceRefresh() calls _clear_cache then triggers a refresh."""
+        import backend.live_tv_library as mod
+
+        lib, client, _ = _make_library()
+
+        # Pre-populate cache
+        (tmp_path / "channels.json").write_text("[]", encoding="utf-8")
+        (tmp_path / "gk1.json").write_text("[]", encoding="utf-8")
+
+        with patch.object(mod, "_CACHE_DIR", tmp_path), \
+             patch.object(lib, "refresh") as mock_refresh:
+            lib.forceRefresh()
+
+        # Cache should be cleared
+        remaining = [f.name for f in tmp_path.iterdir()]
+        assert "channels.json" not in remaining
+        assert "gk1.json" not in remaining
+
+        # refresh() should have been called
+        mock_refresh.assert_called_once()
