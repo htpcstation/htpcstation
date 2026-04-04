@@ -37,11 +37,9 @@ htpcstation/
     moonlight_models.py                # MoonlightHost, MoonlightApp dataclasses
     moonlight_parser.py                # Moonlight QSettings config parser, host discovery, TCP probe
     moonlight_play_history.py          # Play timestamp recording/reading (play_history.json)
-    mpv_ipc.py                         # MpvIpc: Unix socket client for MPV JSON IPC (track list, subtitle
-                                       # and audio track selection)
-    mpv_launcher.py                    # MpvLauncher: QProcess MPV subprocess, VA-API hwdec, Wayland/Xorg
-                                       # auto-detect, versioned input.conf, IPC socket, resume via --start,
-                                       # live TV variant with reconnect options
+    mpv_launcher.py                    # LibMpvPlayer: python-mpv in-process player, VA-API hwdec,
+                                       # Wayland/Xorg auto-detect, programmatic keybinds, property
+                                       # observers (time-pos, pause), live TV variant with reconnect options
     network_monitor.py                 # NetworkMonitor QObject: periodic connectivity check, online property
     plex_account.py                    # plex.tv API: OAuth, server discovery, home users, user switching
     plex_client.py                     # Plex Media Server HTTP client, get_stream_url(), report_timeline(),
@@ -140,7 +138,6 @@ htpcstation/
     test_moonlight_library.py          # 119 tests
     test_moonlight_parser.py           # 30 tests
     test_moonlight_play_history.py     # 20 tests
-    test_mpv_ipc.py                    # 12 tests
     test_mpv_launcher.py               # 45 tests
     test_network_monitor.py            # 13 tests
     test_pc_games_favorites.py         # 58 tests
@@ -149,7 +146,7 @@ htpcstation/
     test_plex_mylist.py                # 36 tests
     test_plex_stream.py                # 15 tests
     test_plex_client.py                # 11 tests (identity headers, timeline, track persistence)
-    test_plex_timeline.py              # 6 tests (PlexTimelineReporter lifecycle)
+    test_plex_timeline.py              # 10 tests (PlexTimelineReporter lifecycle + push interface)
     test_settings_backend.py           # 99 tests
     test_steam.py                      # 95 tests
     test_video_snap.py                 # 5 tests
@@ -198,12 +195,11 @@ htpcstation/
 
 ### MPV Architecture
 - `MpvLauncher`: subprocess MPV, auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `--hwdec=vaapi-copy --gpu-context=wayland`. Xorg → `--hwdec=vaapi --gpu-context=x11`. Versioned `input.conf` (v14) auto-written to `~/.config/htpcstation/mpv/input.conf`, overwritten when outdated. `--input-gamepad=yes` required — disabled by default in MPV. Gamepad bindings verified with `mpv --input-test` on 8BitDo Micro D-input: `GAMEPAD_ACTION_DOWN` (A/east = pause/play), `GAMEPAD_DPAD_*` (seek/volume), `GAMEPAD_LEFT/RIGHT_SHOULDER` (audio/tracks), `GAMEPAD_ACTION_LEFT/UP` (subtitles/progress), `GAMEPAD_START` (quit). L2/R2 (`GAMEPAD_LEFT/RIGHT_TRIGGER`) are unbound — they are analog axes that fire continuously while held, uncontrollable from `input.conf` alone.
-- `MpvIpc`: Unix socket client for `--input-ipc-server=/tmp/htpcstation-mpv.sock`. Used for subtitle track list query, selection, and position polling (timeline reporter).
-- `MpvSubtitleOverlay.qml`: always-on-top `Window`, shown when X pressed during MPV playback. Calls `plex.getMpvSubtitleTracks()` / `plex.setMpvSubtitleTrack()` / `plex.persistTrackSelection()`.
-- `MpvSkipIntroOverlay.qml`: always-on-top `Window`, shown bottom-right when `plex.markersReady` fires with `intro_end_ms > 0`. Calls `plex.skipIntro()` which seeks via IPC.
-- `PlexTimelineReporter` (`backend/plex_timeline.py`): daemon thread started on `processStarted`, stopped on `processFinished`. POSTs to `/:/timeline` every 10s with current position from MpvIpc. Sends `"stopped"` on exit. Session identified by per-play `uuid4()`.
+- `MpvSubtitleOverlay.qml`: always-on-top `Window`, shown when X pressed during MPV playback. Calls `plex.getMpvSubtitleTracks()` / `plex.setMpvSubtitleTrack()` / `plex.persistTrackSelection()`. Track list and selection now read/written directly via `player["track-list"]` / `player["sid"]` on the libmpv instance.
+- `MpvSkipIntroOverlay.qml`: always-on-top `Window`, shown bottom-right when `plex.markersReady` fires with `intro_end_ms > 0`. Calls `plex.skipIntro()` which seeks via `player.seek()`.
+- `PlexTimelineReporter` (`backend/plex_timeline.py`): daemon thread started on `processStarted`, stopped on `processFinished`. POSTs to `/:/timeline` every 10s. Position is updated via push-based `time-pos` property observer (registered in `PlexLibrary.set_wid()`). Pause state updated via `pause` property observer. Sends `"stopped"` on exit. Session identified by per-play `uuid4()`.
 - Stream URLs use transient token (`GET /security/token?type=delegation&scope=all`) — long-lived token never passed to MPV process.
-- **Planned migration (roadmap #28):** Replace subprocess + IPC with `python-mpv` (libmpv ctypes binding). Enables push-based `time-pos` observer (eliminates 10s poll), `keybind()` API (eliminates `input.conf` versioning), in-process axis debouncing (fixes L2/R2), and `wait_until_playing()` for exact loading overlay timing.
+- `MpvIpc` (Unix socket IPC client) has been removed. All position/state reads now use libmpv property observers.
 
 ### Live TV Architecture
 - `LiveTvLibrary`: fetches HDHomeRun host from Plex `/livetv/dvrs`, then uses HDHomeRun's own APIs for all guide data. No Plex cloud EPG calls.

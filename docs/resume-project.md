@@ -71,7 +71,7 @@ Bug fixes:
 | 25 | Hero/header fade on content focus | Deferred — UI polish |
 | 26 | ~~In-app Plex login~~ | ✅ Done — PIN overlay in Settings |
 | 27 | Plex search | UI — new navigation flow |
-| 28 | libmpv migration (python-mpv) | Replace `MpvLauncher` subprocess + `MpvIpc` socket polling with `libmpv` via `python-mpv`. Enables: push-based `time-pos` observer (replaces 10s poll), `keybind()` API (eliminates `input.conf` versioning), L2/R2 seek (axis events controllable in-process), embedded video in Qt window. See scope below. |
+| 28 | ~~libmpv migration (python-mpv) — tasks 001–003~~ | ✅ Done — `LibMpvPlayer` (python-mpv), programmatic keybinds + L2/R2 debounce, push-based timeline reporter (no IPC polling). `MpvIpc` deleted. |
 | 29 | Rating UI — thumbs up/down on detail screen | Needs a free button; deferred until after libmpv migration frees up input.conf |
 | 30 | Custom user-defined collections | Needs scoping |
 | 31 | GOG/Epic Games Store | Needs spike first |
@@ -185,7 +185,7 @@ bash scripts/check-deps.sh
 
 **`PlexOnDeckGrid` and `PlexOnDeckList` expose `currentIndex` as a writable property** (not readonly). Writing to it from WatchScreen sets `_suppressIndexReset = true` first to prevent the `onActiveFocusChanged` handler from resetting to 0.
 
-**`PlexTimelineReporter` uses a daemon thread.** It is started in `_on_mpv_started_for_timeline` and stopped in `_on_mpv_finished_for_timeline`. `PlexLibrary.shutdown()` also calls `stop()`. The reporter reads MPV position via `MpvIpc` every 10s.
+**`PlexTimelineReporter` uses a daemon thread.** It is started in `_on_mpv_started_for_timeline` and stopped in `_on_mpv_finished_for_timeline`. `PlexLibrary.shutdown()` also calls `stop()`. Position is updated via push-based `time-pos` property observer (registered in `PlexLibrary.set_wid()`); no IPC polling.
 
 **`_mpvLaunchReady` signal carries 8 args** `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`. All test mocks must pass all 8.
 

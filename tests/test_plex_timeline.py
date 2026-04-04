@@ -120,3 +120,52 @@ class TestTimelineReporterStopIdempotent:
         reporter = PlexTimelineReporter(lambda: None)
         # Should not raise
         reporter.stop()
+
+
+class TestPlexTimelineReporterPush:
+    """Tests for the push-based position/pause update interface."""
+
+    def test_update_position_updates_internal_state(self) -> None:
+        """update_position(30.5) sets _position_ms to 30500."""
+        reporter = PlexTimelineReporter(lambda: None)
+        reporter.update_position(30.5)
+        assert reporter._position_ms == 30500
+
+    def test_update_paused_triggers_report(self) -> None:
+        """update_paused(True) triggers an immediate report."""
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+        reporter.start(rating_key="abc", duration_ms=60000)
+        time.sleep(0.1)
+        mock_client.report_timeline.reset_mock()
+
+        reporter.update_paused(True)
+        time.sleep(0.1)
+        reporter.stop()
+
+        # At least one call should have state='paused'
+        states = [c[1]["state"] for c in mock_client.report_timeline.call_args_list]
+        assert "paused" in states
+
+    def test_position_used_in_report(self) -> None:
+        """Position set via update_position is used in the next report."""
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+        reporter.start(rating_key="xyz", duration_ms=120000)
+        time.sleep(0.1)
+
+        reporter.update_position(5.0)  # 5000 ms
+        mock_client.report_timeline.reset_mock()
+        reporter._send_report("playing")
+
+        calls = mock_client.report_timeline.call_args_list
+        assert len(calls) == 1
+        assert calls[0][1]["time_ms"] == 5000
+        reporter.stop()
+
+    def test_start_seeds_position_from_start_ms(self) -> None:
+        """start() with start_ms=60000 seeds _position_ms to 60000."""
+        reporter = PlexTimelineReporter(lambda: None)
+        reporter.start(rating_key="def", duration_ms=300000, start_ms=60000)
+        assert reporter._position_ms == 60000
+        reporter.stop()

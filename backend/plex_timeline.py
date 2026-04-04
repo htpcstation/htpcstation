@@ -20,11 +20,14 @@ _IDENTIFIER = "com.plexapp.plugins.library"
 class PlexTimelineReporter:
     """Sends /:/timeline heartbeats to Plex while MPV is playing.
 
+    Position is updated via push-based property observers (observe_time_pos /
+    observe_pause on LibMpvPlayer) rather than polled via IPC.
+
     Usage:
         reporter = PlexTimelineReporter(client)
         reporter.start(rating_key, duration_ms, start_ms)   # on MPV launch
-        reporter.set_paused(True)                            # on pause
-        reporter.set_paused(False)                           # on resume
+        reporter.update_position(30.5)                       # called by time-pos observer
+        reporter.update_paused(True)                         # called by pause observer
         reporter.stop()                                      # on MPV exit
     """
 
@@ -44,14 +47,13 @@ class PlexTimelineReporter:
         self._duration_ms: int = 0
         self._session_id: str = ""
         self._paused: bool = False
-        self._mpv_ipc = None  # set in start()
+        self._position_ms: int = 0  # updated by observer
 
     def start(
         self,
         rating_key: str,
         duration_ms: int,
         start_ms: int = 0,
-        mpv_ipc=None,
         play_queue_item_id: int = 0,
     ) -> None:
         """Begin reporting for a new playback session.
@@ -59,8 +61,7 @@ class PlexTimelineReporter:
         rating_key:  Plex ratingKey of the item being played.
         duration_ms: Total duration of the item in milliseconds.
         start_ms:    Resume offset in milliseconds (0 = from beginning).
-        mpv_ipc:     MpvIpc instance for reading current position. If None,
-                     position is estimated from elapsed time.
+                     Used to seed the initial position before the first observer callback.
         play_queue_item_id: Plex playQueueItemID for Companion/Up Next support.
         """
         self.stop()  # stop any previous session
@@ -70,10 +71,8 @@ class PlexTimelineReporter:
             self._duration_ms = duration_ms
             self._session_id = str(uuid.uuid4())
             self._paused = False
-            self._mpv_ipc = mpv_ipc
+            self._position_ms = start_ms  # seed with resume position
             self._play_queue_item_id: int = play_queue_item_id
-            self._start_ms = start_ms
-            self._start_wall = time.monotonic()
 
         self._stop_event.clear()
         self._thread = threading.Thread(
@@ -85,11 +84,20 @@ class PlexTimelineReporter:
             rating_key, self._session_id,
         )
 
-    def set_paused(self, paused: bool) -> None:
-        """Update pause state. Triggers an immediate report."""
+    def update_position(self, pos_seconds: float) -> None:
+        """Update the current playback position. Called by the time-pos observer."""
+        with self._lock:
+            self._position_ms = int(pos_seconds * 1000)
+
+    def update_paused(self, paused: bool) -> None:
+        """Update pause state and trigger an immediate report. Called by the pause observer."""
         with self._lock:
             self._paused = paused
         self._report_now()
+
+    def set_paused(self, paused: bool) -> None:
+        """Update pause state. Alias for update_paused for backward compatibility."""
+        self.update_paused(paused)
 
     def stop(self) -> None:
         """Stop reporting and send a final 'stopped' report."""
@@ -117,21 +125,10 @@ class PlexTimelineReporter:
     def _current_position_ms(self) -> int:
         """Return current playback position in milliseconds.
 
-        Reads from MPV IPC if available; falls back to wall-clock estimate.
+        Returns the last position pushed by the time-pos observer.
         """
-        if self._mpv_ipc is not None:
-            try:
-                pos = self._mpv_ipc.command("get_property", "time-pos")
-                if isinstance(pos, (int, float)) and pos >= 0:
-                    return int(pos * 1000)
-            except Exception:  # noqa: BLE001
-                pass
-        # Fallback: estimate from elapsed wall time
         with self._lock:
-            elapsed = time.monotonic() - self._start_wall
-            if self._paused:
-                return self._start_ms
-            return min(self._start_ms + int(elapsed * 1000), self._duration_ms)
+            return self._position_ms
 
     def _report_now(self) -> None:
         """Send an immediate report (used on pause/resume)."""

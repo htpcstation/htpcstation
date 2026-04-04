@@ -10,7 +10,7 @@ import logging
 import os
 import threading
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import mpv
 
@@ -18,8 +18,7 @@ from PySide6.QtCore import QMetaObject, QObject, Qt, Signal, Slot
 
 logger = logging.getLogger(__name__)
 
-# IPC socket path for communicating with a running MPV instance.
-# Kept for MpvIpc compatibility (task 3 will migrate this).
+# IPC socket path — kept for the input-ipc-server option (harmless, no longer polled).
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
 _TRIGGER_DEBOUNCE = 0.5  # seconds — ignore L2/R2 repeats within this window
@@ -226,6 +225,32 @@ class LibMpvPlayer(QObject):
             return
         logger.info("LibMpvPlayer: stopping playback")
         self._player.stop()
+
+    def observe_time_pos(self, callback: Callable[[float], None]) -> None:
+        """Register a callback for time-pos changes. Called from mpv event thread."""
+        if self._player is None:
+            logger.warning("LibMpvPlayer.observe_time_pos: player not initialised — ignoring")
+            return
+
+        @self._player.property_observer("time-pos")
+        def _handler(name, value):
+            if isinstance(value, (int, float)) and value is not None:
+                callback(float(value))
+
+        self._time_pos_observer = _handler  # keep reference
+
+    def observe_pause(self, callback: Callable[[bool], None]) -> None:
+        """Register a callback for pause state changes. Called from mpv event thread."""
+        if self._player is None:
+            logger.warning("LibMpvPlayer.observe_pause: player not initialised — ignoring")
+            return
+
+        @self._player.property_observer("pause")
+        def _handler(name, value):
+            if value is not None:
+                callback(bool(value))
+
+        self._pause_observer = _handler  # keep reference
 
     def is_running(self) -> bool:
         """Return True if MPV is currently playing (not idle)."""

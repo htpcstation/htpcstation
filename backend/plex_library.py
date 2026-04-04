@@ -26,7 +26,6 @@ from PySide6.QtCore import (
 
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config, CONFIG_DIR
-from backend.mpv_ipc import MpvIpc
 from backend.mpv_launcher import LibMpvPlayer
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient, PlexErrorType
@@ -573,9 +572,6 @@ class PlexLibrary(QObject):
         self._mpv_launcher.mpvPlaybackStarted.connect(self._on_mpv_playback_started)
         self._mpv_launcher.subtitlePickerRequested.connect(self._on_subtitle_picker_requested)
 
-        # MPV IPC for communicating with the running MPV instance
-        self._mpv_ipc = MpvIpc()
-
         # Timeline reporter for Plex playback state
         self._timeline_reporter = PlexTimelineReporter(lambda: self._client)
         self._pending_play_rating_key: str = ""
@@ -598,8 +594,11 @@ class PlexLibrary(QObject):
         """Pass the Qt native window handle to the MPV player.
 
         Must be called after the Qt window is shown (so winId() is valid).
+        Registers property observers for push-based timeline position updates.
         """
         self._mpv_launcher.set_wid(wid)
+        self._mpv_launcher.observe_time_pos(self._timeline_reporter.update_position)
+        self._mpv_launcher.observe_pause(self._timeline_reporter.update_paused)
 
     def shutdown(self) -> None:
         """Shut down thread pools. Call before application exit."""
@@ -1262,8 +1261,7 @@ class PlexLibrary(QObject):
         self._timeline_reporter.start(
             rating_key=self._current_play_rating_key,
             duration_ms=self._current_play_duration_ms,
-            start_ms=0,  # MPV is already at the right position
-            mpv_ipc=self._mpv_ipc,
+            start_ms=0,  # MPV is already at the right position; observer will update
             play_queue_item_id=self._current_play_queue_item_id,
         )
 
@@ -1284,9 +1282,17 @@ class PlexLibrary(QObject):
         """Return subtitle tracks from the running MPV instance.
 
         Returns a list of dicts with keys: id, lang, title, selected.
-        Uses MpvIpc for now; task 003 will replace with property observer.
+        Reads the track-list property directly from the libmpv instance.
         """
-        tracks = self._mpv_ipc.get_track_list()
+        player = self._mpv_launcher._player
+        if player is None:
+            return []
+        try:
+            tracks = player["track-list"]
+        except Exception:  # noqa: BLE001
+            return []
+        if not isinstance(tracks, list):
+            return []
         result = []
         for t in tracks:
             if t.get("type") == "sub":
@@ -1301,18 +1307,35 @@ class PlexLibrary(QObject):
     @Slot(int)
     def setMpvSubtitleTrack(self, track_id: int) -> None:
         """Select a subtitle track by its MPV track ID. Use 0 to disable."""
-        self._mpv_ipc.set_subtitle_track(track_id)
+        player = self._mpv_launcher._player
+        if player is None:
+            return
+        try:
+            if track_id == 0:
+                player["sid"] = "no"
+            else:
+                player["sid"] = track_id
+        except Exception:  # noqa: BLE001
+            pass
 
     @Slot(int, str)
     def persistTrackSelection(self, mpv_track_id: int, track_type: str) -> None:
         """Persist a track selection to the Plex server.
 
         track_type: 'subtitle' or 'audio'
-        Uses MpvIpc to get the track list and maps MPV track ID to Plex stream ID.
+        Reads the track list from libmpv and maps MPV track ID to Plex stream ID.
         """
         if not self._client or not self._current_play_part_id:
             return
-        tracks = self._mpv_ipc.get_track_list()
+        player = self._mpv_launcher._player
+        if player is None:
+            return
+        try:
+            tracks = player["track-list"]
+        except Exception:  # noqa: BLE001
+            tracks = []
+        if not isinstance(tracks, list):
+            tracks = []
         # Find the track with the given MPV id and type
         mpv_type = "sub" if track_type == "subtitle" else "audio"
         matched = next(
