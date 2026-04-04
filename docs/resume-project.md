@@ -66,12 +66,24 @@ Live TV overhaul:
 | 14 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
 | 15 | Gamepad extension: YouTube/Netflix | Browser extension work |
 | 16 | Plex token encryption / OS keyring | Security hardening |
-| 17 | `/hubs/home/continueWatching` swap | One-line endpoint change in `PlexClient.get_on_deck()` |
-| 18 | Focus memory per row (WatchScreen) | Generalise `_resumeSavedIndex` to `_focusMemory` dict |
-| 19 | Plex play queue (`POST /playQueues`) | Enables Plex Companion + Up Next |
-| 20 | Server events SSE (`/:/eventsource/notifications`) | Reactive library refresh |
-| 21 | Plex search | New navigation flow |
-| 22 | In-app Plex login | Needed for first-run wizard |
+| 17 | `/hubs/home/continueWatching` swap | ⚡ Backend only — one-line endpoint change in `PlexClient.get_on_deck()` |
+| 18 | Typed error handling + retry (`PlexError` enum) | ⚡ Backend only — `_get()` currently returns `None` for all errors; add transient/permanent distinction + exponential backoff |
+| 19 | Plex play queue (`POST /playQueues`) | ⚡ Backend only — enables Plex Companion; improves timeline accuracy with `playQueueItemID` |
+| 20 | `X-Plex-Client-Profile-Extra` header | ⚡ Backend only — tells Plex our codec capabilities → better direct-play decisions |
+| 21 | Playback history (`GET /status/sessions/history/all`) | ⚡ Backend only — more reliable recently-watched data source |
+| 22 | Self-healing server connection | ⚡ Backend only — retry all known server addresses on failure; survives LAN IP changes |
+| 23 | Server events SSE (`/:/eventsource/notifications`) | ⚡ Backend only — reactive library refresh when Plex scan completes |
+| 24 | Rating (`PUT /:/rate`) | Minimal UI — thumbs up/down on detail screen; backend is one method |
+| 25 | Focus memory per row (WatchScreen) | UI — generalise `_resumeSavedIndex` to `_focusMemory` dict |
+| 26 | Hero/header fade on content focus | UI — `WatchScreen` header opacity animation |
+| 27 | In-app Plex login | UI — needed for first-run wizard (roadmap #7) |
+| 28 | Plex search | UI — new navigation flow |
+| 29 | Custom user-defined collections | Needs scoping |
+| 30 | GOG/Epic Games Store | Needs spike first |
+| 31 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
+| 32 | Gamepad extension: YouTube/Netflix | Browser extension work |
+| 33 | Plex token encryption / OS keyring | Security hardening (was #16) |
+| 34 | Moonlight rich metadata | Deferred — nearly free when resumed (steam_app_id already in artwork_index.json) |
 
 ---
 
