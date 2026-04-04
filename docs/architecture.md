@@ -25,8 +25,8 @@ htpcstation/
     keys.py                            # Semantic key abstraction, input source tracking, button layout
     launcher.py                        # QProcess emulator launcher, async signal-based start
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
-    live_tv_library.py                 # LiveTvLibrary QObject: EPG fetch (Plex cloud), HDHomeRun stream
-                                       # URLs, parallel per-channel schedule fetch, LiveTvChannelModel
+    live_tv_library.py                 # LiveTvLibrary QObject: HDHomeRun guide API fetch, guide cache,
+                                       # warm/cold start, background refresh, LiveTvChannelModel
     live_tv_models.py                  # LiveTvChannel dataclass
     metadata_gamelist.py               # GameMetadata dataclass, gamelist.xml reader/writer (Steam + Moonlight)
     models.py                          # Game and System dataclasses
@@ -44,10 +44,14 @@ htpcstation/
                                        # live TV variant with reconnect options
     network_monitor.py                 # NetworkMonitor QObject: periodic connectivity check, online property
     plex_account.py                    # plex.tv API: OAuth, server discovery, home users, user switching
-    plex_client.py                     # Plex Media Server HTTP client, get_stream_url() for direct play
+    plex_client.py                     # Plex Media Server HTTP client, get_stream_url(), report_timeline(),
+                                       # persist_stream_selection(), mark_played/unplayed, transient token,
+                                       # get_metadata(include_markers=True), get_markers()
     plex_library.py                    # PlexLibrary QObject: threaded data loading, models, sort/filter,
                                        # music slots, server/user management, MPV/browser launch,
-                                       # My List (plex_mylist.json), subtitle IPC slots
+                                       # My List (plex_mylist.json), subtitle IPC slots,
+                                       # timeline reporter wiring, track persistence, skip intro markers,
+                                       # fetchStreamInfo async, streamInfoReady signal
     plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode, PlexArtist,
                                        # PlexAlbum, PlexTrack dataclasses
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
@@ -117,6 +121,7 @@ htpcstation/
       PlexOnDeckList.qml
       LiveTvScreen.qml                 # Embedded Live TV channel guide
       MpvSubtitleOverlay.qml           # Always-on-top Window for subtitle track selection during MPV
+      MpvSkipIntroOverlay.qml          # Always-on-top Window for skip intro button (bottom-right)
       ListenScreen.qml                 # All music views: menu, artists, albums, tracks, now playing
       ControllerMappingDialog.qml
       SystemCoresScreen.qml            # Per-system RetroArch core editor
@@ -129,7 +134,7 @@ htpcstation/
     test_emulator_launch.py            # 24 tests
     test_filter_sort.py                # 12 tests
     test_gamelist_parser_fixes.py      # 7 tests
-    test_live_tv_library.py            # 38 tests
+    test_live_tv_library.py            # ~38 tests (HDHomeRun guide API)
     test_moonlight_artwork.py          # 36 tests
     test_moonlight_client.py           # 24 tests
     test_moonlight_library.py          # 119 tests
@@ -143,6 +148,8 @@ htpcstation/
     test_plex_backend.py               # 191 tests
     test_plex_mylist.py                # 36 tests
     test_plex_stream.py                # 15 tests
+    test_plex_client.py                # 11 tests (identity headers, timeline, track persistence)
+    test_plex_timeline.py              # 6 tests (PlexTimelineReporter lifecycle)
     test_settings_backend.py           # 99 tests
     test_steam.py                      # 95 tests
     test_video_snap.py                 # 5 tests
@@ -168,12 +175,14 @@ htpcstation/
 
 ### Threading Model
 - All UI on Qt main thread
-- Plex API calls via `ThreadPoolExecutor(max_workers=2)`, results via Qt signals
+- Plex API calls via `ThreadPoolExecutor(max_workers=2)` (`self._executor`), results via Qt signals
+- Poster downloads via dedicated `ThreadPoolExecutor(max_workers=10)` (`self._poster_executor`) — separate from main executor to avoid blocking library loads
 - Moonlight host probing + app enumeration via `ThreadPoolExecutor(max_workers=2)`
-- Poster downloads on thread pool, `dataChanged` emitted on main thread
 - Emulator/browser/Moonlight launch via `QProcess` (async, non-blocking)
 - Steam game discovery is synchronous (small local ACF file reads)
-- Live TV EPG: discovery phase sequential (paginated), per-channel fetch parallel (8 workers)
+- Live TV: HDHomeRun `discover.json` sequential (fast, local), then `lineup.json` + guide API parallel (2 workers)
+- `PlexTimelineReporter`: dedicated daemon `threading.Thread` (not executor) — fires every 10s, reads MPV position via IPC
+- All internal signals that cross thread boundaries use `Qt.ConnectionType.QueuedConnection`
 
 ### Process Lifecycle
 - **Emulators/Browser/Moonlight:** `processStarted` → `window.hide()`, `processFinished` → `window.showFullScreen()` + `raise_()` + `requestActivate()`
@@ -183,18 +192,28 @@ htpcstation/
 
 ### Plex Architecture
 - **`PlexAccount`** — talks to `plex.tv` for OAuth, server discovery, home users, user switching. Old `/api/` endpoints use XML + token as query param. OAuth methods are `@staticmethod`.
-- **`PlexClient`** — talks to local media server. Always uses admin token. `get_stream_url(ratingKey)` returns `(url, view_offset_ms)` for direct MPV play.
-- **`PlexLibrary`** — orchestrates both. Stores `_active_token` (user-specific) for browser deep links separately from admin token. Caches user token/title/content-rating-filter. On-deck skipped for managed users (server rejects their tokens).
+- **`PlexClient`** — talks to local media server. Always uses admin token. Sends full identity headers (`X-Plex-Client-Identifier`, `X-Plex-Product`, etc.) on every request. `get_stream_url(ratingKey)` returns `(url, view_offset_ms)`. `report_timeline()` is fire-and-forget (timeout=5s, never raises). `persist_stream_selection()` PUTs audio/subtitle choice with `allParts=1`. `get_transient_token()` returns short-lived delegation token for stream URLs.
+- **`PlexLibrary`** — orchestrates both. Stores `_active_token` (user-specific) for browser deep links separately from admin token. Caches user token/title/content-rating-filter. On-deck skipped for managed users (server rejects their tokens). Owns `PlexTimelineReporter` — started/stopped via `processStarted`/`processFinished`. Stores `_current_play_part_id`, `_audio_id_map`, `_sub_id_map` for track persistence. `_mpvLaunchReady` signal carries 8 args: `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`.
+- **Poster cache:** `_poster_executor` (10 workers) separate from `_executor` (2 workers). Cached posters pre-resolved on worker thread before emitting to QML — no placeholder flash on warm load.
 
 ### MPV Architecture
-- `MpvLauncher`: subprocess MPV, auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `--hwdec=vaapi-copy --gpu-context=wayland`. Xorg → `--hwdec=vaapi --gpu-context=x11`. Versioned `input.conf` (v2) auto-written to `~/.config/htpcstation/mpv/input.conf`, overwritten when outdated.
-- `MpvIpc`: Unix socket client for `--input-ipc-server=/tmp/htpcstation-mpv.sock`. Used for subtitle track list query and selection.
-- `MpvSubtitleOverlay.qml`: always-on-top `Window`, shown when Y pressed during MPV playback (Watch tab only). Calls `plex.getMpvSubtitleTracks()` / `plex.setMpvSubtitleTrack()`.
+- `MpvLauncher`: subprocess MPV, auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `--hwdec=vaapi-copy --gpu-context=wayland`. Xorg → `--hwdec=vaapi --gpu-context=x11`. Versioned `input.conf` (v3) auto-written to `~/.config/htpcstation/mpv/input.conf`, overwritten when outdated. Gamepad bindings: `GAMEPAD_ACTION_RIGHT` (play/pause), `GAMEPAD_ACTION_DOWN` (quit), `GAMEPAD_DPAD_*` (seek/volume).
+- `MpvIpc`: Unix socket client for `--input-ipc-server=/tmp/htpcstation-mpv.sock`. Used for subtitle track list query, selection, and position polling (timeline reporter).
+- `MpvSubtitleOverlay.qml`: always-on-top `Window`, shown when X pressed during MPV playback. Calls `plex.getMpvSubtitleTracks()` / `plex.setMpvSubtitleTrack()` / `plex.persistTrackSelection()`.
+- `MpvSkipIntroOverlay.qml`: always-on-top `Window`, shown bottom-right when `plex.markersReady` fires with `intro_end_ms > 0`. Calls `plex.skipIntro()` which seeks via IPC.
+- `PlexTimelineReporter` (`backend/plex_timeline.py`): daemon thread started on `processStarted`, stopped on `processFinished`. POSTs to `/:/timeline` every 10s with current position from MpvIpc. Sends `"stopped"` on exit. Session identified by per-play `uuid4()`.
+- Stream URLs use transient token (`GET /security/token?type=delegation&scope=all`) — long-lived token never passed to MPV process.
 
 ### Live TV Architecture
-- `LiveTvLibrary`: fetches EPG provider key from `/media/providers`, HDHomeRun host from `/livetv/dvrs`. Paginates `/{epg_provider}/grid` to discover all channel gridKeys, then fetches each channel's schedule in parallel (8 workers, 5 programs per channel). Stream URL: `http://{hdhomerun_host}:5004/auto/v{vcn}`.
-- EPG endpoint: `{server_url}/tv.plex.providers.epg.cloud:N/grid?type=1&gridStartTime={now-43200}&gridEndTime={now+7200}`
-- Current program: `beginsAt <= now < endsAt` OR `onAir=True` in Media object. Next: first program with `beginsAt >= now` that isn't current.
+- `LiveTvLibrary`: fetches HDHomeRun host from Plex `/livetv/dvrs`, then uses HDHomeRun's own APIs for all guide data. No Plex cloud EPG calls.
+- **Data sources:**
+  - `GET http://{host}/discover.json` → `DeviceAuth` token (local, instant)
+  - `GET http://{host}/lineup.json` → 67 tunable channels with VCN, name, stream URL (local, instant)
+  - `GET https://api.hdhomerun.com/api/guide?DeviceAuth={token}` → 58 channels with full guide (cloud, ~2s)
+- **Current program detection:** `StartTime <= now < EndTime` — HDHomeRun timestamps are accurate Unix seconds.
+- **Cache:** `~/.config/htpcstation/livetv_cache/guide_cache.json` — single file, all channels. Warm start serves cache instantly, background refresh updates in-place.
+- **Force refresh:** Y button in guide clears cache and re-fetches.
+- **Why not Plex cloud EPG:** The `/{epg_key}/grid` endpoint ignores `channelGridKey` filter — returns the same 607-item cross-channel dataset regardless. Only 19 of 64 channels appeared, only 5 with live data. HDHomeRun guide gives 58 channels, 56 with live data.
 
 ### Steam Architecture
 - `steam_parser.py`: VDF/ACF recursive descent parser. Discovers games from Flatpak + native paths. Filters non-games (Proton, runtimes, incomplete installs).
@@ -222,7 +241,7 @@ htpcstation/
     "cores_directory": "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
   },
   "systems": { "gb": { "display_name": "Game Boy", "core": "gambatte_libretro.so", "extensions": [".gb"] } },
-  "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv" },
+  "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
   "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard" }
@@ -286,6 +305,17 @@ htpcstation/
 - **Wayland needs `vaapi-copy`** — `vaapi` direct display path doesn't work without a copy step on Wayland EGL.
 - **Fedora codec-restricted packages** — `ffmpeg-free` causes `libopenh264` to win H.264 decoder selection over VA-API. Swap for `ffmpeg` from RPM Fusion. `libva-intel-media-driver` → `libva-intel-driver` (RPM Fusion).
 - **AV1 requires Gen 12+ hardware** — Kaby Lake (UHD 620) has no AV1 hardware decode.
+- **Gamepad button names are MPV-specific** — Use `GAMEPAD_ACTION_RIGHT/DOWN/LEFT/UP` and `GAMEPAD_DPAD_*`, not SDL names like `GAMEPAD_ACTION_A`. Verify with `mpv --input-keylist | grep GAMEPAD`.
+- **`_mpvLaunchReady` carries 8 args** — `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`. All test mocks must pass all 8 or use default values.
+- **`QProcess.start()` must be called on the main thread** — Use `Qt.ConnectionType.QueuedConnection` for any signal that triggers `MpvLauncher.launch()` from a worker thread.
+
+### Plex API
+- **Plex cloud EPG `channelGridKey` filter is broken** — The `/{epg_key}/grid` endpoint ignores `channelGridKey` and returns the same full dataset regardless. Use HDHomeRun guide API instead.
+- **Plex EPG timestamps may be ~1 year ahead** — The cloud EPG provider returns `beginsAt`/`endsAt` in seconds but offset by ~1 year from wall clock. Do not use for current-program detection. Use HDHomeRun timestamps.
+- **`hubs/discover` endpoint takes 26 seconds** — The `/{epg_key}/hubs/discover` endpoint times out with the 10s `_TIMEOUT`. Do not use.
+- **Timeline reports use `timeout=5`** — Not `_TIMEOUT=10`. Timeline is fire-and-forget; never raise.
+- **Markers are at top level of metadata item** — `metadata.get("Marker", [])`, not inside `Media.Part.Stream`. Type field is `"intro"` or `"credits"`.
+- **Transient token replaces long-lived token in stream URL** — `get_transient_token()` returns `""` on failure; fall back to main token silently.
 
 ### Gamepad
 - **evdev crash loop** — `OSError` catch must wrap the entire `for event in events:` loop, not just `.read()`.
@@ -356,6 +386,7 @@ Button Layout setting swaps both display labels AND functional mapping.
 - **CP 15** — Public release prep (README, MIT license, PII sanitization, requirements.txt, check-deps), list views for all tabs, LT/RT quick jump, Plex Live TV gamepad navigation
 - **CP 16** — PC Games Favorites, System Cores settings, SYSTEM_DEFAULTS expansion (~130 systems), Plex My List, MPV video player (VA-API, Wayland, resume, subtitle overlay), embedded Live TV guide (EPG + HDHomeRun), hardware-aware check-deps
 - **CP 17** — UI Refresh 4a: Theme.qml token interface (palette vars + semantic tokens), all hardcoded hex colors replaced across 26 QML files
+- **CP 18** — MPV UX overhaul (gamepad controls, loading overlay, async playback, resume focus restore, My List fixes); Plex P0 (timeline heartbeat, client identity, track persistence); Plex P1 (mark watched/unwatched, transient token, skip intro overlay); poster cache parallelism (10-worker executor, pre-resolve cached); Live TV overhaul (HDHomeRun guide API replaces Plex cloud EPG — 58 channels, 56 with live data, ~2s load)
 
 ---
 
@@ -378,3 +409,4 @@ All task briefs at `~/opencode/misc/coding-team/`:
 - `plex-watchlist/` (001–002), `plex-mylist/` (001–002)
 - `mpv-player/` (001–004), `mpv-subtitle-overlay/` (001)
 - `ui-refresh-4a/` (001)
+- `mpv-ux-fixes/` (001–015): MPV UX, Plex P0/P1, poster cache, Live TV HDHomeRun guide

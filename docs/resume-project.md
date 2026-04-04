@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 17)
+# HTPC Station — Resume Document (Checkpoint 18)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -7,15 +7,42 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,452 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,485 tests passing.**
 
-**What's new since Checkpoint 16:**
-- UI Refresh 4a: Theme.qml token interface complete. All hardcoded hex colors replaced with semantic tokens across 26 QML files. Zero hardcoded colors remain outside Theme.qml.
+**What's new since Checkpoint 17:**
 
-**What's new since Checkpoint 15:**
-- PC Games Favorites, System Cores settings, SYSTEM_DEFAULTS ~130 systems
-- Plex My List, MPV video player (VA-API, Wayland, resume, subtitle overlay)
-- Embedded Live TV guide (EPG + HDHomeRun), hardware-aware check-deps
+MPV UX overhaul:
+- Gamepad controls in MPV fixed (v3 input.conf: `GAMEPAD_ACTION_RIGHT/DOWN/DPAD_*`)
+- Loading overlay with 400ms minimum display on Play press
+- Async `fetchStreamInfo` + `playWithMpv` — no main-thread blocking
+- Resume dialog cancel restores focus to previously selected item
+- My List respects MPV/browser player setting; shows navigate to show detail
+- Sort/filter slots guard against synthetic section keys (`_mylist`, `_ondeck`)
+
+Plex playback reporting (P0):
+- `X-Plex-Client-Identifier` stable UUID + full identity headers on every request
+- `PlexTimelineReporter` — daemon thread, `POST /:/timeline` every 10s while MPV plays
+- Track persistence: `PUT /library/parts/{partId}` syncs audio/subtitle choice to all Plex clients
+- Transient token: MPV stream URLs use short-lived delegation token
+
+Plex P1 features:
+- Mark watched/unwatched (Y button on detail screens, optimistic update)
+- Skip intro overlay (`MpvSkipIntroOverlay.qml`) — reads `Marker` array from metadata
+- `plex.skipIntro()` seeks MPV via IPC to `intro_end_ms`
+
+Poster cache improvements:
+- Dedicated `_poster_executor` (10 workers) for poster downloads
+- Pre-resolve cached posters before emitting to QML — eliminates placeholder flash on warm load
+- Skip download tasks for already-cached items
+
+Live TV overhaul:
+- Replaced Plex cloud EPG (broken per-channel filter, 19 channels, 5 with live data) with HDHomeRun guide API
+- `GET api.hdhomerun.com/api/guide?DeviceAuth=...` — 58 channels, 56 with currently-airing programs, ~2s load
+- `GET http://{host}/lineup.json` — 67 tunable channels with stream URLs
+- Accurate Unix timestamps — `StartTime <= now < EndTime` works correctly
+- Channel logos from HDHomeRun `ImageURL`
+- Single `guide_cache.json` replaces 19+ per-channel cache files
+- Warm start: instant from cache, background refresh in parallel
 
 ---
 
@@ -32,13 +59,19 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs workin
 | 7 | X1 — First-run setup wizard | Built on new tokens + OSK |
 | 8 | UI Refresh 4b/4c — QML token replacement + theme switcher | High blast radius, phase separately |
 | 9 | Listen tab enhancements | Shuffle/repeat, seek bar, volume |
-| 10 | Mark watched/unwatched (Plex) | Single API write + toggle |
+| 10 | ~~Mark watched/unwatched (Plex)~~ | ✅ Done — Y button on detail screens |
 | 11 | Plex search | New navigation flow |
 | 12 | Custom user-defined collections | Needs scoping |
 | 13 | GOG/Epic Games Store | Needs spike first |
 | 14 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
 | 15 | Gamepad extension: YouTube/Netflix | Browser extension work |
 | 16 | Plex token encryption / OS keyring | Security hardening |
+| 17 | `/hubs/home/continueWatching` swap | One-line endpoint change in `PlexClient.get_on_deck()` |
+| 18 | Focus memory per row (WatchScreen) | Generalise `_resumeSavedIndex` to `_focusMemory` dict |
+| 19 | Plex play queue (`POST /playQueues`) | Enables Plex Companion + Up Next |
+| 20 | Server events SSE (`/:/eventsource/notifications`) | Reactive library refresh |
+| 21 | Plex search | New navigation flow |
+| 22 | In-app Plex login | Needed for first-run wizard |
 
 ---
 
@@ -48,15 +81,17 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs workin
 |---|---|
 | Framework | Qt 6 / QML + PySide6 (Python 3.10+) |
 | Target | Linux x86_64, Xorg or Wayland, Intel J5005-class or better |
-| Video playback | System MPV (`/usr/bin/mpv`), VA-API hwdec, direct Plex stream URLs |
-| Live TV | HDHomeRun direct streams, Plex cloud EPG (`discover.provider.plex.tv`) |
+| Video playback | System MPV (`/usr/bin/mpv`), VA-API hwdec, direct Plex stream URLs (transient token) |
+| Live TV | HDHomeRun direct streams + SiliconDust guide API (`api.hdhomerun.com`) |
 | Emulator | RetroArch via Flatpak |
 | PC games | Steam URI (`steam://rungameid/`), Moonlight CLI (Flatpak) |
 | Plex music | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Browser | Brave Flatpak (music playback, MPV fallback) |
 | Gamepad | evdev → synthetic QKeyEvent injection |
 | Config | `~/.config/htpcstation/config.json` |
-| MPV config | `~/.config/htpcstation/mpv/input.conf` (versioned, auto-written) |
+| MPV config | `~/.config/htpcstation/mpv/input.conf` (versioned v3, auto-written) |
+| Live TV cache | `~/.config/htpcstation/livetv_cache/guide_cache.json` |
+| Poster cache | `~/.config/htpcstation/poster_cache/{sha256}.jpg` |
 
 ---
 
@@ -83,8 +118,8 @@ bash scripts/check-deps.sh
 | `library` | GameLibrary | ROM data, models, launch, favorites |
 | `steam` | SteamLibrary | Steam/Moonlight games, models, sort, launch, favorites |
 | `moonlight` | MoonlightLibrary | Moonlight host/app data, models, launch |
-| `plex` | PlexLibrary | Plex data, models, sort/filter, MPV/browser launch, My List, subtitle IPC |
-| `liveTV` | LiveTvLibrary | EPG channels, HDHomeRun streams, MPV launch |
+| `plex` | PlexLibrary | Plex data, models, sort/filter, MPV/browser launch, My List, subtitle IPC, timeline reporting, track persistence, markers |
+| `liveTV` | LiveTvLibrary | HDHomeRun guide + streams, MPV launch, guide cache |
 | `gamepadManager` | GamepadManager | Raw mode for mapping dialog, device capabilities |
 | `networkMonitor` | NetworkMonitor | Periodic connectivity check |
 | `settings` | SettingsManager | Config read/write for settings UI, OAuth |
@@ -115,13 +150,24 @@ bash scripts/check-deps.sh
 
 **Theme.qml: use semantic tokens, never `_palette` vars.** `_bg`, `_accent`, etc. are internal. QML files reference `colorBackground`, `colorAccent`, etc. `colorPrimary` and `colorSecondary` are kept as aliases for the 255 existing usages — rename them in 4b/4c.
 
+**`PlexOnDeckGrid` and `PlexOnDeckList` expose `currentIndex` as a writable property** (not readonly). Writing to it from WatchScreen sets `_suppressIndexReset = true` first to prevent the `onActiveFocusChanged` handler from resetting to 0.
+
+**`PlexTimelineReporter` uses a daemon thread.** It is started in `_on_mpv_started_for_timeline` and stopped in `_on_mpv_finished_for_timeline`. `PlexLibrary.shutdown()` also calls `stop()`. The reporter reads MPV position via `MpvIpc` every 10s.
+
+**`_mpvLaunchReady` signal carries 8 args** `(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)`. All test mocks must pass all 8.
+
+**HDHomeRun guide API uses `DeviceAuth` token** from `http://{host}/discover.json`, not the Plex token. The guide endpoint is `https://api.hdhomerun.com/api/guide?DeviceAuth={token}`. The Plex cloud EPG grid endpoint (`/{epg_key}/grid`) ignores `channelGridKey` filter — do not use it for per-channel data.
+
+**Plex EPG timestamps are unreliable** (may be ~1 year ahead of wall clock). Use HDHomeRun guide timestamps instead — they are accurate Unix seconds.
+
 ---
 
 ## Dev Machine
 
-- ThinkPad T460, i5-8350U (Kaby Lake-R), Intel UHD 620, Fedora 43, Wayland
+- ThinkPad T480, i5-8350U (Kaby Lake-R), Intel UHD 620, Fedora 43, Wayland
 - ROMs: `~/opencode/ROMs/` (gb, ngpc, sega32x)
 - Steam: Flatpak, 5 games
 - Moonlight: Flatpak, 1 paired host, 7 apps
 - Plex: local server + HDHomeRun FLEX 4K tuner at `192.168.0.80`
 - Controller: 8BitDo Micro in D-input mode (D-pad as ABS_X/ABS_Y, no analog sticks)
+- HDHomeRun DeviceAuth: in `discover.json` at `http://192.168.0.80/discover.json`
