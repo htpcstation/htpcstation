@@ -550,6 +550,101 @@ class TestPlexClientErrorHandling:
 
 
 # ---------------------------------------------------------------------------
+# PlexClient — get_on_deck (continueWatching)
+# ---------------------------------------------------------------------------
+
+
+class TestPlexClientGetOnDeck:
+    def test_calls_continue_watching_endpoint(self) -> None:
+        """get_on_deck() should call /hubs/home/continueWatching."""
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "MediaContainer": {
+                    "Hub": [
+                        {
+                            "Metadata": [
+                                {"ratingKey": "1", "title": "Episode 1"},
+                                {"ratingKey": "2", "title": "Episode 2"},
+                            ]
+                        }
+                    ]
+                }
+            }
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_on_deck()
+
+            call_url = mock_session.get.call_args[0][0]
+            assert "/hubs/home/continueWatching" in call_url
+            assert len(result) == 2
+            assert result[0]["title"] == "Episode 1"
+
+    def test_fallback_metadata_at_container_level(self) -> None:
+        """When Hub is absent, fall back to Metadata at the container level."""
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "MediaContainer": {
+                    "Metadata": [
+                        {"ratingKey": "3", "title": "Episode 3"},
+                    ]
+                }
+            }
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_on_deck()
+
+            assert len(result) == 1
+            assert result[0]["title"] == "Episode 3"
+
+    def test_returns_empty_list_on_none_response(self) -> None:
+        """get_on_deck() returns [] when _get returns None (error)."""
+        from backend.plex_client import PlexClient
+        import requests as req
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_session.get.side_effect = req.exceptions.ConnectionError("refused")
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_on_deck()
+
+            assert result == []
+
+    def test_returns_empty_list_when_hub_has_no_metadata(self) -> None:
+        """When Hub exists but has no Metadata key, returns []."""
+        from backend.plex_client import PlexClient
+
+        with patch("backend.plex_client.requests.Session") as mock_session_cls:
+            mock_session = MagicMock()
+            mock_session_cls.return_value = mock_session
+            mock_response = MagicMock()
+            mock_response.json.return_value = {
+                "MediaContainer": {
+                    "Hub": [{}]
+                }
+            }
+            mock_session.get.return_value = mock_response
+
+            client = PlexClient("http://server:32400", "tok")
+            result = client.get_on_deck()
+
+            assert result == []
+
+
+# ---------------------------------------------------------------------------
 # PosterCache
 # ---------------------------------------------------------------------------
 

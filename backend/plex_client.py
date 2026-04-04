@@ -162,11 +162,20 @@ class PlexClient:
         return container.get("Hub", [])
 
     def get_on_deck(self) -> list[dict]:
-        """GET /library/onDeck — continue watching items."""
-        data = self._get("/library/onDeck")
+        """GET /hubs/home/continueWatching — continue watching items (cross-library).
+
+        Returns the Metadata array. Falls back to empty list on error.
+        Previously used /library/onDeck (legacy endpoint).
+        """
+        data = self._get("/hubs/home/continueWatching")
         if data is None:
             return []
         container = data.get("MediaContainer", {})
+        # The hub endpoint wraps items in a Hub list; the first hub contains Metadata.
+        hubs = container.get("Hub", [])
+        if hubs:
+            return hubs[0].get("Metadata", [])
+        # Fallback: some server versions return Metadata directly
         return container.get("Metadata", [])
 
     def get_playlists(self) -> list[dict]:
