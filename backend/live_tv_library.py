@@ -32,7 +32,7 @@ from PySide6.QtCore import (
 
 from backend.config import CONFIG_DIR
 from backend.live_tv_models import LiveTvChannel
-from backend.mpv_launcher import MpvLauncher
+from backend.mpv_launcher import LibMpvPlayer
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ class LiveTvLibrary(QObject):
     def __init__(
         self,
         plex_client_factory: Callable,
-        mpv_launcher: MpvLauncher,
+        mpv_launcher: LibMpvPlayer,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)

@@ -157,6 +157,12 @@ def main() -> None:
     # Get the root window for focus/visibility management
     window = engine.rootObjects()[0]
 
+    # Show the window before passing wid so winId() is valid
+    window.showFullScreen()
+
+    # Pass the Qt native window handle to the MPV player (libmpv renders inside it)
+    plex_library.set_wid(int(window.winId()))
+
     # Hide the window when an external process launches, restore when it exits
     def _hide_window():
         window.hide()

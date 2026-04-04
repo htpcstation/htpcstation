@@ -588,134 +588,140 @@ class TestGuideCache:
 
 
 # ---------------------------------------------------------------------------
-# MpvLauncher.launch_live_tv — arg construction
+# LibMpvPlayer.launch_live_tv — option setting
 # ---------------------------------------------------------------------------
+
+
+def _make_live_tv_player(tmp_path: Path):
+    """Create a LibMpvPlayer with set_wid() called, returning (player, mock_instance, set_items)."""
+    from unittest.mock import PropertyMock
+    import backend.mpv_launcher as mpv_mod
+    from backend.mpv_launcher import LibMpvPlayer
+
+    input_conf_path = tmp_path / "mpv" / "input.conf"
+    mock_instance = MagicMock()
+    type(mock_instance).core_idle = PropertyMock(return_value=True)
+    set_items: dict = {}
+    mock_instance.__setitem__.side_effect = lambda key, value: set_items.update({key: value})
+
+    with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
+         patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+         patch("backend.mpv_launcher.threading"):
+        mock_mpv_module.MPV.return_value = mock_instance
+        player = LibMpvPlayer()
+        player.set_wid(123)
+
+    return player, mock_instance, set_items
 
 
 class TestMpvLauncherLiveTv:
     def test_launch_live_tv_uses_reconnect_args(self, tmp_path: Path) -> None:
-        """launch_live_tv() includes reconnect options for live streams."""
-        from backend.mpv_launcher import MpvLauncher
+        """launch_live_tv() sets stream-lavf-o with reconnect options."""
         import backend.mpv_launcher as mpv_mod
-        from PySide6.QtCore import QProcess
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
+        player, mock_instance, set_items = _make_live_tv_player(tmp_path)
 
-        mock_process = MagicMock(spec=QProcess)
-        mock_process.state.return_value = QProcess.ProcessState.NotRunning
+        with patch("backend.mpv_launcher.threading"):
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1", "ABC")
 
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.QProcess", return_value=mock_process):
-            launcher = MpvLauncher()
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v7.1", "ABC")
-
-        mock_process.start.assert_called_once()
-        program, args = mock_process.start.call_args[0]
-        assert program == "/usr/bin/mpv"
-        assert "--fullscreen" in args
-        assert "--no-terminal" in args
-        assert any(a.startswith("--hwdec=vaapi") for a in args)  # vaapi or vaapi-copy
-        assert "--vo=gpu" in args
-        assert any(a.startswith("--gpu-context=") for a in args)  # x11 or wayland
-        assert "--cache=yes" in args
-        assert "--demuxer-max-bytes=128MiB" in args
-        assert any("reconnect=1" in a for a in args)
-        assert "http://192.168.0.80:5004/auto/v7.1" in args
+        assert "stream-lavf-o" in set_items
+        assert "reconnect=1" in set_items["stream-lavf-o"]
+        mock_instance.play.assert_called_once_with("http://192.168.0.80:5004/auto/v7.1")
 
     def test_launch_live_tv_has_no_http_header_fields(self, tmp_path: Path) -> None:
-        """launch_live_tv() does NOT include --http-header-fields (no auth needed)."""
-        from backend.mpv_launcher import MpvLauncher
-        import backend.mpv_launcher as mpv_mod
-        from PySide6.QtCore import QProcess
+        """launch_live_tv() does NOT override http-header-fields (no Plex auth for HDHomeRun).
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
+        http-header-fields is set once in set_wid() for Plex VOD streams.
+        launch_live_tv() must not change it (HDHomeRun needs no auth headers).
+        """
+        player, mock_instance, set_items = _make_live_tv_player(tmp_path)
 
-        mock_process = MagicMock(spec=QProcess)
-        mock_process.state.return_value = QProcess.ProcessState.NotRunning
+        # Record the value of http-header-fields after set_wid() (before launch_live_tv)
+        http_header_value_before = set_items.get("http-header-fields")
 
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.QProcess", return_value=mock_process):
-            launcher = MpvLauncher()
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
+        # Reset tracking to only capture changes made during launch_live_tv
+        set_items.clear()
 
-        _, args = mock_process.start.call_args[0]
-        assert not any("http-header-fields" in a for a in args)
+        with patch("backend.mpv_launcher.threading"):
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
+
+        # http-header-fields should NOT be changed during launch_live_tv
+        assert "http-header-fields" not in set_items
 
     def test_launch_live_tv_has_no_start_arg(self, tmp_path: Path) -> None:
-        """launch_live_tv() does NOT include --start (live streams start at live edge)."""
-        from backend.mpv_launcher import MpvLauncher
+        """launch_live_tv() does NOT set player.start (live streams start at live edge)."""
+        from unittest.mock import PropertyMock
         import backend.mpv_launcher as mpv_mod
-        from PySide6.QtCore import QProcess
+        from backend.mpv_launcher import LibMpvPlayer
 
         input_conf_path = tmp_path / "mpv" / "input.conf"
+        mock_instance = MagicMock()
+        type(mock_instance).core_idle = PropertyMock(return_value=True)
+        set_items: dict = {}
+        mock_instance.__setitem__.side_effect = lambda key, value: set_items.update({key: value})
+        set_attrs: dict = {}
 
-        mock_process = MagicMock(spec=QProcess)
-        mock_process.state.return_value = QProcess.ProcessState.NotRunning
+        original_setattr = mock_instance.__class__.__setattr__
+
+        def _track_setattr(obj, name, value):
+            if obj is mock_instance:
+                set_attrs[name] = value
+            original_setattr(obj, name, value)
 
         with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.QProcess", return_value=mock_process):
-            launcher = MpvLauncher()
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
+             patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+             patch("backend.mpv_launcher.threading"):
+            mock_mpv_module.MPV.return_value = mock_instance
+            player = LibMpvPlayer()
+            player.set_wid(123)
+            # Clear tracked attrs from set_wid
+            set_attrs.clear()
+            with patch.object(type(mock_instance), "__setattr__", _track_setattr):
+                player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
 
-        _, args = mock_process.start.call_args[0]
-        assert not any(a.startswith("--start=") for a in args)
+        assert "start" not in set_attrs, f"player.start was unexpectedly set to {set_attrs.get('start')}"
 
     def test_launch_live_tv_includes_title_when_given(self, tmp_path: Path) -> None:
-        """launch_live_tv() includes --title and --force-media-title when title is given."""
-        from backend.mpv_launcher import MpvLauncher
-        import backend.mpv_launcher as mpv_mod
-        from PySide6.QtCore import QProcess
+        """launch_live_tv() sets player.title and player.force_media_title when title is given."""
+        player, mock_instance, set_items = _make_live_tv_player(tmp_path)
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch("backend.mpv_launcher.threading"):
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1", "ABC Channel")
 
-        mock_process = MagicMock(spec=QProcess)
-        mock_process.state.return_value = QProcess.ProcessState.NotRunning
-
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.QProcess", return_value=mock_process):
-            launcher = MpvLauncher()
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v7.1", "ABC Channel")
-
-        _, args = mock_process.start.call_args[0]
-        assert "--title=ABC Channel" in args
-        assert "--force-media-title=ABC Channel" in args
+        assert mock_instance.title == "ABC Channel"
+        assert mock_instance.force_media_title == "ABC Channel"
 
     def test_launch_live_tv_noop_when_already_running(self, tmp_path: Path) -> None:
-        """launch_live_tv() is a no-op when MPV is already running."""
-        from backend.mpv_launcher import MpvLauncher
+        """launch_live_tv() is a no-op when MPV is already playing."""
+        from unittest.mock import PropertyMock
         import backend.mpv_launcher as mpv_mod
-        from PySide6.QtCore import QProcess
+        from backend.mpv_launcher import LibMpvPlayer
 
         input_conf_path = tmp_path / "mpv" / "input.conf"
-
-        mock_process = MagicMock(spec=QProcess)
-        mock_process.state.side_effect = [
-            QProcess.ProcessState.NotRunning,  # before first launch
-            QProcess.ProcessState.Running,     # before second launch
-        ]
+        mock_instance = MagicMock()
+        # Simulate playing: core_idle=False
+        type(mock_instance).core_idle = PropertyMock(return_value=False)
+        mock_instance.__setitem__.side_effect = lambda key, value: None
 
         with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.QProcess", return_value=mock_process):
-            launcher = MpvLauncher()
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
-            launcher.launch_live_tv("http://192.168.0.80:5004/auto/v4.1")
+             patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+             patch("backend.mpv_launcher.threading"):
+            mock_mpv_module.MPV.return_value = mock_instance
+            player = LibMpvPlayer()
+            player.set_wid(123)
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v4.1")
 
-        assert mock_process.start.call_count == 1
+        mock_instance.play.assert_not_called()
 
     def test_build_live_tv_args_uses_128mib_buffer(self, tmp_path: Path) -> None:
-        """_build_live_tv_args uses 128MiB demuxer buffer (larger than VOD's 50MiB)."""
-        from backend.mpv_launcher import MpvLauncher
-        import backend.mpv_launcher as mpv_mod
+        """launch_live_tv() sets demuxer-max-bytes to 128MiB (larger than VOD's 50MiB)."""
+        player, mock_instance, set_items = _make_live_tv_player(tmp_path)
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
+        with patch("backend.mpv_launcher.threading"):
+            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
 
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path):
-            launcher = MpvLauncher()
-            args = launcher._build_live_tv_args("http://192.168.0.80:5004/auto/v7.1")
-
-        assert "--demuxer-max-bytes=128MiB" in args
-        # VOD uses 50MiB — live TV should NOT use 50MiB
-        assert "--demuxer-max-bytes=50MiB" not in args
+        assert set_items.get("demuxer-max-bytes") == "128MiB"
 
 
 # ---------------------------------------------------------------------------

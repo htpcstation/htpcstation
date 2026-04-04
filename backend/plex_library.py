@@ -27,7 +27,7 @@ from PySide6.QtCore import (
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config, CONFIG_DIR
 from backend.mpv_ipc import MpvIpc
-from backend.mpv_launcher import MpvLauncher
+from backend.mpv_launcher import LibMpvPlayer
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient, PlexErrorType
 from backend.plex_timeline import PlexTimelineReporter
@@ -565,7 +565,7 @@ class PlexLibrary(QObject):
         self._streamInfoReady.connect(self._on_stream_info_ready, Qt.ConnectionType.QueuedConnection)
 
         # MPV launcher for direct stream playback
-        self._mpv_launcher = MpvLauncher(self)
+        self._mpv_launcher = LibMpvPlayer(parent=self)
         self._mpv_launcher.processStarted.connect(self.mpvStarted)
         self._mpv_launcher.processFinished.connect(lambda _: self.mpvFinished.emit())
 
@@ -590,10 +590,18 @@ class PlexLibrary(QObject):
         items = self._load_my_list()
         self._rebuild_my_list_model(items)
 
+    def set_wid(self, wid: int) -> None:
+        """Pass the Qt native window handle to the MPV player.
+
+        Must be called after the Qt window is shown (so winId() is valid).
+        """
+        self._mpv_launcher.set_wid(wid)
+
     def shutdown(self) -> None:
         """Shut down thread pools. Call before application exit."""
         self._stop_event_listener()
         self._timeline_reporter.stop()
+        self._mpv_launcher.shutdown()
         self._executor.shutdown(wait=False, cancel_futures=True)
         self._poster_executor.shutdown(wait=False, cancel_futures=True)
 
