@@ -133,6 +133,20 @@ FocusScope {
         // Response arrives via plex.streamInfoReady signal — handled in Connections below
     }
 
+    // Hide the loading overlay, respecting the 400ms minimum display time.
+    // If the minimum-display timer is still running, mark pending and let the
+    // timer do the hide; otherwise hide immediately.
+    property bool _loadingHidePending: false
+    function _clearLoading() {
+        _isLoadingContent = false
+        if (loadingOverlayTimer.running) {
+            _loadingHidePending = true
+        } else {
+            _loadingOverlayVisible = false
+            _loadingHidePending = false
+        }
+    }
+
     // Loading state for content playback
     property bool _isLoadingContent: false
     property bool _loadingOverlayVisible: false
@@ -155,8 +169,11 @@ FocusScope {
         id: loadingOverlayTimer
         interval: 400
         onTriggered: {
-            if (!watchScreen._isLoadingContent) {
+            // Minimum display time elapsed. Hide now if loading is done,
+            // or if a hide was requested while the timer was still running.
+            if (!watchScreen._isLoadingContent || watchScreen._loadingHidePending) {
                 watchScreen._loadingOverlayVisible = false
+                watchScreen._loadingHidePending = false
             }
         }
     }
@@ -928,7 +945,7 @@ FocusScope {
     // ── MPV started handler — clear loading state ─────────────────────────────
     Connections {
         target: plex
-        function onMpvStarted() { watchScreen._isLoadingContent = false }
+        function onMpvStarted() { watchScreen._clearLoading() }
     }
 
     // ── Stream info ready handler — async response from fetchStreamInfo ──────
@@ -937,16 +954,16 @@ FocusScope {
         function onStreamInfoReady(ratingKey, url, viewOffsetMs) {
             if (!watchScreen._isLoadingContent) return  // cancelled or stale
             if (!url) {
-                watchScreen._isLoadingContent = false
+                watchScreen._clearLoading()
                 plex.launchContent(ratingKey)
                 return
             }
             if (viewOffsetMs > 0) {
-                watchScreen._isLoadingContent = false
+                watchScreen._clearLoading()
                 watchScreen._showResumeDialog(ratingKey, viewOffsetMs)
             } else {
                 watchScreen._launchMpv(ratingKey, 0)
-                // _isLoadingContent cleared by onMpvStarted
+                // _isLoadingContent / overlay cleared by onMpvStarted
             }
         }
     }
