@@ -50,6 +50,7 @@ class SettingsManager(QObject):
     """
 
     # One signal per property so Q_PROPERTY NOTIFY works correctly.
+    plexLoginStatus = Signal(str)
     romDirectoryChanged = Signal()
     retroarchCommandChanged = Signal()
     coresDirectoryChanged = Signal()
@@ -100,6 +101,7 @@ class SettingsManager(QObject):
         self._oauth_timer: Optional[QTimer] = None
         self._oauth_pin_id: Optional[int] = None
         self._oauth_poll_count: int = 0
+        self._login_mode: str = "browser"  # "browser" or "pin"
 
     # ------------------------------------------------------------------
     # Property getters
@@ -696,26 +698,72 @@ class SettingsManager(QObject):
 
         self._oauth_pin_id = pin_id
         self._oauth_poll_count = 0
+        self._login_mode = "browser"
 
         self._oauth_timer = QTimer(self)
         self._oauth_timer.setInterval(_OAUTH_POLL_INTERVAL_MS)
         self._oauth_timer.timeout.connect(self._poll_oauth_pin)
         self._oauth_timer.start()
 
+    @Slot()
+    def startPlexPinLogin(self) -> None:
+        """Start the PIN-based in-app Plex login flow.
+
+        1. Creates a PIN via PlexAccount.create_pin().
+        2. Emits plexLoginStatus("waiting:<code>") where <code> is the 4-char PIN.
+        3. Polls every 2 s (up to 120 s) for the auth token.
+        4. On success: stores token, emits plexTokenChanged, emits plexLoginStatus("success").
+        5. On timeout: emits plexLoginStatus("timeout").
+        6. On PIN creation failure: emits plexLoginStatus("error").
+        """
+        result = PlexAccount.create_pin()
+        if result is None:
+            logger.error("startPlexPinLogin: failed to create PIN")
+            self.plexLoginStatus.emit("error")
+            return
+
+        pin_id, code = result
+        logger.info("startPlexPinLogin: PIN created (pin_id=%s)", pin_id)
+
+        # Stop any previous polling timer before starting a new one.
+        if self._oauth_timer is not None:
+            self._oauth_timer.stop()
+
+        self._oauth_pin_id = pin_id
+        self._oauth_poll_count = 0
+        self._login_mode = "pin"
+
+        self._oauth_timer = QTimer(self)
+        self._oauth_timer.setInterval(_OAUTH_POLL_INTERVAL_MS)
+        self._oauth_timer.timeout.connect(self._poll_oauth_pin)
+        self._oauth_timer.start()
+
+        self.plexLoginStatus.emit(f"waiting:{code}")
+
+    @Slot()
+    def cancelPlexPinLogin(self) -> None:
+        """Cancel an in-progress PIN login. Emits plexLoginStatus("cancelled")."""
+        self._stop_oauth_timer()
+        self.plexLoginStatus.emit("cancelled")
+
     def _poll_oauth_pin(self) -> None:
         """Timer callback — check whether the user has completed OAuth login."""
         self._oauth_poll_count += 1
 
         if self._oauth_poll_count > _OAUTH_MAX_POLLS:
-            logger.warning("signInWithPlex: timed out waiting for OAuth token")
+            logger.warning("_poll_oauth_pin: timed out waiting for OAuth token")
             self._stop_oauth_timer()
+            if self._login_mode == "pin":
+                self.plexLoginStatus.emit("timeout")
             return
 
         token = PlexAccount.check_pin(self._oauth_pin_id)
         if token:
-            logger.info("signInWithPlex: received auth token")
+            logger.info("_poll_oauth_pin: received auth token")
             self._config.set_plex_token(token)
             self.plexTokenChanged.emit()
+            if self._login_mode == "pin":
+                self.plexLoginStatus.emit("success")
             self._stop_oauth_timer()
 
     def _stop_oauth_timer(self) -> None:
