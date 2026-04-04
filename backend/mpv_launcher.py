@@ -19,23 +19,25 @@ logger = logging.getLogger(__name__)
 # IPC socket path for communicating with a running MPV instance.
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
-_INPUT_CONF_VERSION = "3"
+_INPUT_CONF_VERSION = "14"
 _INPUT_CONF_CONTENT = """\
-# HTPC Station MPV input config v3
-# MPV gamepad key names (mpv --input-keylist | grep GAMEPAD)
-# Button layout: A=East (Accept/Play), B=South (Cancel/Quit)
+# HTPC Station MPV input config v14
+# Verified with mpv --input-test (user confirmed, no SDL override needed):
+#   A (east,  evdev 304) -> GAMEPAD_ACTION_DOWN   = wizard accept = pause
+#   B (south, evdev 305) -> GAMEPAD_ACTION_RIGHT  (unbound)
+#   X (north, evdev 307) -> GAMEPAD_ACTION_UP
+#   Y (west,  evdev 308) -> GAMEPAD_ACTION_LEFT
+#   Start (evdev 315)    -> GAMEPAD_START
+# L2/R2 are unbound — analog axis fires continuously while held, unusable.
 
-GAMEPAD_ACTION_RIGHT    cycle pause
-GAMEPAD_ACTION_DOWN     quit
+GAMEPAD_ACTION_DOWN     cycle pause
 GAMEPAD_DPAD_LEFT       seek -10
 GAMEPAD_DPAD_RIGHT      seek 10
 GAMEPAD_DPAD_UP         add volume 5
 GAMEPAD_DPAD_DOWN       add volume -5
-GAMEPAD_LEFT_TRIGGER    add chapter -1
-GAMEPAD_RIGHT_TRIGGER   add chapter 1
 GAMEPAD_LEFT_SHOULDER   cycle audio
 GAMEPAD_RIGHT_SHOULDER  show-text ${track-list} 3000
-GAMEPAD_ACTION_LEFT     script-message htpc-show-subs
+GAMEPAD_ACTION_LEFT     cycle sub
 GAMEPAD_ACTION_UP       show-progress
 GAMEPAD_START           quit
 """
@@ -176,6 +178,7 @@ class MpvLauncher(QObject):
             "--fullscreen",
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
+            "--input-gamepad=yes",
             f"--hwdec={hwdec}",
             "--hwdec-codecs=all",
             "--gpu-api=opengl",
@@ -202,6 +205,7 @@ class MpvLauncher(QObject):
             "--fullscreen",
             "--no-terminal",
             f"--input-conf={_INPUT_CONF_PATH}",
+            "--input-gamepad=yes",
             f"--hwdec={hwdec}",
             "--hwdec-codecs=all",
             "--gpu-api=opengl",
