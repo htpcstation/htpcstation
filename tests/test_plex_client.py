@@ -31,6 +31,12 @@ class TestClientIdentityHeaders:
         client = PlexClient("http://localhost:32400", "test-token", client_id="my-uuid-123")
         assert client._session.headers["X-Plex-Client-Identifier"] == "my-uuid-123"
 
+    def test_client_profile_extra_header_present(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        header = client._session.headers["X-Plex-Client-Profile-Extra"]
+        assert "video.bitDepth" in header
+        assert "upperBound" in header
+
 
 class TestReportTimeline:
     """Verify report_timeline sends correct params and never raises."""

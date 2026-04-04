@@ -62,6 +62,12 @@ class PlexClient:
                 "X-Plex-Platform": "Linux",
                 "X-Plex-Device": "PC",
                 "X-Plex-Device-Name": _get_device_name(),
+                "X-Plex-Client-Profile-Extra": (
+                    # Declare support for all video codecs up to 10-bit depth.
+                    # This tells Plex to prefer direct play over transcoding.
+                    "add-limitation(scope=videoCodec&scopeName=*"
+                    "&type=upperBound&name=video.bitDepth&value=10&isRequired=false)"
+                ),
             }
         )
         self._last_error: PlexErrorType = PlexErrorType.NONE
