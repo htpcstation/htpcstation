@@ -316,9 +316,12 @@ class TestPlexClientUrlAndHeaders:
 
             PlexClient("http://server:32400", "tok123")
 
-            mock_session.headers.update.assert_called_once_with(
-                {"X-Plex-Token": "tok123", "Accept": "application/json"}
-            )
+            mock_session.headers.update.assert_called_once()
+            call_headers = mock_session.headers.update.call_args[0][0]
+            assert call_headers["X-Plex-Token"] == "tok123"
+            assert call_headers["Accept"] == "application/json"
+            assert call_headers["X-Plex-Client-Identifier"] == "htpcstation"
+            assert call_headers["X-Plex-Product"] == "HTPC Station"
 
     def test_trailing_slash_stripped_from_server_url(self) -> None:
         from backend.plex_client import PlexClient

@@ -69,6 +69,7 @@ Window {
                         var item = subtitleModel.get(trackList.currentIndex)
                         if (item) {
                             plex.setMpvSubtitleTrack(item.trackId)
+                            plex.persistTrackSelection(item.trackId, "subtitle")
                             subtitleOverlay.hide()
                         }
                     } else if (event.key === Qt.Key_Escape) {

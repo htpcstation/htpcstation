@@ -1,0 +1,104 @@
+"""Tests for PlexTimelineReporter — heartbeat lifecycle and error handling."""
+
+from __future__ import annotations
+
+import time
+from unittest.mock import MagicMock, call, patch
+
+import pytest
+
+from backend.plex_timeline import PlexTimelineReporter, _HEARTBEAT_INTERVAL
+
+
+class TestTimelineReporterStart:
+    """Verify that starting the reporter sends an initial 'playing' report."""
+
+    def test_start_sends_playing_report(self) -> None:
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+
+        reporter.start(rating_key="123", duration_ms=100000, start_ms=0)
+        # Give the thread a moment to send the initial report
+        time.sleep(0.3)
+        reporter.stop()
+
+        # The initial report should be 'playing', the final should be 'stopped'
+        calls = mock_client.report_timeline.call_args_list
+        assert len(calls) >= 1
+        # First call should be 'playing'
+        assert calls[0][1]["state"] == "playing"
+        assert calls[0][1]["rating_key"] == "123"
+        assert calls[0][1]["duration_ms"] == 100000
+
+
+class TestTimelineReporterStop:
+    """Verify that stopping the reporter sends a 'stopped' report."""
+
+    def test_stop_sends_stopped_report(self) -> None:
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+
+        reporter.start(rating_key="456", duration_ms=200000)
+        time.sleep(0.3)
+        reporter.stop()
+
+        calls = mock_client.report_timeline.call_args_list
+        # Last call should be 'stopped'
+        assert calls[-1][1]["state"] == "stopped"
+
+
+class TestTimelineReporterPause:
+    """Verify that set_paused sends a 'paused' report."""
+
+    def test_set_paused_sends_paused_report(self) -> None:
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+
+        reporter.start(rating_key="789", duration_ms=300000)
+        time.sleep(0.3)
+        reporter.set_paused(True)
+        time.sleep(0.1)
+        reporter.stop()
+
+        states = [c[1]["state"] for c in mock_client.report_timeline.call_args_list]
+        assert "paused" in states
+
+
+class TestTimelineReporterHeartbeat:
+    """Verify that the heartbeat fires at the configured interval."""
+
+    def test_heartbeat_fires_at_interval(self) -> None:
+        mock_client = MagicMock()
+        reporter = PlexTimelineReporter(lambda: mock_client)
+
+        # Use a short interval for testing by patching the module constant
+        with patch("backend.plex_timeline._HEARTBEAT_INTERVAL", 0.2):
+            reporter.start(rating_key="111", duration_ms=500000)
+            time.sleep(0.8)
+            reporter.stop()
+
+        # Should have initial report + at least 2 heartbeats + stopped
+        calls = mock_client.report_timeline.call_args_list
+        assert len(calls) >= 4  # initial + 2-3 heartbeats + stopped
+
+
+class TestTimelineReporterNoClient:
+    """Verify no exception when client_factory returns None."""
+
+    def test_no_report_when_no_client(self) -> None:
+        reporter = PlexTimelineReporter(lambda: None)
+
+        # Should not raise
+        reporter.start(rating_key="999", duration_ms=100000)
+        time.sleep(0.3)
+        reporter.stop()
+        # If we get here without exception, the test passes
+
+
+class TestTimelineReporterStopIdempotent:
+    """Verify that calling stop() when not started is safe."""
+
+    def test_stop_when_not_started(self) -> None:
+        reporter = PlexTimelineReporter(lambda: None)
+        # Should not raise
+        reporter.stop()

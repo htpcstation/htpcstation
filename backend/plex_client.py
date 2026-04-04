@@ -7,12 +7,21 @@ All methods are safe to call from worker threads.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 10  # seconds
+
+
+def _get_device_name() -> str:
+    import socket
+    try:
+        return socket.gethostname()
+    except Exception:
+        return "htpcstation"
 
 
 class PlexClient:
@@ -23,14 +32,21 @@ class PlexClient:
     log a warning rather than raising.
     """
 
-    def __init__(self, server_url: str, token: str) -> None:
+    def __init__(self, server_url: str, token: str, client_id: str = "") -> None:
         self._server_url = server_url.rstrip("/")
         self._token = token
+        self._client_id = client_id or "htpcstation"
         self._session = requests.Session()
         self._session.headers.update(
             {
                 "X-Plex-Token": token,
                 "Accept": "application/json",
+                "X-Plex-Client-Identifier": self._client_id,
+                "X-Plex-Product": "HTPC Station",
+                "X-Plex-Version": "1.0.0",
+                "X-Plex-Platform": "Linux",
+                "X-Plex-Device": "PC",
+                "X-Plex-Device-Name": _get_device_name(),
             }
         )
         # Increase connection pool size to handle parallel EPG page fetches
@@ -198,6 +214,66 @@ class PlexClient:
         Returns: http://<server>:32400<thumb_path>?X-Plex-Token=<token>
         """
         return f"{self._server_url}{thumb_path}?X-Plex-Token={self._token}"
+
+    def report_timeline(
+        self,
+        rating_key: str,
+        state: str,
+        time_ms: int,
+        duration_ms: int,
+        session_id: str,
+    ) -> None:
+        """POST /:/timeline — playback heartbeat. Fire-and-forget; errors are ignored.
+
+        state: 'playing' | 'paused' | 'stopped' | 'buffering'
+        time_ms: current position in milliseconds
+        duration_ms: total duration in milliseconds
+        session_id: per-session UUID (stable for the lifetime of one playback)
+        """
+        try:
+            self._session.get(
+                f"{self._server_url}/:/timeline",
+                params={
+                    "ratingKey": rating_key,
+                    "key": f"/library/metadata/{rating_key}",
+                    "state": state,
+                    "time": time_ms,
+                    "duration": duration_ms,
+                    "identifier": "com.plexapp.plugins.library",
+                    "X-Plex-Session-Identifier": session_id,
+                },
+                timeout=5,
+            )
+        except Exception:  # noqa: BLE001
+            pass  # timeline reports are best-effort; never raise
+
+    def persist_stream_selection(
+        self,
+        part_id: int,
+        audio_stream_id: Optional[int] = None,
+        subtitle_stream_id: Optional[int] = None,
+    ) -> None:
+        """PUT /library/parts/{partId} — persist audio/subtitle track selection.
+
+        Writes the user's track choice to Plex metadata so it syncs to all
+        other Plex clients and survives resume.
+
+        audio_stream_id:    Plex stream ID for the audio track (from Media.Part.Stream[n].id)
+        subtitle_stream_id: Plex stream ID for the subtitle track (0 = disabled)
+        allParts=1 applies the selection to all media versions (1080p + 4K, etc.)
+        """
+        if not part_id:
+            return
+        params: dict = {"allParts": 1}
+        if audio_stream_id is not None:
+            params["audioStreamID"] = audio_stream_id
+        if subtitle_stream_id is not None:
+            params["subtitleStreamID"] = subtitle_stream_id
+        try:
+            url = f"{self._server_url}/library/parts/{part_id}"
+            self._session.put(url, params=params, timeout=_TIMEOUT)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("persist_stream_selection failed for part %d: %s", part_id, exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

@@ -30,6 +30,7 @@ from backend.mpv_ipc import MpvIpc
 from backend.mpv_launcher import MpvLauncher
 from backend.plex_account import PlexAccount
 from backend.plex_client import PlexClient
+from backend.plex_timeline import PlexTimelineReporter
 from backend.plex_models import (
     PlexArtist,
     PlexMovie,
@@ -483,7 +484,7 @@ class PlexLibrary(QObject):
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
     _artistsReady = Signal(list, int)  # (artists, total_size)
-    _mpvLaunchReady = Signal(str, str, int)  # url, title, start_ms
+    _mpvLaunchReady = Signal(str, str, int, int, int)  # url, title, start_ms, duration_ms, part_id
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
 
     def __init__(
@@ -524,6 +525,8 @@ class PlexLibrary(QObject):
 
         # Thread pool for network calls
         self._executor = ThreadPoolExecutor(max_workers=2)
+        # Dedicated thread pool for poster downloads (higher concurrency for LAN fetching)
+        self._poster_executor = ThreadPoolExecutor(max_workers=10)
 
         # Poster cache
         self._poster_cache = PosterCache(_POSTER_CACHE_DIR)
@@ -560,9 +563,33 @@ class PlexLibrary(QObject):
         self._mpv_launcher.processStarted.connect(self.mpvStarted)
         self._mpv_launcher.processFinished.connect(lambda _: self.mpvFinished.emit())
 
+        # MPV IPC for communicating with the running MPV instance
+        self._mpv_ipc = MpvIpc()
+
+        # Timeline reporter for Plex playback state
+        self._timeline_reporter = PlexTimelineReporter(lambda: self._client)
+        self._pending_play_rating_key: str = ""
+        self._current_play_rating_key: str = ""
+        self._current_play_duration_ms: int = 0
+        self._current_play_part_id: int = 0
+        self._pending_audio_id_map: dict[int, int] = {}
+        self._pending_sub_id_map: dict[int, int] = {}
+        self._audio_id_map: dict[int, int] = {}
+        self._sub_id_map: dict[int, int] = {}
+
+        # Connect MPV lifecycle to the timeline reporter
+        self._mpv_launcher.processStarted.connect(self._on_mpv_started_for_timeline)
+        self._mpv_launcher.processFinished.connect(self._on_mpv_finished_for_timeline)
+
         # Load My List from file and populate model
         items = self._load_my_list()
         self._rebuild_my_list_model(items)
+
+    def shutdown(self) -> None:
+        """Shut down thread pools. Call before application exit."""
+        self._timeline_reporter.stop()
+        self._executor.shutdown(wait=False, cancel_futures=True)
+        self._poster_executor.shutdown(wait=False, cancel_futures=True)
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -1063,27 +1090,50 @@ class PlexLibrary(QObject):
         if self._client is None:
             logger.warning("playWithMpv: no Plex client configured")
             return
+        self._pending_play_rating_key = rating_key
         client = self._client
         def _worker():
             url, _ = client.get_stream_url(rating_key)
             if not url:
-                self._mpvLaunchReady.emit("", "", 0)
+                self._mpvLaunchReady.emit("", "", 0, 0, 0)
                 return
             meta = client.get_metadata(rating_key)
             title = meta.get("title", "")
             grandparent = meta.get("grandparentTitle", "")
             if grandparent:
                 title = f"{grandparent} — {title}"
+            duration_ms = int(meta.get("duration", 0) or 0)
+            # Extract part_id and stream IDs for track persistence
+            media = meta.get("Media", [])
+            part_id = 0
+            parts = []
+            if media:
+                parts = media[0].get("Part", [])
+                if parts:
+                    part_id = int(parts[0].get("id", 0) or 0)
+            # Build MPV-track-id → Plex-stream-id mapping
+            streams = parts[0].get("Stream", []) if parts else []
+            audio_streams = [s for s in streams if s.get("streamType") == 2]
+            sub_streams = [s for s in streams if s.get("streamType") == 3]
+            audio_id_map = {i + 1: int(s.get("id", 0)) for i, s in enumerate(audio_streams)}
+            sub_id_map = {i + 1: int(s.get("id", 0)) for i, s in enumerate(sub_streams)}
+            self._pending_audio_id_map = audio_id_map
+            self._pending_sub_id_map = sub_id_map
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
-            self._mpvLaunchReady.emit(url, title, start_ms)
+            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id)
         self._executor.submit(_worker)
 
-    def _on_mpv_launch_ready(self, url: str, title: str, start_ms: int) -> None:
+    def _on_mpv_launch_ready(self, url: str, title: str, start_ms: int, duration_ms: int, part_id: int) -> None:
         """Launch MPV on the main thread after worker fetched stream info."""
         if not url:
             logger.warning("playWithMpv: no stream URL — cannot launch")
             self.mpvFinished.emit()  # clear loading state in QML
             return
+        self._current_play_rating_key = self._pending_play_rating_key
+        self._current_play_duration_ms = duration_ms
+        self._current_play_part_id = part_id
+        self._audio_id_map = self._pending_audio_id_map
+        self._sub_id_map = self._pending_sub_id_map
         self._mpv_launcher.launch(url, title, start_ms)
 
     @Slot(str)
@@ -1119,6 +1169,52 @@ class PlexLibrary(QObject):
     def setMpvSubtitleTrack(self, track_id: int) -> None:
         """Select a subtitle track in the running MPV instance. 0 = disable."""
         MpvIpc().set_subtitle_track(track_id)
+
+    @Slot(int, str)
+    def persistTrackSelection(self, mpv_track_id: int, track_type: str) -> None:
+        """Persist the user's track selection to Plex. Called from MpvSubtitleOverlay.
+
+        mpv_track_id: MPV's track ID (1-based, per type)
+        track_type: 'audio' or 'subtitle'
+        """
+        if self._client is None or not self._current_play_part_id:
+            return
+        client = self._client
+        part_id = self._current_play_part_id
+
+        if track_type == "audio":
+            plex_id = self._audio_id_map.get(mpv_track_id, 0)
+            if plex_id:
+                self._executor.submit(
+                    client.persist_stream_selection, part_id, plex_id, None
+                )
+        elif track_type == "subtitle":
+            if mpv_track_id == 0:
+                # Disabled — send subtitleStreamID=0
+                self._executor.submit(
+                    client.persist_stream_selection, part_id, None, 0
+                )
+            else:
+                plex_id = self._sub_id_map.get(mpv_track_id, 0)
+                if plex_id:
+                    self._executor.submit(
+                        client.persist_stream_selection, part_id, None, plex_id
+                    )
+
+    def _on_mpv_started_for_timeline(self) -> None:
+        """Start timeline reporting when MPV begins playing."""
+        if not self._current_play_rating_key:
+            return
+        self._timeline_reporter.start(
+            rating_key=self._current_play_rating_key,
+            duration_ms=self._current_play_duration_ms,
+            start_ms=0,  # MPV is already at the right position
+            mpv_ipc=self._mpv_ipc,
+        )
+
+    def _on_mpv_finished_for_timeline(self, exit_code: int) -> None:
+        """Stop timeline reporting when MPV exits."""
+        self._timeline_reporter.stop()
 
     @Slot(str, result="QVariant")
     def getArtist(self, rating_key: str) -> dict:
@@ -1554,9 +1650,21 @@ class PlexLibrary(QObject):
 
         if section_type == "movie":
             movies = [parse_movie(item) for item in items]
+            if self._poster_cache is not None:
+                for movie in movies:
+                    if movie.thumb_path:
+                        cached_path = self._poster_cache._cache_path(movie.thumb_path)
+                        if cached_path.exists():
+                            movie.poster_local = cached_path.as_uri()
             self._moviesReady.emit(movies, total)
         elif section_type == "show":
             shows = [parse_show(item) for item in items]
+            if self._poster_cache is not None:
+                for show in shows:
+                    if show.thumb_path:
+                        cached_path = self._poster_cache._cache_path(show.thumb_path)
+                        if cached_path.exists():
+                            show.poster_local = cached_path.as_uri()
             self._showsReady.emit(shows, total)
         elif section_type == "artist":
             artists = [parse_artist(item) for item in items]
@@ -1586,6 +1694,12 @@ class PlexLibrary(QObject):
                 content_rating=self._content_rating_filter,
             )
             movies = [parse_movie(item) for item in items]
+            if self._poster_cache is not None:
+                for movie in movies:
+                    if movie.thumb_path:
+                        cached_path = self._poster_cache._cache_path(movie.thumb_path)
+                        if cached_path.exists():
+                            movie.poster_local = cached_path.as_uri()
             self._moviesReady.emit(movies, total)
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load more movies: %s", exc)
@@ -1606,6 +1720,12 @@ class PlexLibrary(QObject):
                 content_rating=self._content_rating_filter,
             )
             shows = [parse_show(item) for item in items]
+            if self._poster_cache is not None:
+                for show in shows:
+                    if show.thumb_path:
+                        cached_path = self._poster_cache._cache_path(show.thumb_path)
+                        if cached_path.exists():
+                            show.poster_local = cached_path.as_uri()
             self._showsReady.emit(shows, total)
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load more shows: %s", exc)
@@ -1652,14 +1772,14 @@ class PlexLibrary(QObject):
         self._movies_total = total
         self._movies_loaded += len(movies)
 
-        # Kick off poster downloads for new items
+        # Kick off poster downloads only for items not already cached
         client = self._client
         if client is not None:
             start_row = self._movies_loaded - len(movies)
             for i, movie in enumerate(movies):
-                if movie.thumb_path:
+                if movie.thumb_path and not movie.poster_local:
                     row = start_row + i
-                    self._executor.submit(
+                    self._poster_executor.submit(
                         self._worker_fetch_poster, client, movie.thumb_path, "movie", row
                     )
 
@@ -1676,14 +1796,14 @@ class PlexLibrary(QObject):
         self._shows_total = total
         self._shows_loaded += len(shows)
 
-        # Kick off poster downloads for new items
+        # Kick off poster downloads only for items not already cached
         client = self._client
         if client is not None:
             start_row = self._shows_loaded - len(shows)
             for i, show in enumerate(shows):
-                if show.thumb_path:
+                if show.thumb_path and not show.poster_local:
                     row = start_row + i
-                    self._executor.submit(
+                    self._poster_executor.submit(
                         self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
 
@@ -1699,7 +1819,7 @@ class PlexLibrary(QObject):
         if client is not None:
             for i, artist in enumerate(artists):
                 if artist.thumb_path and not artist.poster_local:
-                    self._executor.submit(
+                    self._poster_executor.submit(
                         self._worker_fetch_poster, client, artist.thumb_path, "artist", i
                     )
 
@@ -1707,25 +1827,32 @@ class PlexLibrary(QObject):
         items = []
         for item in raw_items:
             item_type = item.get("type", "")
+            thumb_path = item.get("thumb", "")
+            # Pre-resolve cached poster
+            poster_local = ""
+            if thumb_path and self._poster_cache is not None:
+                cached_path = self._poster_cache._cache_path(thumb_path)
+                if cached_path.exists():
+                    poster_local = cached_path.as_uri()
             items.append({
                 "rating_key": str(item.get("ratingKey", "")),
                 "title": item.get("title", ""),
                 "type": item_type,
-                "poster_local": "",
+                "poster_local": poster_local,
                 "grandparent_title": item.get("grandparentTitle", ""),
                 "view_offset": int(item.get("viewOffset", 0) or 0),
                 "duration": int(item.get("duration", 0) or 0),
-                "thumb_path": item.get("thumb", ""),
+                "thumb_path": thumb_path,
             })
         self._on_deck_model.set_items(items)
         self.onDeckModelChanged.emit()
 
-        # Kick off poster downloads
+        # Download only missing posters
         client = self._client
         if client is not None:
             for i, item in enumerate(items):
-                if item.get("thumb_path"):
-                    self._executor.submit(
+                if item.get("thumb_path") and not item.get("poster_local"):
+                    self._poster_executor.submit(
                         self._worker_fetch_poster, client, item["thumb_path"], "ondeck", i
                     )
 
@@ -1945,7 +2072,7 @@ class PlexLibrary(QObject):
         # The PlexClient uses the admin token for server API calls because
         # managed/restricted users don't have direct server access.
         self._active_token = user_token
-        self._client = PlexClient(server_url, token)
+        self._client = PlexClient(server_url, token, client_id=self._config.plex_client_id)
         logger.info("PlexLibrary: client configured for %s", server_url)
 
     def _ensure_account(self) -> PlexAccount | None:

@@ -321,6 +321,8 @@ class TestPlayWithMpv:
             "http://server:32400/library/parts/456/0/file.mkv?X-Plex-Token=tok",
             "Test Movie",
             0,
+            0,
+            0,
         )
 
         mock_launcher.launch.assert_called_once_with(
@@ -353,6 +355,8 @@ class TestPlayWithMpv:
             "http://server:32400/library/parts/789/0/file.mkv?X-Plex-Token=tok",
             "My Show — Pilot",
             0,
+            0,
+            0,
         )
 
         mock_launcher.launch.assert_called_once_with(
@@ -382,6 +386,8 @@ class TestPlayWithMpv:
             "http://server:32400/library/parts/456/0/file.mkv?X-Plex-Token=tok",
             "Movie",
             60000,
+            0,
+            0,
         )
 
         mock_launcher.launch.assert_called_once_with(
@@ -414,8 +420,8 @@ class TestPlayWithMpv:
 
         lib.playWithMpv("999", 0)
         lib._executor.shutdown(wait=True)
-        # Worker emits _mpvLaunchReady("", "", 0); handler should not call launch
-        lib._on_mpv_launch_ready("", "", 0)
+        # Worker emits _mpvLaunchReady("", "", 0, 0, 0); handler should not call launch
+        lib._on_mpv_launch_ready("", "", 0, 0, 0)
 
         mock_launcher.launch.assert_not_called()
 
@@ -446,6 +452,8 @@ class TestPlayWithMpvFromStart:
         lib._on_mpv_launch_ready(
             "http://server:32400/library/parts/456/0/file.mkv?X-Plex-Token=tok",
             "Movie",
+            0,
+            0,
             0,
         )
 

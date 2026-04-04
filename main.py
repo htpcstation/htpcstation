@@ -112,6 +112,7 @@ def main() -> None:
     )
     engine.rootContext().setContextProperty("liveTV", live_tv)
     app.aboutToQuit.connect(live_tv.shutdown)
+    app.aboutToQuit.connect(plex_library.shutdown)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary()

@@ -241,6 +241,7 @@ class Config:
         self._plex_token: Optional[str] = None
         self._plex_server_id: Optional[str] = None
         self._plex_user_id: Optional[int] = None
+        self._plex_client_id: str = ""
         # Browser configuration
         self._browser_command: str = _DEFAULT_BROWSER_COMMAND
         # Moonlight configuration
@@ -321,6 +322,15 @@ class Config:
     def plex_user_id(self) -> Optional[int]:
         """Plex home user ID. None if not selected (uses admin account)."""
         return self._plex_user_id
+
+    @property
+    def plex_client_id(self) -> str:
+        """Stable UUID identifying this HTPC Station installation."""
+        if not self._plex_client_id:
+            import uuid
+            self._plex_client_id = str(uuid.uuid4())
+            self.save()
+        return self._plex_client_id
 
     @property
     def browser_command(self) -> str:
@@ -615,6 +625,7 @@ class Config:
                 "token": self._plex_token or "",
                 "server_id": self._plex_server_id or "",
                 "user_id": self._plex_user_id or 0,
+                "client_id": self._plex_client_id,
                 "music_library_key": self._music_library_key,
                 "player": self._plex_player,
             },
@@ -715,6 +726,7 @@ class Config:
             user_id = plex.get("user_id", 0)
             if user_id:
                 self._plex_user_id = int(user_id)
+            self._plex_client_id = plex.get("client_id", "")
             self._music_library_key = plex.get("music_library_key", "")
             player = plex.get("player", "mpv")
             if player in ("mpv", "browser"):
