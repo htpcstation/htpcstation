@@ -75,6 +75,11 @@ FocusScope {
         target: plex
         function onMpvStarted() { homeScreen._mpvRunning = true }
         function onMpvFinished() { homeScreen._mpvRunning = false }
+        function onSubtitlePickerRequested() {
+            if (homeScreen._mpvRunning) {
+                mpvSubtitleOverlay.showOverlay()
+            }
+        }
     }
 
     // ── Global music playback state ───────────────────────────────────────────
@@ -393,5 +398,11 @@ FocusScope {
             var item = tabRepeater.itemAt(0)
             if (item) item.forceActiveFocus()
         })
+    }
+
+    // ── Subtitle picker overlay (declared last for highest z-order) ───────────
+    MpvSubtitleOverlay {
+        id: mpvSubtitleOverlay
+        z: 100
     }
 }

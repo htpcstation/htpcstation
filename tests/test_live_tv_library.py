@@ -595,17 +595,15 @@ class TestGuideCache:
 def _make_live_tv_player(tmp_path: Path):
     """Create a LibMpvPlayer with set_wid() called, returning (player, mock_instance, set_items)."""
     from unittest.mock import PropertyMock
-    import backend.mpv_launcher as mpv_mod
     from backend.mpv_launcher import LibMpvPlayer
 
-    input_conf_path = tmp_path / "mpv" / "input.conf"
     mock_instance = MagicMock()
     type(mock_instance).core_idle = PropertyMock(return_value=True)
     set_items: dict = {}
     mock_instance.__setitem__.side_effect = lambda key, value: set_items.update({key: value})
+    mock_instance.on_key_press.return_value = lambda fn: fn
 
-    with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-         patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+    with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
          patch("backend.mpv_launcher.threading"):
         mock_mpv_module.MPV.return_value = mock_instance
         player = LibMpvPlayer()
@@ -651,14 +649,13 @@ class TestMpvLauncherLiveTv:
     def test_launch_live_tv_has_no_start_arg(self, tmp_path: Path) -> None:
         """launch_live_tv() does NOT set player.start (live streams start at live edge)."""
         from unittest.mock import PropertyMock
-        import backend.mpv_launcher as mpv_mod
         from backend.mpv_launcher import LibMpvPlayer
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
         mock_instance = MagicMock()
         type(mock_instance).core_idle = PropertyMock(return_value=True)
         set_items: dict = {}
         mock_instance.__setitem__.side_effect = lambda key, value: set_items.update({key: value})
+        mock_instance.on_key_press.return_value = lambda fn: fn
         set_attrs: dict = {}
 
         original_setattr = mock_instance.__class__.__setattr__
@@ -668,8 +665,7 @@ class TestMpvLauncherLiveTv:
                 set_attrs[name] = value
             original_setattr(obj, name, value)
 
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+        with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()
@@ -694,17 +690,15 @@ class TestMpvLauncherLiveTv:
     def test_launch_live_tv_noop_when_already_running(self, tmp_path: Path) -> None:
         """launch_live_tv() is a no-op when MPV is already playing."""
         from unittest.mock import PropertyMock
-        import backend.mpv_launcher as mpv_mod
         from backend.mpv_launcher import LibMpvPlayer
 
-        input_conf_path = tmp_path / "mpv" / "input.conf"
         mock_instance = MagicMock()
         # Simulate playing: core_idle=False
         type(mock_instance).core_idle = PropertyMock(return_value=False)
         mock_instance.__setitem__.side_effect = lambda key, value: None
+        mock_instance.on_key_press.return_value = lambda fn: fn
 
-        with patch.object(mpv_mod, "_INPUT_CONF_PATH", input_conf_path), \
-             patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+        with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()

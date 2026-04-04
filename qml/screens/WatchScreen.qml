@@ -122,7 +122,7 @@ FocusScope {
         _loadingOverlayVisible = true
         loadingOverlayTimer.restart()
         plex.playWithMpv(ratingKey, startMs)
-        // Overlay cleared by onMpvStarted → _clearLoading()
+        // Overlay cleared by onMpvPlaybackReady → _clearLoading()
     }
 
     function _playContent(ratingKey, knownViewOffset) {
@@ -946,10 +946,12 @@ FocusScope {
         }
     }
 
-    // ── MPV started handler — clear loading state ─────────────────────────────
+    // ── MPV playback handlers ─────────────────────────────────────────────────
     Connections {
         target: plex
-        function onMpvStarted() { watchScreen._clearLoading() }
+        function onMpvPlaybackReady() { watchScreen._clearLoading() }
+        function onMpvStarted() { /* keep for _mpvRunning flag in HomeScreen */ }
+        function onMpvFinished() { watchScreen._clearLoading() }
     }
 
     // ── Stream info ready handler — async response from fetchStreamInfo ──────
@@ -967,7 +969,7 @@ FocusScope {
                 watchScreen._showResumeDialog(ratingKey, viewOffsetMs)
             } else {
                 watchScreen._launchMpv(ratingKey, 0)
-                // _isLoadingContent / overlay cleared by onMpvStarted
+                // _isLoadingContent / overlay cleared by onMpvPlaybackReady
             }
         }
     }

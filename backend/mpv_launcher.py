@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from pathlib import Path
+import time
 from typing import Optional
 
 import mpv
@@ -22,29 +22,7 @@ logger = logging.getLogger(__name__)
 # Kept for MpvIpc compatibility (task 3 will migrate this).
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
-_INPUT_CONF_VERSION = "15"
-_INPUT_CONF_CONTENT = """\
-# HTPC Station MPV input config v15
-# Verified with mpv --input-test (user confirmed, no SDL override needed):
-#   A (east,  evdev 304) -> GAMEPAD_ACTION_DOWN   = wizard accept = pause
-#   B (south, evdev 305) -> GAMEPAD_ACTION_RIGHT  (unbound)
-#   X (north, evdev 307) -> GAMEPAD_ACTION_UP     = show-progress
-#   Y (west,  evdev 308) -> GAMEPAD_ACTION_LEFT   (unbound)
-#   Start (evdev 315)    -> GAMEPAD_START          = quit
-# L2/R2 are unbound — analog axis fires continuously while held, unusable.
-
-GAMEPAD_ACTION_DOWN     cycle pause
-GAMEPAD_DPAD_LEFT       seek -10
-GAMEPAD_DPAD_RIGHT      seek 10
-GAMEPAD_DPAD_UP         add volume 5
-GAMEPAD_DPAD_DOWN       add volume -5
-GAMEPAD_LEFT_SHOULDER   cycle audio
-GAMEPAD_RIGHT_SHOULDER  show-text ${track-list} 3000
-GAMEPAD_ACTION_UP       show-progress
-GAMEPAD_START           quit
-"""
-
-_INPUT_CONF_PATH = Path.home() / ".config" / "htpcstation" / "mpv" / "input.conf"
+_TRIGGER_DEBOUNCE = 0.5  # seconds — ignore L2/R2 repeats within this window
 
 
 def _mpv_log(level: str, prefix: str, text: str) -> None:
@@ -70,16 +48,19 @@ class LibMpvPlayer(QObject):
     Signals:
         processStarted — emitted when MPV begins playing (first frame ready).
         processFinished(exit_code) — emitted when playback ends (always 0).
+        mpvPlaybackStarted — emitted when first frame is ready (wait_until_playing).
+        subtitlePickerRequested — emitted when Y button is pressed during playback.
     """
 
     processStarted = Signal()
     processFinished = Signal(int)
+    mpvPlaybackStarted = Signal()
+    subtitlePickerRequested = Signal()
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._player: Optional[mpv.MPV] = None
         self._is_live_tv: bool = False
-        self._ensure_input_conf()
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,7 +87,6 @@ class LibMpvPlayer(QObject):
             fullscreen="yes",
             input_gamepad="yes",
             cache="yes",
-            input_conf=str(_INPUT_CONF_PATH),
             log_handler=_mpv_log,
             loglevel="warn",
         )
@@ -136,6 +116,9 @@ class LibMpvPlayer(QObject):
                 "_emit_finished",
                 Qt.ConnectionType.QueuedConnection,
             )
+
+        # Register programmatic keybinds (replaces input.conf)
+        self._setup_keybinds()
 
         logger.info("LibMpvPlayer: MPV instance created (wid=%d)", wid)
 
@@ -169,9 +152,14 @@ class LibMpvPlayer(QObject):
         # Wait for playback to start on a daemon thread, then signal main thread
         def _wait_and_signal() -> None:
             try:
-                self._player.wait_until_playing()
+                self._player.wait_until_playing(timeout=30)
+                QMetaObject.invokeMethod(
+                    self,
+                    "_on_playback_started",
+                    Qt.ConnectionType.QueuedConnection,
+                )
             except Exception:  # noqa: BLE001
-                pass
+                pass  # timeout or shutdown — processStarted already handles cleanup
             QMetaObject.invokeMethod(
                 self,
                 "_emit_started",
@@ -215,7 +203,12 @@ class LibMpvPlayer(QObject):
 
         def _wait_and_signal() -> None:
             try:
-                self._player.wait_until_playing()
+                self._player.wait_until_playing(timeout=30)
+                QMetaObject.invokeMethod(
+                    self,
+                    "_on_playback_started",
+                    Qt.ConnectionType.QueuedConnection,
+                )
             except Exception:  # noqa: BLE001
                 pass
             QMetaObject.invokeMethod(
@@ -264,9 +257,74 @@ class LibMpvPlayer(QObject):
     def _emit_finished(self) -> None:
         self.processFinished.emit(0)
 
+    @Slot()
+    def _on_playback_started(self) -> None:
+        self.mpvPlaybackStarted.emit()
+
+    @Slot()
+    def _request_subtitle_picker(self) -> None:
+        self.subtitlePickerRequested.emit()
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _setup_keybinds(self) -> None:
+        """Register all gamepad keybinds programmatically.
+
+        Replaces input.conf. Verified button names from mpv --input-test
+        on 8BitDo Micro D-input (Bluetooth):
+          GAMEPAD_ACTION_DOWN  = A (east, evdev 304) = wizard accept
+          GAMEPAD_ACTION_RIGHT = B (south, evdev 305) = unbound
+          GAMEPAD_ACTION_UP    = X (north, evdev 307)
+          GAMEPAD_ACTION_LEFT  = Y (west, evdev 308)
+          GAMEPAD_START        = Start (evdev 315)
+        """
+        binds = [
+            ("GAMEPAD_ACTION_DOWN",    "cycle pause"),
+            ("GAMEPAD_DPAD_LEFT",      "seek -10"),
+            ("GAMEPAD_DPAD_RIGHT",     "seek 10"),
+            ("GAMEPAD_DPAD_UP",        "add volume 5"),
+            ("GAMEPAD_DPAD_DOWN",      "add volume -5"),
+            ("GAMEPAD_LEFT_SHOULDER",  "cycle audio"),
+            ("GAMEPAD_RIGHT_SHOULDER", "show-text ${track-list} 3000"),
+            ("GAMEPAD_ACTION_UP",      "show-progress"),
+            ("GAMEPAD_START",          "quit"),
+            # GAMEPAD_ACTION_LEFT (Y) handled via Python callback — see subtitle picker
+            # GAMEPAD_LEFT_TRIGGER / GAMEPAD_RIGHT_TRIGGER handled via key press handlers
+        ]
+        for key, cmd in binds:
+            self._player.keybind(key, cmd)
+
+        # Y button — emit signal to QML on main thread for subtitle picker
+        @self._player.on_key_press("GAMEPAD_ACTION_LEFT")
+        def _on_y_pressed():
+            QMetaObject.invokeMethod(
+                self, "_request_subtitle_picker", Qt.ConnectionType.QueuedConnection
+            )
+
+        # L2/R2 debounce — use on_key_press with debounce to avoid runaway seeks
+        _last_l2_time = [0.0]
+        _last_r2_time = [0.0]
+
+        @self._player.on_key_press("GAMEPAD_LEFT_TRIGGER")
+        def _on_l2():
+            now = time.monotonic()
+            if now - _last_l2_time[0] < _TRIGGER_DEBOUNCE:
+                return
+            _last_l2_time[0] = now
+            self._player.seek(-30, "relative+keyframes")
+
+        @self._player.on_key_press("GAMEPAD_RIGHT_TRIGGER")
+        def _on_r2():
+            now = time.monotonic()
+            if now - _last_r2_time[0] < _TRIGGER_DEBOUNCE:
+                return
+            _last_r2_time[0] = now
+            self._player.seek(30, "relative+keyframes")
+
+        # Store references to prevent garbage collection
+        self._keybind_callbacks = (_on_y_pressed, _on_l2, _on_r2)
 
     @staticmethod
     def _gpu_context() -> str:
@@ -293,22 +351,3 @@ class LibMpvPlayer(QObject):
         if session == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
             return "vaapi-copy"
         return "vaapi"
-
-    def _ensure_input_conf(self) -> None:
-        """Write the default MPV input.conf, updating it if the version is outdated."""
-        if _INPUT_CONF_PATH.exists():
-            # Check version header — overwrite if outdated
-            try:
-                first_line = _INPUT_CONF_PATH.read_text(encoding="utf-8").split("\n")[0]
-                if f"v{_INPUT_CONF_VERSION}" in first_line:
-                    return  # up to date
-            except OSError:
-                pass
-            # Outdated or unreadable — overwrite
-            logger.info("LibMpvPlayer: updating input.conf to v%s", _INPUT_CONF_VERSION)
-        try:
-            _INPUT_CONF_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _INPUT_CONF_PATH.write_text(_INPUT_CONF_CONTENT, encoding="utf-8")
-            logger.info("LibMpvPlayer: wrote input.conf at %s", _INPUT_CONF_PATH)
-        except OSError as exc:
-            logger.warning("LibMpvPlayer: failed to write input.conf: %s", exc)
