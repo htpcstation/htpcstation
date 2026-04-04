@@ -79,7 +79,10 @@ FocusScope {
     property bool _resumeDialogVisible: false
     property string _resumeRatingKey: ""
     property int _resumeViewOffset: 0   // ms
-    property int _resumeSavedIndex: -1
+    // Per-section focus memory: keys are selectedLibraryType strings
+    // ("movie", "show", "ondeck", "mylist") plus "show-episode" for the
+    // episode list inside a show detail view.
+    property var _focusMemory: ({})
 
     function _formatDuration(ms) {
         var s = Math.floor(ms / 1000)
@@ -90,18 +93,21 @@ FocusScope {
     }
 
     function _showResumeDialog(ratingKey, viewOffsetMs) {
-        // Save current index so cancel can restore it
-        _resumeSavedIndex = -1
+        // Save current index into per-section focus memory so cancel can restore it
         if (currentView === "content") {
+            var mem = _focusMemory
             if (selectedLibraryType === "movie") {
-                _resumeSavedIndex = (_viewMode === "list") ? movieList.currentIndex : movieGrid.currentIndex
+                mem["movie"] = (_viewMode === "list") ? movieList.currentIndex : movieGrid.currentIndex
             } else if (selectedLibraryType === "ondeck") {
-                _resumeSavedIndex = (_viewMode === "list") ? onDeckList.currentIndex : onDeckGrid.currentIndex
+                mem["ondeck"] = (_viewMode === "list") ? onDeckList.currentIndex : onDeckGrid.currentIndex
             } else if (selectedLibraryType === "mylist") {
-                _resumeSavedIndex = (_viewMode === "list") ? myListListView.currentIndex : myListGridView.currentIndex
+                mem["mylist"] = (_viewMode === "list") ? myListListView.currentIndex : myListGridView.currentIndex
             }
+            _focusMemory = mem
         } else if (currentView === "detail" && selectedLibraryType === "show") {
-            _resumeSavedIndex = showDetail.episodeCurrentIndex
+            var mem = _focusMemory
+            mem["show-episode"] = showDetail.episodeCurrentIndex
+            _focusMemory = mem
         }
 
         _resumeRatingKey = ratingKey
@@ -474,6 +480,9 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onMovieSelected: (ratingKey, index) => {
+            var mem = watchScreen._focusMemory
+            mem["movie"] = movieGrid.currentIndex
+            watchScreen._focusMemory = mem
             watchScreen.selectedRatingKey = ratingKey
             watchScreen.selectedMovieIndex = index
             watchScreen.selectedMovieData = plex.getMovie(ratingKey)
@@ -499,7 +508,12 @@ FocusScope {
         movieData: watchScreen.selectedMovieData
 
         onBack: {
+            var savedIdx = watchScreen._focusMemory["movie"]
             watchScreen.currentView = "content"
+            if (savedIdx !== undefined) {
+                if (watchScreen._viewMode === "list") movieList.currentIndex = savedIdx
+                else movieGrid.currentIndex = savedIdx
+            }
         }
 
         onPlay: (ratingKey) => {
@@ -544,6 +558,9 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onShowSelected: (ratingKey) => {
+            var mem = watchScreen._focusMemory
+            mem["show"] = showGrid.currentIndex
+            watchScreen._focusMemory = mem
             watchScreen.selectedShowRatingKey = ratingKey
             watchScreen.currentView = "detail"
         }
@@ -567,7 +584,12 @@ FocusScope {
         showRatingKey: watchScreen.selectedShowRatingKey
 
         onBack: {
+            var savedIdx = watchScreen._focusMemory["show"]
             watchScreen.currentView = "content"
+            if (savedIdx !== undefined) {
+                if (watchScreen._viewMode === "list") showList.currentIndex = savedIdx
+                else showGrid.currentIndex = savedIdx
+            }
         }
 
         onPlayEpisode: (ratingKey) => {
@@ -612,6 +634,9 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onMovieSelected: (ratingKey, index) => {
+            var mem = watchScreen._focusMemory
+            mem["movie"] = movieList.currentIndex
+            watchScreen._focusMemory = mem
             watchScreen.selectedRatingKey = ratingKey
             watchScreen.selectedMovieIndex = index
             watchScreen.selectedMovieData = plex.getMovie(ratingKey)
@@ -636,6 +661,9 @@ FocusScope {
         _viewMode: watchScreen._viewMode
 
         onShowSelected: (ratingKey) => {
+            var mem = watchScreen._focusMemory
+            mem["show"] = showList.currentIndex
+            watchScreen._focusMemory = mem
             watchScreen.selectedShowRatingKey = ratingKey
             watchScreen.currentView = "detail"
         }
@@ -795,31 +823,37 @@ FocusScope {
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 watchScreen._resumeDialogVisible = false
-                // Restore previously focused index (set suppress flag to prevent onActiveFocusChanged reset)
-                if (watchScreen._resumeSavedIndex >= 0) {
-                    if (watchScreen.currentView === "content") {
-                        if (watchScreen.selectedLibraryType === "movie") {
-                            if (watchScreen._viewMode === "list") movieList.currentIndex = watchScreen._resumeSavedIndex
-                            else movieGrid.currentIndex = watchScreen._resumeSavedIndex
-                        } else if (watchScreen.selectedLibraryType === "ondeck") {
+                // Restore previously focused index from per-section memory
+                // (set suppress flag to prevent onActiveFocusChanged reset for ondeck/mylist)
+                if (watchScreen.currentView === "content") {
+                    var key = watchScreen.selectedLibraryType
+                    var savedIdx = watchScreen._focusMemory[key]
+                    if (savedIdx !== undefined) {
+                        if (key === "movie") {
+                            if (watchScreen._viewMode === "list") movieList.currentIndex = savedIdx
+                            else movieGrid.currentIndex = savedIdx
+                        } else if (key === "ondeck") {
                             if (watchScreen._viewMode === "list") {
                                 onDeckList._suppressIndexReset = true
-                                onDeckList.currentIndex = watchScreen._resumeSavedIndex
+                                onDeckList.currentIndex = savedIdx
                             } else {
                                 onDeckGrid._suppressIndexReset = true
-                                onDeckGrid.currentIndex = watchScreen._resumeSavedIndex
+                                onDeckGrid.currentIndex = savedIdx
                             }
-                        } else if (watchScreen.selectedLibraryType === "mylist") {
+                        } else if (key === "mylist") {
                             if (watchScreen._viewMode === "list") {
                                 myListListView._suppressIndexReset = true
-                                myListListView.currentIndex = watchScreen._resumeSavedIndex
+                                myListListView.currentIndex = savedIdx
                             } else {
                                 myListGridView._suppressIndexReset = true
-                                myListGridView.currentIndex = watchScreen._resumeSavedIndex
+                                myListGridView.currentIndex = savedIdx
                             }
                         }
-                    } else if (watchScreen.currentView === "detail" && watchScreen.selectedLibraryType === "show") {
-                        showDetail.episodeCurrentIndex = watchScreen._resumeSavedIndex
+                    }
+                } else if (watchScreen.currentView === "detail" && watchScreen.selectedLibraryType === "show") {
+                    var savedIdx = watchScreen._focusMemory["show-episode"]
+                    if (savedIdx !== undefined) {
+                        showDetail.episodeCurrentIndex = savedIdx
                     }
                 }
                 watchScreen._routeFocus()
