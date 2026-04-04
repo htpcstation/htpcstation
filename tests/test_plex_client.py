@@ -1,12 +1,13 @@
-"""Tests for PlexClient — identity headers, timeline reporting, track persistence."""
+"""Tests for PlexClient — identity headers, timeline reporting, track persistence, retry logic."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
-from backend.plex_client import PlexClient
+from backend.plex_client import PlexClient, PlexErrorType
 
 
 class TestClientIdentityHeaders:
@@ -309,3 +310,161 @@ class TestGetMarkers:
         assert result["intro_start_ms"] == 1000
         assert result["intro_end_ms"] == 60000
         assert result["credits_start_ms"] == 3000000
+
+
+# ---------------------------------------------------------------------------
+# PlexClient._get — retry logic and error classification
+# ---------------------------------------------------------------------------
+
+
+class TestGetRetryLogic:
+    """Verify _get() retries transient errors and classifies error types."""
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_retries_on_500(self, mock_sleep: MagicMock) -> None:
+        """Mock _session.get to return 500 twice then 200; verify 3 calls and result returned."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        # Build mock responses: 500, 500, 200
+        resp_500_1 = MagicMock()
+        resp_500_1.status_code = 500
+        resp_500_1.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=resp_500_1
+        )
+
+        resp_500_2 = MagicMock()
+        resp_500_2.status_code = 500
+        resp_500_2.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=resp_500_2
+        )
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {"MediaContainer": {"data": "ok"}}
+
+        client._session.get = MagicMock(side_effect=[resp_500_1, resp_500_2, resp_200])
+
+        result = client._get("/test")
+
+        assert result == {"MediaContainer": {"data": "ok"}}
+        assert client._session.get.call_count == 3
+        assert client._last_error == PlexErrorType.NONE
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_no_retry_on_401(self, mock_sleep: MagicMock) -> None:
+        """Mock returns 401; verify only 1 call made, returns None, _last_error == AUTH."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        resp_401 = MagicMock()
+        resp_401.status_code = 401
+        resp_401.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=resp_401
+        )
+
+        client._session.get = MagicMock(side_effect=[resp_401])
+
+        result = client._get("/test")
+
+        assert result is None
+        assert client._session.get.call_count == 1
+        assert client._last_error == PlexErrorType.AUTH
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_no_retry_on_404(self, mock_sleep: MagicMock) -> None:
+        """Mock returns 404; verify only 1 call, _last_error == NOT_FOUND."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        resp_404 = MagicMock()
+        resp_404.status_code = 404
+        resp_404.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=resp_404
+        )
+
+        client._session.get = MagicMock(side_effect=[resp_404])
+
+        result = client._get("/test")
+
+        assert result is None
+        assert client._session.get.call_count == 1
+        assert client._last_error == PlexErrorType.NOT_FOUND
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_retries_on_connection_error(self, mock_sleep: MagicMock) -> None:
+        """Mock raises ConnectionError twice then succeeds; verify 3 calls."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {"MediaContainer": {"ok": True}}
+
+        client._session.get = MagicMock(side_effect=[
+            requests.exceptions.ConnectionError("refused"),
+            requests.exceptions.ConnectionError("refused"),
+            resp_200,
+        ])
+
+        result = client._get("/test")
+
+        assert result == {"MediaContainer": {"ok": True}}
+        assert client._session.get.call_count == 3
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_calls_error_callback(self, mock_sleep: MagicMock) -> None:
+        """Register callback, mock returns 401; verify callback called with PlexErrorType.AUTH."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        callback = MagicMock()
+        client.set_error_callback(callback)
+
+        resp_401 = MagicMock()
+        resp_401.status_code = 401
+        resp_401.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            response=resp_401
+        )
+
+        client._session.get = MagicMock(side_effect=[resp_401])
+
+        client._get("/test")
+
+        callback.assert_called_once_with(PlexErrorType.AUTH)
+
+    @patch("backend.plex_client.time.sleep")
+    def test_get_handles_retry_after_header(self, mock_sleep: MagicMock) -> None:
+        """Mock returns 429 with Retry-After: 0; verify retried."""
+        client = PlexClient("http://localhost:32400", "test-token")
+
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        resp_429.headers = {"Retry-After": "0"}
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {"MediaContainer": {"ok": True}}
+
+        client._session.get = MagicMock(side_effect=[resp_429, resp_200])
+
+        result = client._get("/test")
+
+        assert result == {"MediaContainer": {"ok": True}}
+        assert client._session.get.call_count == 2
+
+    @patch("backend.plex_client.time.sleep")
+    def test_last_error_cleared_on_success(self, mock_sleep: MagicMock) -> None:
+        """Set _last_error to AUTH, then mock returns 200; verify _last_error == NONE."""
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._last_error = PlexErrorType.AUTH
+
+        resp_200 = MagicMock()
+        resp_200.status_code = 200
+        resp_200.raise_for_status.return_value = None
+        resp_200.json.return_value = {"MediaContainer": {}}
+
+        client._session.get = MagicMock(return_value=resp_200)
+
+        result = client._get("/test")
+
+        assert result == {"MediaContainer": {}}
+        assert client._last_error == PlexErrorType.NONE

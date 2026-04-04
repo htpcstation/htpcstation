@@ -471,6 +471,7 @@ class PlexLibrary(QObject):
     artistsModelChanged = Signal()
     currentLibraryChanged = Signal(str)
     myListChanged = Signal(bool)   # True = added, False = removed
+    plexError = Signal(str)  # error type string: "auth", "not_found", "server", "network", "unknown"
     mpvStarted = Signal()
     mpvFinished = Signal()
     streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
@@ -1637,6 +1638,14 @@ class PlexLibrary(QObject):
         return ""
 
     # ------------------------------------------------------------------
+    # Internal: error callback (called on worker thread)
+    # ------------------------------------------------------------------
+
+    def _on_plex_error(self, error_type) -> None:
+        """Called on worker thread when a Plex API request fails."""
+        self.plexError.emit(error_type.value)
+
+    # ------------------------------------------------------------------
     # Internal: worker thread functions
     # ------------------------------------------------------------------
 
@@ -2128,6 +2137,7 @@ class PlexLibrary(QObject):
         # managed/restricted users don't have direct server access.
         self._active_token = user_token
         self._client = PlexClient(server_url, token, client_id=self._config.plex_client_id)
+        self._client.set_error_callback(self._on_plex_error)
         logger.info("PlexLibrary: client configured for %s", server_url)
 
     def _ensure_account(self) -> PlexAccount | None:

@@ -6,14 +6,29 @@ All methods are safe to call from worker threads.
 
 from __future__ import annotations
 
+import enum
 import logging
-from typing import Optional
+import time
+from typing import Callable, Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = 10  # seconds
+
+_TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+_MAX_RETRIES = 2
+_RETRY_BACKOFF = [1.0, 3.0]  # seconds between retries
+
+
+class PlexErrorType(enum.Enum):
+    NONE = "none"
+    AUTH = "auth"           # 401, 403
+    NOT_FOUND = "not_found" # 404
+    SERVER = "server"       # 500-599
+    NETWORK = "network"     # ConnectionError, Timeout
+    UNKNOWN = "unknown"     # anything else
 
 
 def _get_device_name() -> str:
@@ -49,11 +64,21 @@ class PlexClient:
                 "X-Plex-Device-Name": _get_device_name(),
             }
         )
+        self._last_error: PlexErrorType = PlexErrorType.NONE
+        self._on_error: Optional[Callable[[PlexErrorType], None]] = None
+
         # Increase connection pool size to handle parallel EPG page fetches
         # (default is 10; Live TV fetches up to 10 pages concurrently).
         adapter = requests.adapters.HTTPAdapter(pool_connections=2, pool_maxsize=12)
         self._session.mount("https://", adapter)
         self._session.mount("http://", adapter)
+
+    def set_error_callback(self, callback: Callable[[PlexErrorType], None]) -> None:
+        """Register a callback invoked whenever a request fails.
+
+        Called on the worker thread — callback must be thread-safe (e.g. emit a Qt signal).
+        """
+        self._on_error = callback
 
     # ------------------------------------------------------------------
     # Public API
@@ -364,18 +389,78 @@ class PlexClient:
     # ------------------------------------------------------------------
 
     def _get(self, path: str, params: dict | None = None) -> dict | None:
-        """Perform a GET request and return the parsed JSON, or None on error."""
+        """Perform a GET request and return the parsed JSON, or None on error.
+
+        Retries up to _MAX_RETRIES times for transient errors (429, 5xx, network).
+        Permanent errors (401, 403, 404) are not retried.
+        On any error, sets _last_error and calls _on_error callback if registered.
+        Return type is unchanged — all callers continue to work without modification.
+        """
         url = f"{self._server_url}{path}"
-        try:
-            response = self._session.get(url, params=params, timeout=_TIMEOUT)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.ConnectionError as exc:
-            logger.warning("Plex connection error for %s: %s", url, exc)
-        except requests.exceptions.Timeout:
-            logger.warning("Plex request timed out for %s", url)
-        except requests.exceptions.HTTPError as exc:
-            logger.warning("Plex HTTP error for %s: %s", url, exc)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Plex unexpected error for %s: %s", url, exc)
+        last_exc = None
+
+        for attempt in range(_MAX_RETRIES + 1):
+            if attempt > 0:
+                delay = _RETRY_BACKOFF[attempt - 1]
+                logger.info("Plex retry %d/%d for %s (waiting %.1fs)", attempt, _MAX_RETRIES, url, delay)
+                time.sleep(delay)
+            try:
+                response = self._session.get(url, params=params, timeout=_TIMEOUT)
+
+                # Check for Retry-After header on 429
+                if response.status_code == 429:
+                    retry_after = float(response.headers.get("Retry-After", _RETRY_BACKOFF[0]))
+                    logger.warning("Plex rate limited for %s, retry after %.1fs", url, retry_after)
+                    if attempt < _MAX_RETRIES:
+                        time.sleep(min(retry_after, 30.0))
+                        continue
+                    self._set_error(PlexErrorType.SERVER)
+                    return None
+
+                response.raise_for_status()
+                self._last_error = PlexErrorType.NONE
+                return response.json()
+
+            except requests.exceptions.HTTPError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                logger.warning("Plex HTTP error for %s: %s", url, exc)
+                if status in (401, 403):
+                    self._set_error(PlexErrorType.AUTH)
+                    return None  # permanent — no retry
+                if status == 404:
+                    self._set_error(PlexErrorType.NOT_FOUND)
+                    return None  # permanent — no retry
+                if status in _TRANSIENT_STATUS_CODES:
+                    last_exc = exc
+                    continue  # retry
+                self._set_error(PlexErrorType.SERVER)
+                return None
+
+            except requests.exceptions.ConnectionError as exc:
+                logger.warning("Plex connection error for %s: %s", url, exc)
+                last_exc = exc
+                # retry
+
+            except requests.exceptions.Timeout:
+                logger.warning("Plex request timed out for %s", url)
+                last_exc = Exception("timeout")
+                # retry
+
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Plex unexpected error for %s: %s", url, exc)
+                self._set_error(PlexErrorType.UNKNOWN)
+                return None
+
+        # All retries exhausted
+        logger.warning("Plex request failed after %d retries for %s", _MAX_RETRIES, url)
+        self._set_error(PlexErrorType.NETWORK)
         return None
+
+    def _set_error(self, error_type: PlexErrorType) -> None:
+        """Record the error type and invoke the callback if registered."""
+        self._last_error = error_type
+        if self._on_error is not None:
+            try:
+                self._on_error(error_type)
+            except Exception:  # noqa: BLE001
+                pass

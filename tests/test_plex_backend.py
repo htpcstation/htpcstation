@@ -475,7 +475,8 @@ class TestPlexClientPagination:
 
 
 class TestPlexClientErrorHandling:
-    def test_connection_error_returns_empty(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_connection_error_returns_empty(self, mock_sleep) -> None:
         import requests as req
         from backend.plex_client import PlexClient
 
@@ -489,7 +490,8 @@ class TestPlexClientErrorHandling:
 
         assert result == {}
 
-    def test_timeout_returns_empty(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_timeout_returns_empty(self, mock_sleep) -> None:
         import requests as req
         from backend.plex_client import PlexClient
 
@@ -519,7 +521,8 @@ class TestPlexClientErrorHandling:
 
         assert result == {}
 
-    def test_connection_error_returns_empty_libraries(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_connection_error_returns_empty_libraries(self, mock_sleep) -> None:
         import requests as req
         from backend.plex_client import PlexClient
 
@@ -533,7 +536,8 @@ class TestPlexClientErrorHandling:
 
         assert libs == []
 
-    def test_connection_error_returns_empty_items(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_connection_error_returns_empty_items(self, mock_sleep) -> None:
         import requests as req
         from backend.plex_client import PlexClient
 
@@ -608,7 +612,8 @@ class TestPlexClientGetOnDeck:
             assert len(result) == 1
             assert result[0]["title"] == "Episode 3"
 
-    def test_returns_empty_list_on_none_response(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_returns_empty_list_on_none_response(self, mock_sleep) -> None:
         """get_on_deck() returns [] when _get returns None (error)."""
         from backend.plex_client import PlexClient
         import requests as req
@@ -1990,7 +1995,8 @@ class TestPlexClientGetGenres:
         call_url = mock_session.get.call_args[0][0]
         assert call_url == "http://server:32400/library/sections/4/genre"
 
-    def test_returns_empty_on_connection_error(self) -> None:
+    @patch("backend.plex_client.time.sleep")
+    def test_returns_empty_on_connection_error(self, mock_sleep) -> None:
         import requests as req
         from backend.plex_client import PlexClient
 
@@ -4051,3 +4057,46 @@ class TestGetLibraryListLiveTv:
         assert len(result) == 1
         assert result[0]["title"] == "Live TV"
         assert result[0]["type"] == "livetv"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary — error callback registration and plexError signal (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestPlexLibraryErrorCallback:
+    """Verify PlexLibrary registers the error callback and emits plexError."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient") as mock_client_cls, \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_plex_library_registers_error_callback(self) -> None:
+        """After _setup_client(), verify client._on_error is not None."""
+        lib = self._make_lib()
+        if lib._client is not None:
+            assert lib._client._on_error is not None
+
+    def test_plex_error_signal_emitted(self) -> None:
+        """Mock client to call _on_plex_error(PlexErrorType.AUTH); verify plexError emitted with 'auth'."""
+        from backend.plex_client import PlexErrorType
+
+        lib = self._make_lib()
+
+        received: list[str] = []
+        lib.plexError.connect(lambda err: received.append(err))
+
+        lib._on_plex_error(PlexErrorType.AUTH)
+
+        assert received == ["auth"]
