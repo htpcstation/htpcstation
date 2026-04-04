@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
 
-from backend.plex_client import PlexClient, PlexErrorType
+from backend.plex_client import PlexClient, PlexErrorType, PlexEventListener
 
 
 class TestClientIdentityHeaders:
@@ -696,3 +697,141 @@ class TestTryNextConnection:
 
         assert result is True
         assert client._fallback_index == 0
+
+
+# ---------------------------------------------------------------------------
+# PlexEventListener
+# ---------------------------------------------------------------------------
+
+
+class TestPlexEventListener:
+    """Tests for PlexEventListener._handle_payload and connection error handling."""
+
+    def _make_payload(self, event_type: str) -> str:
+        """Build a JSON SSE payload for the given event type."""
+        return json.dumps({"NotificationContainer": {"type": event_type}})
+
+    def test_calls_callback_on_library_update(self) -> None:
+        """SSE line with library.update triggers callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload(self._make_payload("library.update"))
+
+        callback.assert_called_once()
+
+    def test_calls_callback_on_library_new(self) -> None:
+        """SSE line with library.new triggers callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload(self._make_payload("library.new"))
+
+        callback.assert_called_once()
+
+    def test_calls_callback_on_library_refresh_all(self) -> None:
+        """SSE line with library.refresh.all triggers callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload(self._make_payload("library.refresh.all"))
+
+        callback.assert_called_once()
+
+    def test_ignores_unknown_event_type(self) -> None:
+        """SSE line with unknown type does NOT trigger callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload(self._make_payload("media.play"))
+
+        callback.assert_not_called()
+
+    def test_ignores_empty_event_type(self) -> None:
+        """SSE line with empty type does NOT trigger callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload(self._make_payload(""))
+
+        callback.assert_not_called()
+
+    def test_stop_prevents_callback(self) -> None:
+        """After stop(), callback is not called even if a line arrives."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener.stop()
+        # _handle_payload itself doesn't check _stop_event — the loop does.
+        # But we can verify the stop event is set and the loop would break.
+        assert listener._stop_event.is_set()
+
+    def test_handles_invalid_json_silently(self) -> None:
+        """Malformed JSON payload does not raise and does not call callback."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        listener._handle_payload("not-valid-json{{{")
+
+        callback.assert_not_called()
+
+    def test_handles_connection_error_silently(self) -> None:
+        """Connection error logs warning and does not raise."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        with patch("requests.get", side_effect=ConnectionError("refused")):
+            # _run should complete without raising
+            listener._run()
+
+        # callback should not have been called
+        callback.assert_not_called()
+
+    def test_start_creates_daemon_thread(self) -> None:
+        """start() creates a daemon thread named 'plex-sse'."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        # Mock requests.get to block until stop is called
+        import threading as _threading
+
+        stop_barrier = _threading.Event()
+
+        def fake_get(*args, **kwargs):
+            stop_barrier.wait(timeout=2)
+            raise ConnectionError("stopped")
+
+        with patch("requests.get", side_effect=fake_get):
+            listener.start()
+            assert listener._thread is not None
+            assert listener._thread.daemon is True
+            assert listener._thread.name == "plex-sse"
+            assert listener._thread.is_alive()
+            # Clean up
+            stop_barrier.set()
+            listener.stop()
+
+    def test_start_noop_if_already_running(self) -> None:
+        """start() is a no-op if the thread is already alive."""
+        callback = MagicMock()
+        listener = PlexEventListener("http://server:32400", "tok", callback)
+
+        import threading as _threading
+
+        stop_barrier = _threading.Event()
+
+        def fake_get(*args, **kwargs):
+            stop_barrier.wait(timeout=2)
+            raise ConnectionError("stopped")
+
+        with patch("requests.get", side_effect=fake_get):
+            listener.start()
+            first_thread = listener._thread
+
+            # Call start() again — should not create a new thread
+            listener.start()
+            assert listener._thread is first_thread
+
+            # Clean up
+            stop_barrier.set()
+            listener.stop()

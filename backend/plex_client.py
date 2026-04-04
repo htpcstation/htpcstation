@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import enum
 import logging
+import threading
 import time
 from typing import Callable, Optional
 
@@ -572,3 +573,73 @@ class PlexClient:
                 self._on_error(error_type)
             except Exception:  # noqa: BLE001
                 pass
+
+
+_LIBRARY_EVENT_TYPES = {"library.update", "library.new", "library.refresh.all"}
+
+
+class PlexEventListener:
+    """Daemon thread that streams SSE from /:/eventsource/notifications.
+
+    Calls on_library_changed() (no args) when a library update event arrives.
+    Stops cleanly when stop() is called or the connection drops.
+    """
+
+    def __init__(
+        self,
+        server_url: str,
+        token: str,
+        on_library_changed: Callable[[], None],
+    ) -> None:
+        self._server_url = server_url.rstrip("/")
+        self._token = token
+        self._on_library_changed = on_library_changed
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        """Start the listener thread. No-op if already running."""
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="plex-sse")
+        self._thread.start()
+
+    def stop(self) -> None:
+        """Signal the listener to stop. Returns immediately (does not join)."""
+        self._stop_event.set()
+
+    def _run(self) -> None:
+        url = f"{self._server_url}/:/eventsource/notifications"
+        params = {"X-Plex-Token": self._token}
+        logger.debug("PlexEventListener: connecting to %s", url)
+        try:
+            import requests as _requests
+            with _requests.get(url, params=params, stream=True, timeout=60) as resp:
+                resp.raise_for_status()
+                for raw_line in resp.iter_lines():
+                    if self._stop_event.is_set():
+                        break
+                    if not raw_line:
+                        continue
+                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    self._handle_payload(payload)
+        except Exception as exc:  # noqa: BLE001
+            if not self._stop_event.is_set():
+                logger.warning("PlexEventListener: connection lost: %s", exc)
+
+    def _handle_payload(self, payload: str) -> None:
+        import json as _json
+        try:
+            data = _json.loads(payload)
+            # Plex wraps the event in a NotificationContainer
+            container = data.get("NotificationContainer", {})
+            event_type = container.get("type", "")
+            if event_type in _LIBRARY_EVENT_TYPES:
+                logger.info("PlexEventListener: library event '%s' — triggering refresh", event_type)
+                self._on_library_changed()
+        except Exception:  # noqa: BLE001
+            pass

@@ -4283,3 +4283,105 @@ class TestOnPlexErrorTriggersReconnect:
 
         # Should not raise
         lib._on_plex_error(PlexErrorType.NETWORK)
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary — SSE event listener integration (Task 007)
+# ---------------------------------------------------------------------------
+
+
+class TestEventListenerIntegration:
+    """Integration tests for PlexLibrary SSE event listener lifecycle."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_start_event_listener_called_after_setup_client(self) -> None:
+        """After _setup_client succeeds, _event_listener is not None."""
+        lib = self._make_lib()
+        # _setup_client was called during __init__ and succeeded (server123 is in fake resources)
+        assert lib._event_listener is not None
+
+    def test_stop_event_listener_called_on_shutdown(self) -> None:
+        """shutdown() stops the event listener."""
+        lib = self._make_lib()
+
+        # Verify listener is set
+        assert lib._event_listener is not None
+
+        # Patch the listener's stop method to track calls
+        mock_listener = MagicMock()
+        lib._event_listener = mock_listener
+
+        lib.shutdown()
+
+        mock_listener.stop.assert_called_once()
+        # After shutdown, _event_listener should be None
+        assert lib._event_listener is None
+
+    def test_on_library_event_submits_worker_refresh(self) -> None:
+        """_on_library_event() submits _worker_refresh to the executor."""
+        lib = self._make_lib()
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
+
+        lib._on_library_event()
+
+        assert len(submitted) == 1
+        fn, args = submitted[0]
+        # Bound methods create new objects each time; compare by __func__ instead
+        assert fn.__func__ is lib._worker_refresh.__func__
+
+    def test_event_listener_stopped_on_select_server(self) -> None:
+        """selectServer() stops the event listener before invalidating the client."""
+        lib = self._make_lib()
+
+        mock_listener = MagicMock()
+        lib._event_listener = mock_listener
+
+        lib.selectServer("new-server-id")
+
+        mock_listener.stop.assert_called_once()
+        assert lib._event_listener is None
+
+    def test_event_listener_stopped_on_select_user(self) -> None:
+        """selectUser() stops the event listener before invalidating the client."""
+        lib = self._make_lib()
+
+        mock_listener = MagicMock()
+        lib._event_listener = mock_listener
+
+        lib.selectUser(99)
+
+        mock_listener.stop.assert_called_once()
+        assert lib._event_listener is None
+
+    def test_no_event_listener_when_no_client(self) -> None:
+        """_start_event_listener does nothing when _client is None."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = None
+            config.plex_token = None
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+
+        assert lib._event_listener is None

@@ -550,6 +550,7 @@ class PlexLibrary(QObject):
 
         # Build Plex client if config is available
         self._client: Optional[PlexClient] = None
+        self._event_listener: Optional["PlexEventListener"] = None
         self._setup_client()
 
         # Connect internal signals (worker -> main thread)
@@ -598,6 +599,7 @@ class PlexLibrary(QObject):
 
     def shutdown(self) -> None:
         """Shut down thread pools. Call before application exit."""
+        self._stop_event_listener()
         self._timeline_reporter.stop()
         self._executor.shutdown(wait=False, cancel_futures=True)
         self._poster_executor.shutdown(wait=False, cancel_futures=True)
@@ -2218,6 +2220,35 @@ class PlexLibrary(QObject):
         fallbacks = [u for u in self._all_server_urls if u != server_url]
         self._client.set_fallback_urls(fallbacks)
         logger.info("PlexLibrary: client configured for %s", server_url)
+        self._start_event_listener()
+
+    def _start_event_listener(self) -> None:
+        """Start the SSE listener if a client is configured."""
+        self._stop_event_listener()
+        if self._client is None or not self._server_url:
+            return
+        from backend.plex_client import PlexEventListener
+        self._event_listener = PlexEventListener(
+            self._server_url,
+            self._config.plex_token,
+            self._on_library_event,
+        )
+        self._event_listener.start()
+
+    def _stop_event_listener(self) -> None:
+        if self._event_listener is not None:
+            self._event_listener.stop()
+            self._event_listener = None
+
+    def _on_library_event(self) -> None:
+        """Called from SSE thread when a library update event arrives."""
+        logger.info("PlexLibrary: library event received — scheduling refresh")
+        # Use executor so refresh() runs off the main thread (same as normal refresh).
+        # Guard against RuntimeError if the executor is already shut down (app exit race).
+        try:
+            self._executor.submit(self._worker_refresh, self._client)
+        except RuntimeError:
+            pass
 
     def _ensure_account(self) -> PlexAccount | None:
         """Return a PlexAccount, creating one if needed.
@@ -2282,6 +2313,7 @@ class PlexLibrary(QObject):
         """
         self._config.set_plex_server_id(server_id)
         # Invalidate the current client so the next refresh() reconnects
+        self._stop_event_listener()
         self._client = None
         self._server_url = ""
         self._active_token = ""
@@ -2304,5 +2336,6 @@ class PlexLibrary(QObject):
         self._cached_content_rating_filter = ""
         self._content_rating_filter = ""
         # Invalidate the current client
+        self._stop_event_listener()
         self._client = None
         logger.info("PlexLibrary: user selection changed to %s", user_id)
