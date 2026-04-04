@@ -484,7 +484,8 @@ class PlexLibrary(QObject):
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
     _artistsReady = Signal(list, int)  # (artists, total_size)
-    _mpvLaunchReady = Signal(str, str, int, int, int)  # url, title, start_ms, duration_ms, part_id
+    _mpvLaunchReady = Signal(str, str, int, int, int, int, int, int)  # url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms
+    markersReady = Signal(int, int, int)  # intro_start_ms, intro_end_ms, credits_start_ms
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
 
     def __init__(
@@ -576,6 +577,9 @@ class PlexLibrary(QObject):
         self._pending_sub_id_map: dict[int, int] = {}
         self._audio_id_map: dict[int, int] = {}
         self._sub_id_map: dict[int, int] = {}
+        self._current_intro_start_ms: int = 0
+        self._current_intro_end_ms: int = 0
+        self._current_credits_start_ms: int = 0
 
         # Connect MPV lifecycle to the timeline reporter
         self._mpv_launcher.processStarted.connect(self._on_mpv_started_for_timeline)
@@ -977,6 +981,7 @@ class PlexLibrary(QObject):
             "directors": movie.directors,
             "cast": movie.cast,
             "posterLocal": movie.poster_local,
+            "viewCount": int(data.get("viewCount", 0) or 0),
         }
 
     @Slot(str, result="QVariant")
@@ -1005,6 +1010,7 @@ class PlexLibrary(QObject):
             "genres": show.genres,
             "cast": show.cast,
             "posterLocal": show.poster_local,
+            "viewCount": int(data.get("viewCount", 0) or 0),
         }
 
     @Slot(str, result="QVariant")
@@ -1095,9 +1101,17 @@ class PlexLibrary(QObject):
         def _worker():
             url, _ = client.get_stream_url(rating_key)
             if not url:
-                self._mpvLaunchReady.emit("", "", 0, 0, 0)
+                self._mpvLaunchReady.emit("", "", 0, 0, 0, 0, 0, 0)
                 return
-            meta = client.get_metadata(rating_key)
+
+            # Replace long-lived token with a short-lived transient token
+            transient = client.get_transient_token()
+            if transient and self._config is not None:
+                main_token = self._config.plex_token or ""
+                if main_token and main_token in url:
+                    url = url.replace(main_token, transient)
+
+            meta = client.get_metadata(rating_key, include_markers=True)
             title = meta.get("title", "")
             grandparent = meta.get("grandparentTitle", "")
             if grandparent:
@@ -1119,11 +1133,26 @@ class PlexLibrary(QObject):
             sub_id_map = {i + 1: int(s.get("id", 0)) for i, s in enumerate(sub_streams)}
             self._pending_audio_id_map = audio_id_map
             self._pending_sub_id_map = sub_id_map
+            # Extract markers
+            markers = client.get_markers(meta)
+            intro_start_ms = markers["intro_start_ms"]
+            intro_end_ms = markers["intro_end_ms"]
+            credits_start_ms = markers["credits_start_ms"]
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
-            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id)
+            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id, intro_start_ms, intro_end_ms, credits_start_ms)
         self._executor.submit(_worker)
 
-    def _on_mpv_launch_ready(self, url: str, title: str, start_ms: int, duration_ms: int, part_id: int) -> None:
+    def _on_mpv_launch_ready(
+        self,
+        url: str,
+        title: str,
+        start_ms: int,
+        duration_ms: int,
+        part_id: int,
+        intro_start_ms: int = 0,
+        intro_end_ms: int = 0,
+        credits_start_ms: int = 0,
+    ) -> None:
         """Launch MPV on the main thread after worker fetched stream info."""
         if not url:
             logger.warning("playWithMpv: no stream URL — cannot launch")
@@ -1134,12 +1163,38 @@ class PlexLibrary(QObject):
         self._current_play_part_id = part_id
         self._audio_id_map = self._pending_audio_id_map
         self._sub_id_map = self._pending_sub_id_map
+        self._current_intro_start_ms = intro_start_ms
+        self._current_intro_end_ms = intro_end_ms
+        self._current_credits_start_ms = credits_start_ms
         self._mpv_launcher.launch(url, title, start_ms)
+        self.markersReady.emit(intro_start_ms, intro_end_ms, credits_start_ms)
 
     @Slot(str)
     def playWithMpvFromStart(self, rating_key: str) -> None:
         """Launch MPV from the beginning (no resume). Convenience slot for QML."""
         self.playWithMpv(rating_key, 0)
+
+    @Slot(str)
+    def markPlayed(self, rating_key: str) -> None:
+        """Mark an item as watched. Dispatches to thread pool."""
+        if self._client is None:
+            return
+        client = self._client
+        self._executor.submit(client.mark_played, rating_key)
+
+    @Slot(str)
+    def markUnplayed(self, rating_key: str) -> None:
+        """Mark an item as unwatched. Dispatches to thread pool."""
+        if self._client is None:
+            return
+        client = self._client
+        self._executor.submit(client.mark_unplayed, rating_key)
+
+    @Slot()
+    def skipIntro(self) -> None:
+        """Seek MPV past the intro. Called from the skip intro overlay."""
+        if self._current_intro_end_ms > 0:
+            self._mpv_ipc.command("seek", self._current_intro_end_ms / 1000, "absolute")
 
     @Slot(result="QVariant")
     def getMpvSubtitleTracks(self) -> list[dict]:

@@ -696,12 +696,16 @@ FocusScope {
                 var playLabel = (settings && (settings.plexPlayer || "mpv") === "mpv")
                     ? "Play"
                     : "Play in Plex"
+                var watchLabel = showDetailView._viewCount > 0 ? "Mark Unwatched" : "Mark Watched"
                 if (keys.useGamepadLabels) {
                     return "[◀▶] Season    [▼] Episodes    [" + keys.acceptLabel + "] " + playLabel
-                        + "    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
+                        + "    [" + keys.context1Label + "] My List"
+                        + "    [" + keys.context2Label + "] " + watchLabel
+                        + "    [" + keys.cancelLabel + "] Back"
                 } else {
                     return "[←→] Season    [↓] Episodes    [Enter] " + playLabel
-                        + "    [F1] My List    [Esc] Back"
+                        + "    [F1] My List    [F2] " + watchLabel
+                        + "    [Esc] Back"
                 }
             }
             color: Theme.colorTextDim
@@ -719,7 +723,14 @@ FocusScope {
         }
     }
 
-    // ── X key handler for My List toggle ─────────────────────────────────────
+    // Local viewCount for optimistic toggle of Mark Watched / Unwatched.
+    property int _viewCount: 0
+    onShowDataChanged: {
+        _viewCount = (showData && showData.viewCount !== undefined && showData.viewCount !== null)
+                     ? showData.viewCount : 0
+    }
+
+    // ── X/Y key handler for My List toggle and Mark Watched ──────────────────
     Keys.onPressed: (event) => {
         if (keys.isContext1(event)) {
             event.accepted = true
@@ -729,6 +740,17 @@ FocusScope {
                                   "show",
                                   showDetailView.showData.posterLocal || "",
                                   "")
+            }
+        } else if (keys.isContext2(event)) {
+            event.accepted = true
+            if (plex && showDetailView.showData.ratingKey) {
+                if (showDetailView._viewCount > 0) {
+                    plex.markUnplayed(showDetailView.showData.ratingKey)
+                    showDetailView._viewCount = 0
+                } else {
+                    plex.markPlayed(showDetailView.showData.ratingKey)
+                    showDetailView._viewCount = 1
+                }
             }
         }
     }

@@ -137,3 +137,175 @@ class TestPersistStreamSelection:
 
         # Should not raise
         client.persist_stream_selection(part_id=999, audio_stream_id=42)
+
+
+class TestMarkPlayed:
+    """Verify mark_played and mark_unplayed send correct requests."""
+
+    def test_mark_played_calls_scrobble(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock()
+
+        client.mark_played("12345")
+
+        client._session.get.assert_called_once()
+        call_args = client._session.get.call_args
+        assert call_args[0][0] == "http://localhost:32400/:/scrobble"
+        params = call_args[1]["params"]
+        assert params["key"] == "12345"
+        assert params["identifier"] == "com.plexapp.plugins.library"
+
+    def test_mark_unplayed_calls_unscrobble(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock()
+
+        client.mark_unplayed("12345")
+
+        client._session.get.assert_called_once()
+        call_args = client._session.get.call_args
+        assert call_args[0][0] == "http://localhost:32400/:/unscrobble"
+        params = call_args[1]["params"]
+        assert params["key"] == "12345"
+        assert params["identifier"] == "com.plexapp.plugins.library"
+
+    def test_mark_played_never_raises(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock(side_effect=ConnectionError("refused"))
+
+        # Should not raise
+        client.mark_played("12345")
+
+    def test_mark_unplayed_never_raises(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._session.get = MagicMock(side_effect=ConnectionError("refused"))
+
+        # Should not raise
+        client.mark_unplayed("12345")
+
+
+class TestTransientToken:
+    """Verify get_transient_token returns token or empty string."""
+
+    def test_get_transient_token_returns_token(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {"token": "abc123"}
+        })
+
+        result = client.get_transient_token()
+
+        assert result == "abc123"
+        client._get.assert_called_once_with(
+            "/security/token", params={"type": "delegation", "scope": "all"}
+        )
+
+    def test_get_transient_token_returns_empty_on_failure(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value=None)
+
+        result = client.get_transient_token()
+
+        assert result == ""
+
+
+class TestGetMetadataWithMarkers:
+    """Verify get_metadata sends includeMarkers param when requested."""
+
+    def test_get_metadata_with_markers_sends_param(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {
+                "Metadata": [{"ratingKey": "123", "title": "Test"}]
+            }
+        })
+
+        client.get_metadata("123", include_markers=True)
+
+        client._get.assert_called_once_with(
+            "/library/metadata/123", params={"includeMarkers": 1}
+        )
+
+    def test_get_metadata_without_markers_no_param(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        client._get = MagicMock(return_value={
+            "MediaContainer": {
+                "Metadata": [{"ratingKey": "123", "title": "Test"}]
+            }
+        })
+
+        client.get_metadata("123")
+
+        client._get.assert_called_once_with(
+            "/library/metadata/123", params=None
+        )
+
+
+class TestGetMarkers:
+    """Verify get_markers extracts intro and credits markers correctly."""
+
+    def test_get_markers_extracts_intro(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        metadata = {
+            "Marker": [
+                {
+                    "type": "intro",
+                    "startTimeOffset": 5000,
+                    "endTimeOffset": 90000,
+                }
+            ]
+        }
+
+        result = client.get_markers(metadata)
+
+        assert result["intro_start_ms"] == 5000
+        assert result["intro_end_ms"] == 90000
+        assert result["credits_start_ms"] == 0
+
+    def test_get_markers_extracts_credits(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        metadata = {
+            "Marker": [
+                {
+                    "type": "credits",
+                    "startTimeOffset": 3500000,
+                    "endTimeOffset": 3600000,
+                }
+            ]
+        }
+
+        result = client.get_markers(metadata)
+
+        assert result["intro_start_ms"] == 0
+        assert result["intro_end_ms"] == 0
+        assert result["credits_start_ms"] == 3500000
+
+    def test_get_markers_returns_zeros_when_no_markers(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        metadata = {}
+
+        result = client.get_markers(metadata)
+
+        assert result == {"intro_start_ms": 0, "intro_end_ms": 0, "credits_start_ms": 0}
+
+    def test_get_markers_handles_both_intro_and_credits(self) -> None:
+        client = PlexClient("http://localhost:32400", "test-token")
+        metadata = {
+            "Marker": [
+                {
+                    "type": "intro",
+                    "startTimeOffset": 1000,
+                    "endTimeOffset": 60000,
+                },
+                {
+                    "type": "credits",
+                    "startTimeOffset": 3000000,
+                    "endTimeOffset": 3600000,
+                },
+            ]
+        }
+
+        result = client.get_markers(metadata)
+
+        assert result["intro_start_ms"] == 1000
+        assert result["intro_end_ms"] == 60000
+        assert result["credits_start_ms"] == 3000000

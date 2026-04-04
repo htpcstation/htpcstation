@@ -82,6 +82,23 @@ FocusScope {
         id: mpvSubtitleOverlay
     }
 
+    // Skip intro overlay window — instantiated once, shown when intro markers are present.
+    MpvSkipIntroOverlay {
+        id: skipIntroOverlay
+    }
+
+    Connections {
+        target: plex
+        function onMarkersReady(introStartMs, introEndMs, creditsStartMs) {
+            if (introEndMs > 0) {
+                skipIntroOverlay.showForIntro(introStartMs, introEndMs)
+            }
+        }
+        function onMpvFinished() {
+            skipIntroOverlay.hideOverlay()
+        }
+    }
+
     // ── Global music playback state ───────────────────────────────────────────
     // Index into _playbackTracks of the currently playing track (-1 = not playing).
     property int _playingIndex: -1

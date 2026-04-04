@@ -128,9 +128,12 @@ class PlexClient:
             if isinstance(d, dict)
         ]
 
-    def get_metadata(self, rating_key: str) -> dict:
+    def get_metadata(self, rating_key: str, include_markers: bool = False) -> dict:
         """GET /library/metadata/<ratingKey> — full metadata for one item."""
-        data = self._get(f"/library/metadata/{rating_key}")
+        params = {}
+        if include_markers:
+            params["includeMarkers"] = 1
+        data = self._get(f"/library/metadata/{rating_key}", params=params or None)
         if data is None:
             return {}
         container = data.get("MediaContainer", {})
@@ -274,6 +277,78 @@ class PlexClient:
             self._session.put(url, params=params, timeout=_TIMEOUT)
         except Exception as exc:  # noqa: BLE001
             logger.warning("persist_stream_selection failed for part %d: %s", part_id, exc)
+
+    def mark_played(self, rating_key: str) -> None:
+        """PUT /:/scrobble — mark item as watched.
+
+        Sets viewCount and lastViewedAt on the server.
+        identifier must be 'com.plexapp.plugins.library'.
+        """
+        try:
+            self._session.get(
+                f"{self._server_url}/:/scrobble",
+                params={
+                    "key": rating_key,
+                    "identifier": "com.plexapp.plugins.library",
+                },
+                timeout=_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("mark_played failed for ratingKey=%s", rating_key)
+
+    def mark_unplayed(self, rating_key: str) -> None:
+        """PUT /:/unscrobble — mark item as unwatched.
+
+        Clears viewCount and lastViewedAt on the server.
+        """
+        try:
+            self._session.get(
+                f"{self._server_url}/:/unscrobble",
+                params={
+                    "key": rating_key,
+                    "identifier": "com.plexapp.plugins.library",
+                },
+                timeout=_TIMEOUT,
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("mark_unplayed failed for ratingKey=%s", rating_key)
+
+    def get_transient_token(self) -> str:
+        """GET /security/token — returns a short-lived delegation token.
+
+        Use this token in stream URLs passed to MPV instead of the long-lived
+        user token. The long-lived token never appears in MPV logs or process args.
+        Returns "" on failure (caller should fall back to the main token).
+        """
+        data = self._get("/security/token", params={"type": "delegation", "scope": "all"})
+        if data is None:
+            return ""
+        return data.get("MediaContainer", {}).get("token", "")
+
+    def get_markers(self, metadata: dict) -> dict:
+        """Extract intro and credits marker timestamps from a metadata dict.
+
+        Returns:
+            {
+                "intro_start_ms": int,   # 0 if no intro marker
+                "intro_end_ms": int,     # 0 if no intro marker
+                "credits_start_ms": int, # 0 if no credits marker
+            }
+        Marker timestamps from Plex are in milliseconds.
+        Marker types: "intro", "credits", "commercial", "bookmark", "resume".
+        """
+        result = {"intro_start_ms": 0, "intro_end_ms": 0, "credits_start_ms": 0}
+        markers = metadata.get("Marker", [])
+        for marker in markers:
+            marker_type = marker.get("type", "")
+            start = int(marker.get("startTimeOffset", 0) or 0)
+            end = int(marker.get("endTimeOffset", 0) or 0)
+            if marker_type == "intro":
+                result["intro_start_ms"] = start
+                result["intro_end_ms"] = end
+            elif marker_type == "credits":
+                result["credits_start_ms"] = start
+        return result
 
     # ------------------------------------------------------------------
     # Internal helpers

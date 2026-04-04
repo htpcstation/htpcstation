@@ -28,6 +28,13 @@ FocusScope {
     // Only process input when this view is active.
     enabled: focus
 
+    // Local viewCount for optimistic toggle of Mark Watched / Unwatched.
+    property int _viewCount: 0
+    onMovieDataChanged: {
+        _viewCount = (movieData && movieData.viewCount !== undefined && movieData.viewCount !== null)
+                     ? movieData.viewCount : 0
+    }
+
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
         if (keys.isAccept(event)) {
@@ -41,6 +48,17 @@ FocusScope {
                                   "movie",
                                   movieDetailView.movieData.posterLocal || "",
                                   "")
+            }
+        } else if (keys.isContext2(event)) {
+            event.accepted = true
+            if (plex && movieDetailView.movieData.ratingKey) {
+                if (movieDetailView._viewCount > 0) {
+                    plex.markUnplayed(movieDetailView.movieData.ratingKey)
+                    movieDetailView._viewCount = 0
+                } else {
+                    plex.markPlayed(movieDetailView.movieData.ratingKey)
+                    movieDetailView._viewCount = 1
+                }
             }
         } else if (keys.isCancel(event)) {
             event.accepted = true
@@ -335,12 +353,16 @@ FocusScope {
                 var playLabel = (settings && (settings.plexPlayer || "mpv") === "mpv")
                     ? "Play"
                     : "Play in Plex"
+                var watchLabel = movieDetailView._viewCount > 0 ? "Mark Unwatched" : "Mark Watched"
                 if (keys.useGamepadLabels) {
                     return "[◀▶] Prev/Next    [" + keys.acceptLabel + "] " + playLabel
-                        + "    [" + keys.context1Label + "] My List    [" + keys.cancelLabel + "] Back"
+                        + "    [" + keys.context1Label + "] My List"
+                        + "    [" + keys.context2Label + "] " + watchLabel
+                        + "    [" + keys.cancelLabel + "] Back"
                 } else {
                     return "[←→] Prev/Next    [Enter] " + playLabel
-                        + "    [F1] My List    [Esc] Back"
+                        + "    [F1] My List    [F2] " + watchLabel
+                        + "    [Esc] Back"
                 }
             }
             color: Theme.colorTextDim
