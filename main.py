@@ -1,9 +1,15 @@
 """HTPC Station — entry point."""
 
+import locale
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+# libmpv requires LC_NUMERIC=C. This MUST be set before any other import
+# that transitively loads libmpv (including `import mpv` in mpv_launcher.py).
+# Qt also resets the locale, so we set it here first and again after PySide6.
+locale.setlocale(locale.LC_NUMERIC, "C")
 
 # Stderr filter is disabled for debugging.  To re-enable, uncomment the
 # _start_stderr_filter() call below.
@@ -49,6 +55,9 @@ os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QKeyEvent
 from PySide6.QtQml import QQmlApplicationEngine
+
+# Qt resets LC_NUMERIC on import — restore it for libmpv.
+locale.setlocale(locale.LC_NUMERIC, "C")
 
 from backend.browser_launcher import BrowserLauncher
 from backend.config import Config
@@ -184,6 +193,15 @@ def main() -> None:
     # Moonlight streaming: hide the window while streaming, restore when done
     moonlight.processStarted.connect(_hide_window)
     moonlight.processFinished.connect(_show_window)
+
+    # MPV (libmpv, embedded): no hide/show on start — MPV renders inside the Qt
+    # window. On playback end, raise and re-activate the window so the HTPC
+    # Station UI regains focus (the MPV surface goes blank when playback stops).
+    # Suppress Qt gamepad key injection while MPV is active — MPV handles the
+    # gamepad via SDL; injecting the same events into Qt causes double-handling.
+    plex_library.mpvStarted.connect(lambda: gamepad_manager.setMpvActive(True))
+    plex_library.mpvFinished.connect(lambda: gamepad_manager.setMpvActive(False))
+    plex_library.mpvFinished.connect(_show_window)
 
     # Start+Select combo: kill the browser process (equivalent to Alt+F4).
     # The browser extension can't close kiosk windows via window.close(),

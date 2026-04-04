@@ -156,6 +156,12 @@ class _DeviceHandler(QObject):
                 self._manager.rawInput.emit("button", code, value)
             return
 
+        # While MPV is active it handles gamepad input via SDL — suppress Qt
+        # injection to prevent double-handling (e.g. Start triggering both
+        # MPV stop and the HTPC Station quit dialog).
+        if self._manager._mpv_active:
+            return
+
         qt_key = self._evdev_lookup.get((ecodes.EV_KEY, code, 1))  # type: ignore[union-attr]
         if qt_key is None:
             return
@@ -198,6 +204,9 @@ class _DeviceHandler(QObject):
         # discover which codes the controller uses.  Normalize the value
         # to -1/0/1 using the axis range so the mapping config stores
         # direction signs, not raw hardware values.
+        if self._manager._mpv_active:
+            return
+
         if self._manager._raw_mode:
             axis_min, axis_max = self._axis_info.get(code, (0, 0))
             if axis_min == axis_max:
@@ -467,6 +476,7 @@ class GamepadManager(QObject):
         self._handlers: dict[str, _DeviceHandler] = {}  # path → handler
         self._warned_no_gamepad = False  # emit the "no gamepads" warning only once
         self._raw_mode: bool = False
+        self._mpv_active: bool = False
 
         # Load mapping and build the unified lookup table
         self._evdev_lookup: dict = build_evdev_lookup(load_mapping())
@@ -496,6 +506,20 @@ class GamepadManager(QObject):
         for handler in list(self._handlers.values()):
             handler._cleanup()
         self._handlers.clear()
+
+    @Slot(bool)
+    def setMpvActive(self, active: bool) -> None:
+        """Suppress Qt key injection while MPV is playing.
+
+        When MPV is active, it handles gamepad input via its own SDL layer.
+        Injecting the same events into Qt causes double-handling (e.g. Start
+        triggers both MPV stop and the HTPC Station quit dialog).
+        On deactivation, releases all held keys so no stale state carries over.
+        """
+        self._mpv_active = active
+        if not active:
+            for handler in self._handlers.values():
+                handler._release_all_keys()
 
     @Slot()
     def startRawMode(self) -> None:

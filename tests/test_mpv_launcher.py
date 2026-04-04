@@ -16,7 +16,7 @@ Covers:
   - _setup_keybinds() registers keybinds programmatically
   - Y button emits subtitlePickerRequested signal
   - mpvPlaybackStarted emitted after wait_until_playing
-  - L2/R2 debounce: one seek per tap, no runaway
+  - pause=False set before play() to ensure playback starts in play state
 """
 
 from __future__ import annotations
@@ -39,6 +39,8 @@ def _make_mock_mpv_instance():
     mock = MagicMock()
     # core_idle=True means idle (not playing); False means playing
     type(mock).core_idle = PropertyMock(return_value=True)
+    # filename=None means no file loaded (not playing)
+    type(mock).filename = PropertyMock(return_value=None)
     return mock
 
 
@@ -145,28 +147,59 @@ class TestLibMpvPlayerLaunch:
         assert mock_instance.force_media_title == "My Movie"
 
     def test_launch_sets_start_position(self) -> None:
-        """launch() sets player.start to HH:MM:SS when start_ms > 0."""
+        """launch() sets player.start to HH:MM:SS for resume, 'none' for fresh play."""
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = _make_mock_mpv_instance()
+        start_values: list[str] = []
+
+        def _capture_play(url):
+            start_values.append(mock_instance.start)
+
+        mock_instance.play.side_effect = _capture_play
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()
             player.set_wid(123)
-            # 60 seconds = 00:01:00
+            # Resume play — start should be set to HH:MM:SS
             player.launch("http://server/file.mkv", "", 60_000)
+            assert start_values == ["00:01:00"]
+            start_values.clear()
+            # Fresh play — start should be reset to "none"
+            type(mock_instance).filename = PropertyMock(return_value=None)
+            player.launch("http://server/file.mkv", "", 0)
+            assert start_values == ["none"]
 
-        assert mock_instance.start == "00:01:00"
+    def test_launch_sets_pause_false_before_play(self) -> None:
+        """launch() sets player.pause = False before calling play() to prevent paused start."""
+        from backend.mpv_launcher import LibMpvPlayer
+
+        mock_instance = _make_mock_mpv_instance()
+        pause_at_play: list[bool] = []
+
+        def _capture_play(url):
+            pause_at_play.append(mock_instance.pause)
+
+        mock_instance.play.side_effect = _capture_play
+
+        with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
+             patch("backend.mpv_launcher.threading"):
+            mock_mpv_module.MPV.return_value = mock_instance
+            player = LibMpvPlayer()
+            player.set_wid(123)
+            player.launch("http://server/file.mkv", "", 0)
+
+        assert pause_at_play == [False]
 
     def test_launch_noop_when_running(self) -> None:
         """launch() does nothing when is_running() returns True."""
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = _make_mock_mpv_instance()
-        # Simulate playing: core_idle=False
-        type(mock_instance).core_idle = PropertyMock(return_value=False)
+        # Simulate playing: filename is set (non-None/non-empty)
+        type(mock_instance).filename = PropertyMock(return_value="file.mkv")
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
@@ -307,8 +340,6 @@ class TestKeybinds:
         # Track keybind calls
         keybind_calls: list[tuple] = []
         mock_instance.keybind.side_effect = lambda key, cmd: keybind_calls.append((key, cmd))
-        # on_key_press returns a decorator — make it a no-op decorator
-        mock_instance.on_key_press.return_value = lambda fn: fn
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
@@ -326,7 +357,6 @@ class TestKeybinds:
         mock_instance = _make_mock_mpv_instance()
         keybind_calls: list[tuple] = []
         mock_instance.keybind.side_effect = lambda key, cmd: keybind_calls.append((key, cmd))
-        mock_instance.on_key_press.return_value = lambda fn: fn
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.threading"):
@@ -334,54 +364,21 @@ class TestKeybinds:
             player = LibMpvPlayer()
             player.set_wid(123)
 
-        keybind_keys = [k for k, _ in keybind_calls]
-        expected_keys = [
-            "GAMEPAD_ACTION_DOWN",
-            "GAMEPAD_DPAD_LEFT",
-            "GAMEPAD_DPAD_RIGHT",
-            "GAMEPAD_DPAD_UP",
-            "GAMEPAD_DPAD_DOWN",
-            "GAMEPAD_LEFT_SHOULDER",
-            "GAMEPAD_RIGHT_SHOULDER",
-            "GAMEPAD_ACTION_UP",
-            "GAMEPAD_START",
-        ]
-        for key in expected_keys:
-            assert key in keybind_keys, f"Expected keybind for {key} not registered"
-
-    def test_y_button_emits_subtitle_picker_signal(self) -> None:
-        """Y button (GAMEPAD_ACTION_LEFT) on_key_press callback emits subtitlePickerRequested."""
-        from backend.mpv_launcher import LibMpvPlayer
-
-        mock_instance = _make_mock_mpv_instance()
-        # Capture the on_key_press callbacks
-        key_press_callbacks: dict[str, object] = {}
-
-        def fake_on_key_press(keydef, **kwargs):
-            def decorator(fn):
-                key_press_callbacks[keydef] = fn
-                return fn
-            return decorator
-
-        mock_instance.on_key_press.side_effect = fake_on_key_press
-        mock_instance.keybind.return_value = None
-
-        with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
-             patch("backend.mpv_launcher.threading"), \
-             patch("backend.mpv_launcher.QMetaObject") as mock_meta:
-            mock_mpv_module.MPV.return_value = mock_instance
-            player = LibMpvPlayer()
-            player.set_wid(123)
-
-            # Trigger the Y button callback
-            assert "GAMEPAD_ACTION_LEFT" in key_press_callbacks
-            key_press_callbacks["GAMEPAD_ACTION_LEFT"]()
-
-            # Verify QMetaObject.invokeMethod was called to marshal to main thread
-            mock_meta.invokeMethod.assert_called()
-            call_args = mock_meta.invokeMethod.call_args
-            assert call_args[0][0] is player
-            assert call_args[0][1] == "_request_subtitle_picker"
+        keybind_keys = {k: cmd for k, cmd in keybind_calls}
+        expected = {
+            "GAMEPAD_ACTION_DOWN":    "cycle pause",
+            "GAMEPAD_DPAD_LEFT":      "seek -10",
+            "GAMEPAD_DPAD_RIGHT":     "seek 10",
+            "GAMEPAD_DPAD_UP":        "add volume 5",
+            "GAMEPAD_DPAD_DOWN":      "add volume -5",
+            "GAMEPAD_LEFT_SHOULDER":  "cycle audio",
+            "GAMEPAD_RIGHT_SHOULDER": "show-text ${track-list} 3000",
+            "GAMEPAD_ACTION_LEFT":    "show-progress",
+            "GAMEPAD_ACTION_UP":      "osd-msg cycle sub",
+            "GAMEPAD_START":          "stop",
+        }
+        for key, cmd in expected.items():
+            assert keybind_keys.get(key) == cmd, f"Keybind {key!r} expected {cmd!r}, got {keybind_keys.get(key)!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -403,7 +400,6 @@ class TestLoadingOverlay:
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.QMetaObject") as mock_meta:
             mock_mpv_module.MPV.return_value = mock_instance
-            mock_instance.on_key_press.return_value = lambda fn: fn
 
             player = LibMpvPlayer()
             player.set_wid(123)
@@ -442,7 +438,6 @@ class TestLoadingOverlay:
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
              patch("backend.mpv_launcher.QMetaObject") as mock_meta:
             mock_mpv_module.MPV.return_value = mock_instance
-            mock_instance.on_key_press.return_value = lambda fn: fn
 
             player = LibMpvPlayer()
             player.set_wid(123)
@@ -459,112 +454,7 @@ class TestLoadingOverlay:
                 mock_threading.Thread.side_effect = fake_thread
                 player.launch("http://example.com/stream.mkv")
 
-        # _on_playback_started should NOT be invoked (exception was raised)
+        # Neither signal should fire — stop/quit before playing means no started events
         assert "_on_playback_started" not in invoke_calls
-        # But _emit_started should still be invoked
-        assert "_emit_started" in invoke_calls
+        assert "_emit_started" not in invoke_calls
 
-
-# ---------------------------------------------------------------------------
-# TestL2R2Debounce
-# ---------------------------------------------------------------------------
-
-
-class TestL2R2Debounce:
-    def _get_trigger_callbacks(self, mock_instance):
-        """Set up mock and return captured L2/R2 callbacks."""
-        from backend.mpv_launcher import LibMpvPlayer
-
-        key_press_callbacks: dict[str, object] = {}
-
-        def fake_on_key_press(keydef, **kwargs):
-            def decorator(fn):
-                key_press_callbacks[keydef] = fn
-                return fn
-            return decorator
-
-        mock_instance.on_key_press.side_effect = fake_on_key_press
-        mock_instance.keybind.return_value = None
-
-        with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
-             patch("backend.mpv_launcher.threading"), \
-             patch("backend.mpv_launcher.QMetaObject"):
-            mock_mpv_module.MPV.return_value = mock_instance
-            player = LibMpvPlayer()
-            player.set_wid(123)
-
-        return player, key_press_callbacks
-
-    def test_l2_seek_fires_once_per_tap(self) -> None:
-        """L2 callback called twice within debounce window → seek called only once."""
-        mock_instance = _make_mock_mpv_instance()
-        player, callbacks = self._get_trigger_callbacks(mock_instance)
-
-        assert "GAMEPAD_LEFT_TRIGGER" in callbacks
-        l2_cb = callbacks["GAMEPAD_LEFT_TRIGGER"]
-
-        with patch("backend.mpv_launcher.time") as mock_time:
-            # Both calls happen at the same time (within debounce window)
-            mock_time.monotonic.return_value = 1000.0
-            l2_cb()
-            l2_cb()
-
-        # seek should only be called once
-        seek_calls = [c for c in mock_instance.seek.call_args_list
-                      if c[0][0] == -30]
-        assert len(seek_calls) == 1
-
-    def test_r2_seek_fires_once_per_tap(self) -> None:
-        """R2 callback called twice within debounce window → seek called only once."""
-        mock_instance = _make_mock_mpv_instance()
-        player, callbacks = self._get_trigger_callbacks(mock_instance)
-
-        assert "GAMEPAD_RIGHT_TRIGGER" in callbacks
-        r2_cb = callbacks["GAMEPAD_RIGHT_TRIGGER"]
-
-        with patch("backend.mpv_launcher.time") as mock_time:
-            mock_time.monotonic.return_value = 1000.0
-            r2_cb()
-            r2_cb()
-
-        seek_calls = [c for c in mock_instance.seek.call_args_list
-                      if c[0][0] == 30]
-        assert len(seek_calls) == 1
-
-    def test_l2_seek_fires_again_after_debounce(self) -> None:
-        """L2 seek fires again after the debounce window has elapsed."""
-        mock_instance = _make_mock_mpv_instance()
-        player, callbacks = self._get_trigger_callbacks(mock_instance)
-
-        l2_cb = callbacks["GAMEPAD_LEFT_TRIGGER"]
-
-        with patch("backend.mpv_launcher.time") as mock_time:
-            # First tap
-            mock_time.monotonic.return_value = 1000.0
-            l2_cb()
-            # Second tap after debounce window (> 0.5s)
-            mock_time.monotonic.return_value = 1000.6
-            l2_cb()
-
-        seek_calls = [c for c in mock_instance.seek.call_args_list
-                      if c[0][0] == -30]
-        assert len(seek_calls) == 2
-
-    def test_r2_seek_fires_again_after_debounce(self) -> None:
-        """R2 seek fires again after the debounce window has elapsed."""
-        mock_instance = _make_mock_mpv_instance()
-        player, callbacks = self._get_trigger_callbacks(mock_instance)
-
-        r2_cb = callbacks["GAMEPAD_RIGHT_TRIGGER"]
-
-        with patch("backend.mpv_launcher.time") as mock_time:
-            # First tap
-            mock_time.monotonic.return_value = 1000.0
-            r2_cb()
-            # Second tap after debounce window (> 0.5s)
-            mock_time.monotonic.return_value = 1000.6
-            r2_cb()
-
-        seek_calls = [c for c in mock_instance.seek.call_args_list
-                      if c[0][0] == 30]
-        assert len(seek_calls) == 2

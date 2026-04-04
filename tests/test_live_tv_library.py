@@ -599,6 +599,7 @@ def _make_live_tv_player(tmp_path: Path):
 
     mock_instance = MagicMock()
     type(mock_instance).core_idle = PropertyMock(return_value=True)
+    type(mock_instance).filename = PropertyMock(return_value=None)
     set_items: dict = {}
     mock_instance.__setitem__.side_effect = lambda key, value: set_items.update({key: value})
     mock_instance.on_key_press.return_value = lambda fn: fn
@@ -693,8 +694,9 @@ class TestMpvLauncherLiveTv:
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = MagicMock()
-        # Simulate playing: core_idle=False
+        # Simulate playing: filename is set (non-None)
         type(mock_instance).core_idle = PropertyMock(return_value=False)
+        type(mock_instance).filename = PropertyMock(return_value="stream.ts")
         mock_instance.__setitem__.side_effect = lambda key, value: None
         mock_instance.on_key_press.return_value = lambda fn: fn
 

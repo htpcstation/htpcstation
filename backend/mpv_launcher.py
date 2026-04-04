@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from typing import Callable, Optional
 
 import mpv
@@ -21,7 +20,7 @@ logger = logging.getLogger(__name__)
 # IPC socket path — kept for the input-ipc-server option (harmless, no longer polled).
 MPV_IPC_SOCKET = "/tmp/htpcstation-mpv.sock"
 
-_TRIGGER_DEBOUNCE = 0.5  # seconds — ignore L2/R2 repeats within this window
+
 
 
 def _mpv_log(level: str, prefix: str, text: str) -> None:
@@ -54,7 +53,6 @@ class LibMpvPlayer(QObject):
     processStarted = Signal()
     processFinished = Signal(int)
     mpvPlaybackStarted = Signal()
-    subtitlePickerRequested = Signal()
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -74,6 +72,11 @@ class LibMpvPlayer(QObject):
             logger.warning("LibMpvPlayer.set_wid: player already created — ignoring")
             return
 
+        # libmpv requires LC_NUMERIC=C. Qt resets the locale; restore it here
+        # immediately before creating the MPV instance.
+        import locale as _locale
+        _locale.setlocale(_locale.LC_NUMERIC, "C")
+
         self._player = mpv.MPV(
             wid=str(wid),
             vo="gpu",
@@ -84,6 +87,9 @@ class LibMpvPlayer(QObject):
             vd_lavc_dr="yes",
             osc="no",
             fullscreen="yes",
+
+            input_default_bindings=True,
+            input_vo_keyboard=True,
             input_gamepad="yes",
             cache="yes",
             log_handler=_mpv_log,
@@ -143,8 +149,14 @@ class LibMpvPlayer(QObject):
             self._player.title = title
             self._player.force_media_title = title
 
-        if start_ms > 0:
-            self._player.start = _ms_to_hms(start_ms)
+        # Set start position. "none" clears any previous resume position.
+        # Do NOT use "" or "0" — both cause errors or a seek+pause on some streams.
+        self._player.start = _ms_to_hms(start_ms) if start_ms > 0 else "none"
+
+        # Ensure playback starts in play state (not paused).
+        # MPV can retain a paused state from a previous session or the
+        # pause=yes default; force it off before loading the new file.
+        self._player.pause = False
 
         self._player.play(url)
 
@@ -152,13 +164,13 @@ class LibMpvPlayer(QObject):
         def _wait_and_signal() -> None:
             try:
                 self._player.wait_until_playing(timeout=30)
-                QMetaObject.invokeMethod(
-                    self,
-                    "_on_playback_started",
-                    Qt.ConnectionType.QueuedConnection,
-                )
             except Exception:  # noqa: BLE001
-                pass  # timeout or shutdown — processStarted already handles cleanup
+                return  # stopped/quit before playing — do not emit started signals
+            QMetaObject.invokeMethod(
+                self,
+                "_on_playback_started",
+                Qt.ConnectionType.QueuedConnection,
+            )
             QMetaObject.invokeMethod(
                 self,
                 "_emit_started",
@@ -198,18 +210,21 @@ class LibMpvPlayer(QObject):
             self._player.title = title
             self._player.force_media_title = title
 
+        # Ensure playback starts in play state.
+        self._player.pause = False
+
         self._player.play(url)
 
         def _wait_and_signal() -> None:
             try:
                 self._player.wait_until_playing(timeout=30)
-                QMetaObject.invokeMethod(
-                    self,
-                    "_on_playback_started",
-                    Qt.ConnectionType.QueuedConnection,
-                )
             except Exception:  # noqa: BLE001
-                pass
+                return  # stopped before playing — do not emit started signals
+            QMetaObject.invokeMethod(
+                self,
+                "_on_playback_started",
+                Qt.ConnectionType.QueuedConnection,
+            )
             QMetaObject.invokeMethod(
                 self,
                 "_emit_started",
@@ -253,10 +268,13 @@ class LibMpvPlayer(QObject):
         self._pause_observer = _handler  # keep reference
 
     def is_running(self) -> bool:
-        """Return True if MPV is currently playing (not idle)."""
+        """Return True if MPV has a file loaded (playing or paused)."""
         if self._player is None:
             return False
-        return self._player.core_idle is False
+        try:
+            return bool(self._player.filename)
+        except Exception:  # noqa: BLE001
+            return False
 
     def shutdown(self) -> None:
         """Terminate the MPV instance. Call on app exit."""
@@ -286,10 +304,6 @@ class LibMpvPlayer(QObject):
     def _on_playback_started(self) -> None:
         self.mpvPlaybackStarted.emit()
 
-    @Slot()
-    def _request_subtitle_picker(self) -> None:
-        self.subtitlePickerRequested.emit()
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -297,13 +311,12 @@ class LibMpvPlayer(QObject):
     def _setup_keybinds(self) -> None:
         """Register all gamepad keybinds programmatically.
 
-        Replaces input.conf. Verified button names from mpv --input-test
-        on 8BitDo Micro D-input (Bluetooth):
-          GAMEPAD_ACTION_DOWN  = A (east, evdev 304) = wizard accept
+        Verified with mpv --input-test on 8BitDo Micro D-input (Bluetooth):
+          GAMEPAD_ACTION_DOWN  = A (east,  evdev 304) = wizard accept = pause
           GAMEPAD_ACTION_RIGHT = B (south, evdev 305) = unbound
-          GAMEPAD_ACTION_UP    = X (north, evdev 307)
-          GAMEPAD_ACTION_LEFT  = Y (west, evdev 308)
-          GAMEPAD_START        = Start (evdev 315)
+          GAMEPAD_ACTION_LEFT  = X (north, evdev 307) = show-progress
+          GAMEPAD_ACTION_UP    = Y (west,  evdev 308) = cycle sub (MPV native)
+          GAMEPAD_START        = Start (evdev 315)    = stop
         """
         binds = [
             ("GAMEPAD_ACTION_DOWN",    "cycle pause"),
@@ -313,43 +326,18 @@ class LibMpvPlayer(QObject):
             ("GAMEPAD_DPAD_DOWN",      "add volume -5"),
             ("GAMEPAD_LEFT_SHOULDER",  "cycle audio"),
             ("GAMEPAD_RIGHT_SHOULDER", "show-text ${track-list} 3000"),
-            ("GAMEPAD_ACTION_UP",      "show-progress"),
-            ("GAMEPAD_START",          "quit"),
-            # GAMEPAD_ACTION_LEFT (Y) handled via Python callback — see subtitle picker
-            # GAMEPAD_LEFT_TRIGGER / GAMEPAD_RIGHT_TRIGGER handled via key press handlers
+            ("GAMEPAD_ACTION_LEFT",    "show-progress"),
+            ("GAMEPAD_ACTION_UP",      "osd-msg cycle sub"),
+            ("GAMEPAD_START",          "stop"),
+            # Override default quit bindings — use stop (keeps core alive) not quit
+            ("q",                      "stop"),
+            ("Q",                      "stop"),
+            ("ESC",                    "stop"),
         ]
         for key, cmd in binds:
             self._player.keybind(key, cmd)
 
-        # Y button — emit signal to QML on main thread for subtitle picker
-        @self._player.on_key_press("GAMEPAD_ACTION_LEFT")
-        def _on_y_pressed():
-            QMetaObject.invokeMethod(
-                self, "_request_subtitle_picker", Qt.ConnectionType.QueuedConnection
-            )
 
-        # L2/R2 debounce — use on_key_press with debounce to avoid runaway seeks
-        _last_l2_time = [0.0]
-        _last_r2_time = [0.0]
-
-        @self._player.on_key_press("GAMEPAD_LEFT_TRIGGER")
-        def _on_l2():
-            now = time.monotonic()
-            if now - _last_l2_time[0] < _TRIGGER_DEBOUNCE:
-                return
-            _last_l2_time[0] = now
-            self._player.seek(-30, "relative+keyframes")
-
-        @self._player.on_key_press("GAMEPAD_RIGHT_TRIGGER")
-        def _on_r2():
-            now = time.monotonic()
-            if now - _last_r2_time[0] < _TRIGGER_DEBOUNCE:
-                return
-            _last_r2_time[0] = now
-            self._player.seek(30, "relative+keyframes")
-
-        # Store references to prevent garbage collection
-        self._keybind_callbacks = (_on_y_pressed, _on_l2, _on_r2)
 
     @staticmethod
     def _gpu_context() -> str:

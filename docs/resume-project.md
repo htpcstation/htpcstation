@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 20)
+# HTPC Station — Resume Document (Checkpoint 21)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -7,21 +7,24 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,536 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,532 tests passing.**
 
-**What's new since Checkpoint 19:**
+**What's new since Checkpoint 20:**
 
-libmpv migration (roadmap #28) — complete:
-- `MpvLauncher` (QProcess subprocess) → `LibMpvPlayer` (python-mpv/libmpv in-process)
-- MPV renders inside the Qt window via `wid` — no window hide/show on playback
-- Gamepad bindings via `player.keybind()` at startup — no `input.conf` file written to disk
-- Loading overlay hides on `wait_until_playing()` (first frame ready), not on process start
-- L2/R2: `on_key_press` callback with 0.5s debounce — one seek per tap, no runaway
-- Y button: subtitle picker overlay restored as in-process `FocusScope` (was broken as separate `Window`)
-- `PlexTimelineReporter` push-based via `@property_observer('time-pos')` — no 10s IPC poll
-- `MpvIpc` deleted entirely
-- `mpv-libs` + `mpv>=1.0.8` (python-mpv) added as dependencies
-- License: MIT retained — libmpv/python-mpv used under LGPLv2.1 via dynamic ctypes linking
+Post-libmpv migration bugfixes — all squashed into one commit on top of checkpoint 20:
+- `fullscreen=yes` restored in `mpv.MPV()` kwargs (required for in-window rendering)
+- `start='none'` used to clear resume position (empty string caused seek+pause on some streams)
+- `is_running()` now checks `player.filename` (not process state)
+- `input_default_bindings=True` + `input_vo_keyboard=True` needed for keyboard input in MPV
+- `LC_NUMERIC=C` set immediately before `mpv.MPV()` creation (Qt resets the locale)
+- Keybinds: `GAMEPAD_ACTION_LEFT=X=show-progress`, `GAMEPAD_ACTION_UP=Y=osd-msg cycle sub`
+- `stop` used instead of `quit` in all keybinds — keeps the libmpv core alive for reuse
+- `_emit_started` guarded: only fires if `wait_until_playing()` succeeds (not on stop/timeout)
+- Subtitle picker overlay removed entirely — Y button now triggers `osd-msg cycle sub` (MPV native)
+- `MpvSubtitleOverlay.qml` deleted
+- Gamepad input suppressed in Qt while MPV is active (prevents double-input); restored on stop
+- L2/R2 keybinds: tried `keybind {no-repeat}` → `on_key_press` → `key_binding` with state=='p' + `command_async` — **ultimately disabled** (feature removed; dpad scrobbling is sufficient)
+- `pause=False` set before `player.play()` in both `launch()` and `launch_live_tv()` — fixes MPV starting in a paused state
 
 ---
 
@@ -56,8 +59,8 @@ libmpv migration (roadmap #28) — complete:
 | 25 | Hero/header fade on content focus | Deferred — UI polish |
 | 26 | ~~In-app Plex login~~ | ✅ Done — PIN overlay in Settings |
 | 27 | Plex search | UI — new navigation flow |
-| 28 | ~~libmpv migration (python-mpv) — tasks 001–003~~ | ✅ Done — `LibMpvPlayer` (python-mpv), programmatic keybinds + L2/R2 debounce, push-based timeline reporter (no IPC polling). `MpvIpc` deleted. |
-| 29 | Rating UI — thumbs up/down on detail screen | Needs a free button; deferred until after libmpv migration frees up input.conf |
+| 28 | ~~libmpv migration (python-mpv) — tasks 001–003~~ | ✅ Done — `LibMpvPlayer` (python-mpv), programmatic keybinds, push-based timeline reporter (no IPC polling). `MpvIpc` deleted. |
+| 29 | Rating UI — thumbs up/down on detail screen | Needs a free button; deferred |
 | 30 | Custom user-defined collections | Needs scoping |
 | 31 | GOG/Epic Games Store | Needs spike first |
 | 32 | Standalone emulator support (Dolphin, PCSX2) | Additive launcher extension |
@@ -152,13 +155,15 @@ bash scripts/check-deps.sh
 
 **Plex EPG timestamps are unreliable** (may be ~1 year ahead of wall clock). Use HDHomeRun guide timestamps instead — they are accurate Unix seconds.
 
-**MPV gamepad key names are SDL positional, not label-based.** On the 8BitDo Micro in D-input mode (Bluetooth), verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`, Start = `GAMEPAD_START`. L2/R2 use `on_key_press("GAMEPAD_LEFT/RIGHT_TRIGGER")` callbacks with 0.5s debounce in `LibMpvPlayer`.
+**MPV gamepad key names are SDL positional, not label-based.** On the 8BitDo Micro in D-input mode (Bluetooth), verified with `mpv --input-test`: A (east, evdev 304) = `GAMEPAD_ACTION_DOWN`, B (south, evdev 305) = `GAMEPAD_ACTION_RIGHT`, Start = `GAMEPAD_START`. Dpad scrobbling uses `GAMEPAD_DPAD_LEFT/RIGHT` (seek ±10s). L2/R2 triggers are **not bound** — feature was removed after multiple failed attempts (keybind `{no-repeat}`, `on_key_press`, `key_binding` state=='p' + `command_async` all had issues); dpad is sufficient.
 
 **`SDL_GAMECONTROLLERCONFIG` override has no effect on this device.** The 8BitDo Micro's SDL mapping is already correct in the system database. Do not attempt to override it.
 
 **python-mpv callbacks run on the mpv event thread.** Never call Qt UI methods directly from a property observer or `on_key_press` callback. Always use `QMetaObject.invokeMethod` with `Qt.ConnectionType.QueuedConnection`.
 
 **`LibMpvPlayer.set_wid()` must be called after `window.showFullScreen()`.** `winId()` is only valid after the window is mapped. In `main.py`, call `plex_library.set_wid(int(window.winId()))` after `showFullScreen()`.
+
+**`LibMpvPlayer.launch()` sets `pause=False` before `play()`.** MPV can retain a paused state across loads. This must stay — removing it will cause MPV to start paused intermittently.
 
 ---
 

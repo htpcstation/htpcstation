@@ -474,7 +474,6 @@ class PlexLibrary(QObject):
     mpvStarted = Signal()
     mpvFinished = Signal()
     mpvPlaybackReady = Signal()  # emitted when first frame is ready (wait_until_playing)
-    subtitlePickerRequested = Signal()  # emitted when Y button pressed during playback
     streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
     watchHistoryReady = Signal(list)
 
@@ -570,7 +569,6 @@ class PlexLibrary(QObject):
         self._mpv_launcher.processStarted.connect(self.mpvStarted)
         self._mpv_launcher.processFinished.connect(lambda _: self.mpvFinished.emit())
         self._mpv_launcher.mpvPlaybackStarted.connect(self._on_mpv_playback_started)
-        self._mpv_launcher.subtitlePickerRequested.connect(self._on_subtitle_picker_requested)
 
         # Timeline reporter for Plex playback state
         self._timeline_reporter = PlexTimelineReporter(lambda: self._client)
@@ -1272,87 +1270,6 @@ class PlexLibrary(QObject):
     def _on_mpv_playback_started(self) -> None:
         """Called on main thread when MPV first frame is ready."""
         self.mpvPlaybackReady.emit()
-
-    def _on_subtitle_picker_requested(self) -> None:
-        """Called on main thread when Y button pressed during MPV playback."""
-        self.subtitlePickerRequested.emit()
-
-    @Slot(result="QVariant")
-    def getMpvSubtitleTracks(self) -> list:
-        """Return subtitle tracks from the running MPV instance.
-
-        Returns a list of dicts with keys: id, lang, title, selected.
-        Reads the track-list property directly from the libmpv instance.
-        """
-        player = self._mpv_launcher._player
-        if player is None:
-            return []
-        try:
-            tracks = player["track-list"]
-        except Exception:  # noqa: BLE001
-            return []
-        if not isinstance(tracks, list):
-            return []
-        result = []
-        for t in tracks:
-            if t.get("type") == "sub":
-                result.append({
-                    "id": t.get("id", 0),
-                    "lang": t.get("lang", ""),
-                    "title": t.get("title", ""),
-                    "selected": bool(t.get("selected", False)),
-                })
-        return result
-
-    @Slot(int)
-    def setMpvSubtitleTrack(self, track_id: int) -> None:
-        """Select a subtitle track by its MPV track ID. Use 0 to disable."""
-        player = self._mpv_launcher._player
-        if player is None:
-            return
-        try:
-            if track_id == 0:
-                player["sid"] = "no"
-            else:
-                player["sid"] = track_id
-        except Exception:  # noqa: BLE001
-            pass
-
-    @Slot(int, str)
-    def persistTrackSelection(self, mpv_track_id: int, track_type: str) -> None:
-        """Persist a track selection to the Plex server.
-
-        track_type: 'subtitle' or 'audio'
-        Reads the track list from libmpv and maps MPV track ID to Plex stream ID.
-        """
-        if not self._client or not self._current_play_part_id:
-            return
-        player = self._mpv_launcher._player
-        if player is None:
-            return
-        try:
-            tracks = player["track-list"]
-        except Exception:  # noqa: BLE001
-            tracks = []
-        if not isinstance(tracks, list):
-            tracks = []
-        # Find the track with the given MPV id and type
-        mpv_type = "sub" if track_type == "subtitle" else "audio"
-        matched = next(
-            (t for t in tracks if t.get("id") == mpv_track_id and t.get("type") == mpv_type),
-            None,
-        )
-        if matched is None:
-            logger.warning("persistTrackSelection: MPV track %d not found", mpv_track_id)
-            return
-        # The Plex stream ID is stored in the 'ff-index' or 'src-id' field
-        # For now, use the MPV track id as a best-effort mapping
-        plex_stream_id = matched.get("src-id") or matched.get("ff-index") or mpv_track_id
-        part_id = self._current_play_part_id
-        client = self._client
-        self._executor.submit(
-            client.set_stream_selection, part_id, track_type, plex_stream_id
-        )
 
     @Slot(str, result="QVariant")
     def getArtist(self, rating_key: str) -> dict:
