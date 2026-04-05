@@ -41,7 +41,7 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 
 ---
 
-## M6 — RetroArch hotkey configuration (V1)
+## M6 — RetroArch hotkey configuration (V1) ✅ Done (CP30)
 
 **What:** Read and write RetroArch's `retroarch.cfg` to map HTPC Station's button layout to RetroArch hotkeys. V1 scope: hotkeys only (no per-system overrides, no rewind settings yet).
 
