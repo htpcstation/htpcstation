@@ -358,8 +358,7 @@ FocusScope {
                     color: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
                         ? Theme.colorText : Theme.colorTextDim
                     font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeBody)
-                    font.bold: menuDelegate.ListView.isCurrentItem
+                    font.pixelSize: root.vpx(Theme.fontSizeHeading)
                 }
 
                 // Now Playing — show current track to the right
