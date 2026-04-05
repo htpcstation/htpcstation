@@ -33,8 +33,8 @@ FocusScope {
     readonly property var _allTabs: [
         { name: "Retro Games", source: "RetroGamesScreen.qml", setting: "showRetroGamesTab" },
         { name: "PC Games",    source: "PcGamesScreen.qml",    setting: "showPcGamesTab" },
-        { name: "Watch",       source: "WatchScreen.qml",      setting: "showWatchTab" },
-        { name: "Listen",      source: "ListenScreen.qml",     setting: "showListenTab" },
+        { name: "Plex Media",  source: "WatchScreen.qml",      setting: "showWatchTab" },
+        { name: "Plex Music",  source: "ListenScreen.qml",     setting: "showListenTab" },
     ]
 
     // Tab visibility — built once on startup from saved settings.

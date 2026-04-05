@@ -24,6 +24,10 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
+    // Incremented when plex.librariesModelChanged fires so the select
+    // options expression re-evaluates reactively.
+    property int _librariesVersion: 0
+
     // ── System Cores sub-screen ───────────────────────────────────────────────
     function showSystemCores() {
         systemCoresScreen.systems = settings ? settings.getSystemsList() : []
@@ -69,8 +73,8 @@ FocusScope {
         { type: "header",  label: "Tabs" },
         { type: "toggle",  label: "Retro Games",         settingKey: "showRetroGamesTab" },
         { type: "toggle",  label: "PC Games",            settingKey: "showPcGamesTab" },
-        { type: "toggle",  label: "Watch",               settingKey: "showWatchTab" },
-        { type: "toggle",  label: "Listen",              settingKey: "showListenTab" },
+        { type: "toggle",  label: "Plex Media",           settingKey: "showWatchTab" },
+        { type: "toggle",  label: "Plex Music",          settingKey: "showListenTab" },
     ]
 
     // ── Toast notification ────────────────────────────────────────────────────
@@ -468,7 +472,12 @@ FocusScope {
                         }
                         if (rowData.settingKey === "musicLibrary") {
                             if (!plex) return []
-                            return plex.getMusicLibraries()
+                            // Read _librariesVersion so this expression re-evaluates
+                            // when onLibrariesModelChanged fires.
+                            void settingsScreen._librariesVersion
+                            var libs = plex.getMusicLibraries()
+                            if (libs.length === 0) plex.refresh()
+                            return libs
                         }
                         if (!plex) return []
                         if (rowData.settingKey === "plexServer") {
@@ -687,6 +696,14 @@ FocusScope {
                 plexLoginOverlay.visible = false
                 settingsList.forceActiveFocus()
             }
+        }
+    }
+
+    // ── Plex libraries model: force select re-evaluation on change ───────────
+    Connections {
+        target: plex
+        function onLibrariesModelChanged() {
+            settingsScreen._librariesVersion++
         }
     }
 
