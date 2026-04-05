@@ -45,50 +45,9 @@ Watch → "Plex Media", Listen → "Plex Music". Display labels only — config 
 
 ---
 
-## M5 — RetroArch core downloader (install.sh)
+## M5 — RetroArch core downloader (install.sh) ✅ Done (CP28)
 
-**What:** Optional step in `install.sh`: "Download recommended RetroArch cores?" Downloads a curated set of cores from the libretro buildbot nightly (`https://buildbot.libretro.com/nightly/linux/x86_64/latest/`), unzips them into the Flatpak cores directory.
-
-**Curated defaults (one core per system family, covers the systems in SYSTEM_DEFAULTS):**
-
-| Core file | Systems |
-|---|---|
-| `gambatte_libretro.so` | gb, gbc, sgb, gb2players, gbc2players |
-| `mgba_libretro.so` | gba |
-| `mesen_libretro.so` | nes, fds, sgb |
-| `snes9x_libretro.so` | snes, snes-msu1, sufami, satellaview |
-| `mupen64plus_next_libretro.so` | n64, n64dd |
-| `melonds_libretro.so` | nds |
-| `genesis_plus_gx_libretro.so` | megadrive, segacd, mastersystem, gamegear, sg1000, pico |
-| `picodrive_libretro.so` | sega32x |
-| `mednafen_psx_hw_libretro.so` | psx |
-| `mednafen_pce_libretro.so` | pce, pcengine, pcenginecd, supergrafx |
-| `mednafen_ngp_libretro.so` | ngp, ngpc |
-| `mednafen_wswan_libretro.so` | wonderswan, wonderswancolor, wswan, wswanc |
-| `mednafen_saturn_libretro.so` | saturn |
-| `flycast_libretro.so` | dreamcast, naomi, naomi2, atomiswave |
-| `fbneo_libretro.so` | neogeo, fbneo |
-| `ppsspp_libretro.so` | psp |
-| `pcsx2_libretro.so` | ps2 |
-| `vice_x64_libretro.so` | c64 |
-| `bluemsx_libretro.so` | msx1, msx2, msx2+, msxturbor, colecovision |
-| `fuse_libretro.so` | zxspectrum |
-| `dosbox_pure_libretro.so` | dos |
-| `scummvm_libretro.so` | scummvm |
-
-**Installer logic:**
-1. Check if RetroArch Flatpak is installed.
-2. Prompt: "Download recommended RetroArch cores? (~200MB) [y/N]"
-3. For each core: skip if `.so` already exists in cores dir. Download `.so.zip`, unzip, delete zip.
-4. Report success/failure per core. Non-fatal — missing cores are skipped with a warning.
-
-**Effort:** Medium (1 task, bash only).
-
-**Caveats:**
-- Buildbot URL format: `https://buildbot.libretro.com/nightly/linux/x86_64/latest/<core>.so.zip`
-- Requires `curl` or `wget` + `unzip` — add to `check-deps.sh` check if download option selected.
-- Flatpak sandbox: cores must go to `~/.var/app/org.libretro.RetroArch/config/retroarch/cores/`.
-- Some cores (pcsx2, dolphin) are large (50–100MB each) — consider making them opt-in within the prompt.
+New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatpak installed. Prompts with default N. Downloads 22 curated cores from `https://buildbot.libretro.com/nightly/linux/x86_64/latest/<core>.so.zip` into `~/.var/app/org.libretro.RetroArch/config/retroarch/cores/`. Skips already-installed cores. Non-fatal per-core failures. Total download ~50MB (sizes were much smaller than estimated — largest core is ppsspp at ~8MB).
 
 ---
 

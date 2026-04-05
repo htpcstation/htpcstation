@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 27)
+# HTPC Station — Resume Document (Checkpoint 28)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -30,6 +30,7 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,708 tests pas
 - M1: Music Library dropdown in Settings now populates immediately after first Plex sign-in
 - M2: Watch → "Plex Media", Listen → "Plex Music" (display labels only, config keys unchanged)
 - M3: Moonlight split into its own tab (`MoonlightScreen.qml`). PC Games is now Steam-only and GOG-ready. Each tab has its own Favorites and Recently Played. `MoonlightLibrary` gained `getRecentlyPlayed()` / `clearRecentlyPlayed()`. All `steam.setMoonlight*` injection removed.
+- M5: `install.sh` Phase 6 — optional RetroArch core downloader. 22 curated cores from libretro buildbot nightly, ~50MB total, default N, non-fatal per-core failures. Also fixed stale "Watch"/"Listen" labels in installer.
 
 **Next milestone:** M4 — RetroArch core selector (dropdown replacing text entry). See `docs/milestones.md`.
 
