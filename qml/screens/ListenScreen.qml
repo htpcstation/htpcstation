@@ -45,7 +45,6 @@ FocusScope {
     property string _previousView: "menu"
 
     function _goToNowPlaying() {
-        _previousView = currentView
         currentView = "nowplaying"
     }
 
@@ -90,6 +89,42 @@ FocusScope {
 
     // Playlist tracks (populated when entering playlistdetail view).
     property var _playlistTracks: []
+
+    // Error banner — shown when plex.plexError fires
+    property string _errorMessage: ""
+    property bool _errorPersistent: false   // true = auth error, stays until dismissed
+
+    function _showPlexError(errorType) {
+        switch (errorType) {
+            case "auth":
+                _errorMessage = "Plex sign-in required — go to Settings to sign in"
+                _errorPersistent = true
+                break
+            case "server":
+                _errorMessage = "Plex server unavailable"
+                _errorPersistent = false
+                break
+            case "network":
+                _errorMessage = "Network error — check your connection"
+                _errorPersistent = false
+                break
+            case "not_found":
+                _errorMessage = "Content not found"
+                _errorPersistent = false
+                break
+            default:
+                _errorMessage = "An unexpected error occurred"
+                _errorPersistent = false
+                break
+        }
+        if (!_errorPersistent) errorBannerTimer.restart()
+    }
+
+    Timer {
+        id: errorBannerTimer
+        interval: 5000
+        onTriggered: listenScreen._errorMessage = ""
+    }
 
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
@@ -142,6 +177,7 @@ FocusScope {
         function onLibrariesModelChanged() {
             listenScreen._trySelectMusicLibrary()
         }
+        function onPlexError(errorType) { listenScreen._showPlexError(errorType) }
     }
 
     // ── Duration formatting helpers ───────────────────────────────────────────
@@ -216,6 +252,9 @@ FocusScope {
     }
 
     onCurrentViewChanged: {
+        if (currentView !== "nowplaying") {
+            _previousView = currentView
+        }
         if (currentView === "detail" && _selectedArtistKey) {
             _artistData = plex.getArtist(_selectedArtistKey)
             _albums = plex.getArtistAlbums(_selectedArtistKey)
@@ -2220,6 +2259,55 @@ FocusScope {
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+        }
+    }
+
+    // ── Error banner ──────────────────────────────────────────────────────────
+    Rectangle {
+        id: errorBanner
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.vpx(44)
+        color: listenScreen._errorPersistent ? Theme.colorAccentNegative || "#8B1A1A"
+                                             : Qt.darker(Theme.colorSecondary, 1.4)
+        visible: listenScreen._errorMessage !== ""
+        z: 160
+
+        Row {
+            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            spacing: root.vpx(12)
+
+            Text {
+                text: listenScreen._errorPersistent ? "⚠" : "ℹ"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                text: listenScreen._errorMessage
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                visible: listenScreen._errorPersistent
+                text: "  [Settings →]"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        // Dismiss on any key press for persistent errors
+        Keys.onPressed: (event) => {
+            if (listenScreen._errorPersistent) {
+                listenScreen._errorMessage = ""
+                event.accepted = true
             }
         }
     }

@@ -447,3 +447,45 @@ class TestGetLyricsUserAgent:
 
         timeout = mock_get.call_args.kwargs.get("timeout") or mock_get.call_args[1].get("timeout")
         assert timeout == 10
+
+
+# ---------------------------------------------------------------------------
+# Zero-duration guard — getLyrics slot
+# ---------------------------------------------------------------------------
+
+
+class TestGetLyricsZeroDuration:
+    def test_zero_duration_emits_lyrics_unavailable(self) -> None:
+        """getLyrics with duration_ms=0 emits lyricsUnavailable without touching the executor."""
+        lib = _make_lib()
+
+        received_unavailable = []
+        lib.lyricsUnavailable.connect(lambda rk: received_unavailable.append(rk))
+
+        received_ready = []
+        lib.lyricsReady.connect(lambda rk, lines: received_ready.append(rk))
+
+        with patch("backend.plex_library.requests.get") as mock_get:
+            lib.getLyrics("42", "Track", "Artist", "Album", 0)
+
+        assert received_unavailable == ["42"]
+        assert received_ready == []
+        mock_get.assert_not_called()
+
+    def test_zero_duration_does_not_submit_to_executor(self) -> None:
+        """getLyrics with duration_ms=0 does not submit a task to the executor."""
+        lib = _make_lib()
+
+        with patch.object(lib._executor, "submit") as mock_submit:
+            lib.getLyrics("99", "Track", "Artist", "Album", 0)
+
+        mock_submit.assert_not_called()
+
+    def test_nonzero_duration_proceeds_normally(self) -> None:
+        """getLyrics with duration_ms > 0 still submits to the executor (no false guard)."""
+        lib = _make_lib()
+
+        with patch.object(lib._executor, "submit") as mock_submit:
+            lib.getLyrics("7", "Track", "Artist", "Album", 180000)
+
+        mock_submit.assert_called_once()

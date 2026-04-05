@@ -34,9 +34,10 @@ class BrowserLauncher(QObject):
     processStarted = Signal()     # emitted when browser starts successfully
     processFinished = Signal(int)  # exit_code
 
-    def __init__(self, browser_command: str = "flatpak run com.brave.Browser", parent: Optional[QObject] = None) -> None:
+    def __init__(self, browser_command: str = "flatpak run com.brave.Browser", button_layout: str = "standard", parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._browser_command = browser_command
+        self._button_layout: str = button_layout
         self._process: Optional[QProcess] = None
         self._start_time: float = 0.0
         # Extension directory ships with the project at <project_root>/extension/
@@ -102,6 +103,10 @@ class BrowserLauncher(QObject):
 
         self._start_time = time.monotonic()
         self._process.start(program, args)
+
+    def set_button_layout(self, layout: str) -> None:
+        """Update the stored button layout used when deploying the extension."""
+        self._button_layout = layout
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -230,10 +235,7 @@ class BrowserLauncher(QObject):
         # generated mapping is available as window.__htpcGeneratedMapping.
         try:
             mapping = load_mapping()
-            # Read button layout from config to apply accept/cancel swap
-            from backend.config import Config
-            _cfg = Config()
-            js_content = generate_mapping_js(mapping, button_layout=_cfg.button_layout)
+            js_content = generate_mapping_js(mapping, button_layout=self._button_layout)
             mapping_js_path = dst / "generated_mapping.js"
             mapping_js_path.write_text(js_content, encoding="utf-8")
             logger.debug("BrowserLauncher: generated mapping JS written to %s", mapping_js_path)

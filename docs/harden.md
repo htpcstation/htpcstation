@@ -8,7 +8,7 @@ Generated from a full codebase audit. Grouped into batches by priority.
 
 | ID | File | Issue |
 |----|------|-------|
-| C1 | `plex_library.py` | `_mpvLaunchReady.emit()` fixed: 8 args → 5 |
+| C1 | `plex_library.py` | `_mpvLaunchReady.emit()` fixed: 8 args → 6 |
 | C3 | `config.py` | `assert` → guard + warning in `set_plex_player` |
 | C4 | `plex_library.py` | `_save_my_list` wrapped in `try/except OSError` |
 | M1 | `mpv_launcher.py` | timeout path emits `_emit_finished` so overlay clears |
@@ -55,31 +55,26 @@ Generated from a full codebase audit. Grouped into batches by priority.
 
 ---
 
-## Test coverage gaps
+## Remaining items ✅ Done (CP26)
 
-| ID | Area | Issue |
-|----|------|-------|
-| T1 | `poster_cache.py` | Zero direct tests — locking, partial-file cleanup, thread-safety untested |
-| T2 | `plex_timeline.py` | `stop()` thread join race untested |
-| T3 | `config.py` | Malformed JSON, empty file, `save()` OSError — zero tests |
-| T4 | `live_tv_library.py` | No test for guide cache staleness |
-| T5 | `plex_library.py` | Zero-URL path in `playWithMpv` worker never tested (also the C1 crash path) |
-| T6 | `plex_library.py` | `_artists_cache_path` hardcoded path never tested |
-
----
-
-## Docs / gotchas
-
-| ID | File | Issue |
-|----|------|-------|
-| G1 | `architecture.md` | Stale 8-arg `_mpvLaunchReady` signature — should be 5 args |
-| G2 | `resume-project.md` | Test count will drift — update at each checkpoint |
+| ID | Area | Resolution |
+|----|------|------------|
+| H1 | `plex_library.py` | Zero-duration guard in `getLyrics`: emits `lyricsUnavailable` immediately, skips LRCLIB fetch |
+| M2 | `WatchScreen.qml` / `ListenScreen.qml` | `plexError` banner on Watch + Listen tabs; transient toast during active MPV playback on Watch |
+| M4 | `ListenScreen.qml` | `_previousView` updated in `onCurrentViewChanged` (not just in `_goToNowPlaying`) — always tracks last non-nowplaying view |
+| T1–T3 | tests | `test_poster_cache.py`, `test_plex_timeline_reporter.py`, `test_config_edge_cases.py` added in CP25 |
+| T4 | `live_tv_library.py` | N/A — cache has no staleness logic by design. Warm start serves cache instantly then always overwrites with fresh fetch. Nothing to test. |
+| T5 | `plex_library.py` | Covered by `test_harden_batch1.py` C1 test (updated for 6-arg signal in CP25) |
+| T6 | `plex_library.py` | Covered by `test_config_edge_cases.py` (CP25) |
+| G1 | `architecture.md` | Fixed in CP25 — `_mpvLaunchReady` correctly documented as 6 args |
+| G2 | `resume-project.md` | Kept current at each checkpoint |
 
 ---
 
-## Notes
+## Deferred / Won't fix
 
-- **H1** (zero-duration track → bad LRCLIB param + silent auto-advance): partially overlaps M3 (auto-advance on bad URL). Fix M3 first; H1's LRCLIB side is low-impact.
-- **M2** (server offline mid-playback): acceptable recovery path exists; no user message is the only gap. Deferred — requires a toast/notification system.
-- **M4** (`_previousView` stale after playlist nav): minor cosmetic — stale header text only.
-- **M6** (album list Up dead end at first item): acceptable — B is the standard back gesture.
+| ID | Note |
+|----|------|
+| C2 | Race window is ~1 event-loop tick; not a real stall in practice |
+| M6 | Album list Up dead end at first item — B is the standard back gesture, acceptable |
+| M2 (server offline mid-playback, no reconnect) | Recovery path exists; toast now shown. Automatic reconnect deferred — requires backend work. |

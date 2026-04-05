@@ -682,6 +682,18 @@ class Config:
                 "show_listen": self._show_listen_tab,
             },
         }
+        # Safety guard: never overwrite a config that has credentials with a blank one.
+        if CONFIG_FILE.exists() and not self._plex_token and not self._plex_server_id:
+            try:
+                existing = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                if existing.get("plex", {}).get("token") or existing.get("plex", {}).get("server_id"):
+                    logger.error(
+                        "Config.save: refusing to overwrite config with credentials "
+                        "— in-memory state has blank token/server_id. This is a bug."
+                    )
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass  # can't read existing file — proceed with save
         try:
             CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as exc:

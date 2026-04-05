@@ -590,6 +590,9 @@ class SettingsManager(QObject):
         # Also update the Keys object so labels change immediately
         if self._keys is not None:
             self._keys.setButtonLayout(layout)
+        # Keep BrowserLauncher in sync so the next extension deploy uses the new layout
+        if self._browser_launcher is not None:
+            self._browser_launcher.set_button_layout(layout)
         self.buttonLayoutChanged.emit()
 
     @Slot(str, str)

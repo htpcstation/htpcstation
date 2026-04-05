@@ -1654,6 +1654,10 @@ class PlexLibrary(QObject):
             plex.getLyrics(track.ratingKey, track.title,
                            track.grandparentTitle, track.parentTitle, track.durationMs)
         """
+        if duration_ms == 0:
+            logger.debug("getLyrics: skipping zero-duration track %s", rating_key)
+            self.lyricsUnavailable.emit(rating_key)
+            return
         self._executor.submit(
             self._worker_fetch_lyrics,
             rating_key,

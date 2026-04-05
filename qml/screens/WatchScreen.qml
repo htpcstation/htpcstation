@@ -200,6 +200,8 @@ FocusScope {
     // Set when the user cancels after MPV was already launched — causes
     // onMpvPlaybackReady to immediately stop playback instead of showing video.
     property bool _cancelledDuringLoad: false
+    // True while MPV is actively playing back content (set on playback ready, cleared on finish).
+    property bool _mpvPlaying: false
 
     // Intro marker state for auto-skip
     property int  _introEndMs:   0      // 0 = no intro for current title
@@ -224,6 +226,26 @@ FocusScope {
     property bool _errorPersistent: false   // true = auth error, stays until dismissed
 
     function _showPlexError(errorType) {
+        // During active MPV playback, route transient errors to the toast
+        // instead of the banner (auth errors always use the banner).
+        if (_mpvPlaying && errorType !== "auth") {
+            switch (errorType) {
+                case "server":
+                    _toastText = "Plex server unavailable"
+                    break
+                case "network":
+                    _toastText = "Network error"
+                    break
+                case "not_found":
+                    _toastText = "Content not found"
+                    break
+                default:
+                    _toastText = "Unexpected error"
+                    break
+            }
+            toastTimer.restart()
+            return
+        }
         switch (errorType) {
             case "auth":
                 _errorMessage = "Plex sign-in required — go to Settings to sign in"
@@ -322,6 +344,7 @@ FocusScope {
             // Playback started successfully — clear the launch flag before
             // calling _clearLoading() so it doesn't treat this as a cancel.
             watchScreen._mpvLaunched = false
+            watchScreen._mpvPlaying = true
             watchScreen._clearLoading()
         }
         function onMpvStarted() { /* keep for _mpvRunning flag in HomeScreen */ }
@@ -330,6 +353,7 @@ FocusScope {
             // this happens when the previous stop (from cancel or resume-dialog
             // confirm) fires processFinished after the next playWithMpv has started.
             if (watchScreen._mpvLaunched) return
+            watchScreen._mpvPlaying = false
             watchScreen._clearLoading()
         }
         function onPlexError(errorType) { watchScreen._showPlexError(errorType) }
@@ -384,6 +408,7 @@ FocusScope {
         function onMpvPlaybackReady() { watchScreen._clearLoading() }
         function onMpvFinished() {
             if (watchScreen._mpvLaunched) return
+            watchScreen._mpvPlaying = false
             watchScreen._clearLoading()
         }
     }

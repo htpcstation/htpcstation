@@ -108,7 +108,7 @@ def main() -> None:
     engine.rootContext().setContextProperty("library", library)
 
     # Browser launcher for Plex Web kiosk mode
-    browser_launcher = BrowserLauncher(config.browser_command)
+    browser_launcher = BrowserLauncher(config.browser_command, button_layout=config.button_layout)
 
     # Plex library — exposed to QML as `plex`
     plex_library = PlexLibrary(config, browser_launcher)
