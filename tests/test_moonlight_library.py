@@ -1025,105 +1025,6 @@ class TestMoonlightLibrarySortApps:
 
 
 # ---------------------------------------------------------------------------
-# SteamLibrary — setMoonlightSources
-# ---------------------------------------------------------------------------
-
-
-class TestSteamLibrarySetMoonlightSources:
-    def _make_steam_lib(self):
-        from backend.steam_library import SteamLibrary
-
-        with patch("backend.steam_library.discover_steam_games", return_value=[]):
-            return SteamLibrary()
-
-    def test_set_moonlight_sources_appends_to_steam(self) -> None:
-        """setMoonlightSources appends Moonlight entries after the Steam entry."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_steam_lib()
-        sources = [
-            {"name": "DESKTOP-PC", "gameCount": 5, "source": "moonlight:uuid-1"},
-        ]
-        lib.setMoonlightSources(sources)
-
-        assert lib._sources_model.rowCount() == 2
-        idx0 = lib._sources_model.index(0, 0)
-        idx1 = lib._sources_model.index(1, 0)
-        assert lib._sources_model.data(idx0, SteamSourceListModel.NameRole) == "Steam"
-        assert lib._sources_model.data(idx1, SteamSourceListModel.NameRole) == "DESKTOP-PC"
-        assert lib._sources_model.data(idx1, SteamSourceListModel.SourceRole) == "moonlight:uuid-1"
-        assert lib._sources_model.data(idx1, SteamSourceListModel.GameCountRole) == 5
-
-    def test_set_moonlight_sources_empty_list_shows_only_steam(self) -> None:
-        """setMoonlightSources([]) shows only the Steam entry."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_steam_lib()
-        lib.setMoonlightSources([])
-
-        assert lib._sources_model.rowCount() == 1
-        idx = lib._sources_model.index(0, 0)
-        assert lib._sources_model.data(idx, SteamSourceListModel.NameRole) == "Steam"
-
-    def test_set_moonlight_sources_emits_sources_model_changed(self) -> None:
-        """setMoonlightSources emits sourcesModelChanged."""
-        lib = self._make_steam_lib()
-
-        signals: list[bool] = []
-        lib.sourcesModelChanged.connect(lambda: signals.append(True))
-        lib.setMoonlightSources([])
-
-        assert len(signals) == 1
-
-    def test_set_moonlight_sources_multiple_hosts(self) -> None:
-        """setMoonlightSources handles multiple Moonlight hosts."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_steam_lib()
-        sources = [
-            {"name": "PC1", "gameCount": 3, "source": "moonlight:uuid-1"},
-            {"name": "PC2", "gameCount": 7, "source": "moonlight:uuid-2"},
-        ]
-        lib.setMoonlightSources(sources)
-
-        assert lib._sources_model.rowCount() == 3  # Steam + 2 Moonlight
-
-    def test_set_moonlight_sources_replaces_previous(self) -> None:
-        """setMoonlightSources replaces previously injected Moonlight sources."""
-        lib = self._make_steam_lib()
-
-        lib.setMoonlightSources([
-            {"name": "PC1", "gameCount": 3, "source": "moonlight:uuid-1"},
-        ])
-        assert lib._sources_model.rowCount() == 2
-
-        # Replace with a different set
-        lib.setMoonlightSources([
-            {"name": "PC2", "gameCount": 5, "source": "moonlight:uuid-2"},
-            {"name": "PC3", "gameCount": 2, "source": "moonlight:uuid-3"},
-        ])
-        assert lib._sources_model.rowCount() == 3  # Steam + 2 new Moonlight
-
-    def test_set_moonlight_sources_steam_game_count_reflects_all_games(self) -> None:
-        """setMoonlightSources preserves the correct Steam game count."""
-        from backend.steam_library import SteamGame, SteamLibrary, SteamSourceListModel
-
-        games = [
-            SteamGame("1", "Game A", "gamea", 0, 0, ""),
-            SteamGame("2", "Game B", "gameb", 0, 0, ""),
-        ]
-        with patch("backend.steam_library.discover_steam_games", return_value=games):
-            lib = SteamLibrary()
-
-        lib.setMoonlightSources([
-            {"name": "PC1", "gameCount": 5, "source": "moonlight:uuid-1"},
-        ])
-
-        idx = lib._sources_model.index(0, 0)
-        assert lib._sources_model.data(idx, SteamSourceListModel.GameCountRole) == 2
-
-
-# ---------------------------------------------------------------------------
 # MoonlightLibrary — signal forwarding
 # ---------------------------------------------------------------------------
 
@@ -1996,141 +1897,140 @@ class TestSteamSourceListModelOfflineRole:
 
 
 # ---------------------------------------------------------------------------
-# main.py _on_moonlight_hosts_changed — offline flag (Task 004)
+# MoonlightLibrary — getRecentlyPlayed
 # ---------------------------------------------------------------------------
 
 
-class TestOnMoonlightHostsChangedOfflineFlag:
-    """Tests for the 'offline' flag set in _on_moonlight_hosts_changed (main.py).
+class TestMoonlightLibraryGetRecentlyPlayed:
+    """Tests for MoonlightLibrary.getRecentlyPlayed()."""
 
-    We test the logic by simulating the conditions that main.py checks:
-      - Paired host exists, loading=False, hostOnline=False → offline=True
-      - Paired host exists, loading=False, hostOnline=True  → offline=False
-      - Paired host exists, loading=True                    → offline=False (loading takes precedence)
-      - No paired hosts                                     → setMoonlightSources([]) called
-    """
-
-    def _make_steam_lib(self):
-        from backend.steam_library import SteamLibrary
-        with patch("backend.steam_library.discover_steam_games", return_value=[]):
-            return SteamLibrary()
-
-    def _make_moonlight_lib(self, paired_hosts, all_apps=None, loading=False, host_online=False):
+    def _make_lib_with_apps(
+        self,
+        apps: list[MoonlightApp],
+        hosts: list[MoonlightHost] | None = None,
+    ) -> "MoonlightLibrary":
         from backend.moonlight_library import MoonlightLibrary
+
         lib = MoonlightLibrary()
-        lib._paired_hosts = paired_hosts
-        lib._all_apps = all_apps or []
-        lib._loading = loading
-        lib._host_online = host_online
+        lib._paired_hosts = hosts or []
+        lib._all_apps = list(apps)
+        lib._current_apps = list(apps)
+        lib._apps_model.set_apps(apps)
         return lib
 
-    def _run_handler(self, moonlight, steam):
-        """Simulate the _on_moonlight_hosts_changed closure from main.py."""
-        from datetime import datetime, timezone
+    def test_returns_empty_when_no_apps(self) -> None:
+        """getRecentlyPlayed returns [] when _all_apps is empty."""
+        from backend.moonlight_library import MoonlightLibrary
 
-        if not moonlight._paired_hosts:
-            steam.setMoonlightSources([])
-            steam.setMoonlightRecentlyPlayed([])
-            return
+        lib = MoonlightLibrary()
+        assert lib.getRecentlyPlayed() == []
 
-        app_count = len(moonlight._all_apps)
-        is_loading = moonlight.loading
-        is_offline = (not is_loading) and (not moonlight.hostOnline) and bool(moonlight._paired_hosts)
-        steam.setMoonlightSources([{
-            "name": "Moonlight Games",
-            "gameCount": app_count,
-            "source": "moonlight",
-            "loading": is_loading,
-            "offline": is_offline,
-        }])
+    def test_returns_empty_when_no_history(self) -> None:
+        """getRecentlyPlayed returns [] when apps exist but none have last_played set."""
+        apps = [
+            MoonlightApp(name="Desktop", host_uuid="uuid-1"),
+            MoonlightApp(name="Steam", host_uuid="uuid-1"),
+        ]
+        lib = self._make_lib_with_apps(apps)
+        assert lib.getRecentlyPlayed() == []
 
-    def _get_moonlight_source(self, steam):
-        """Return the first Moonlight source dict from the sources model, or None."""
-        from backend.steam_library import SteamSourceListModel
-        model = steam._sources_model
-        for i in range(model.rowCount()):
-            idx = model.index(i, 0)
-            if model.data(idx, SteamSourceListModel.SourceRole) == "moonlight":
-                return {
-                    "loading": model.data(idx, SteamSourceListModel.LoadingRole),
-                    "offline": model.data(idx, SteamSourceListModel.OfflineRole),
-                    "gameCount": model.data(idx, SteamSourceListModel.GameCountRole),
-                }
-        return None
+    def test_returns_apps_with_history(self) -> None:
+        """getRecentlyPlayed returns apps that have a non-empty last_played."""
+        apps = [
+            MoonlightApp(name="Desktop", host_uuid="uuid-1", last_played="2026-03-22T18:45:00Z"),
+            MoonlightApp(name="Steam", host_uuid="uuid-1"),
+        ]
+        lib = self._make_lib_with_apps(apps)
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 1
+        assert result[0]["name"] == "Desktop"
 
-    def test_offline_true_when_host_down_after_phase2(self) -> None:
-        """offline=True when paired host exists, loading=False, hostOnline=False."""
-        steam = self._make_steam_lib()
-        moonlight = self._make_moonlight_lib(
-            paired_hosts=[_make_host()],
-            loading=False,
-            host_online=False,
-        )
+    def test_excludes_apps_without_history(self) -> None:
+        """getRecentlyPlayed excludes apps with empty last_played."""
+        apps = [
+            MoonlightApp(name="Played", host_uuid="uuid-1", last_played="2026-03-22T18:45:00Z"),
+            MoonlightApp(name="Unplayed", host_uuid="uuid-1", last_played=""),
+        ]
+        lib = self._make_lib_with_apps(apps)
+        result = lib.getRecentlyPlayed()
+        names = [r["name"] for r in result]
+        assert "Played" in names
+        assert "Unplayed" not in names
 
-        self._run_handler(moonlight, steam)
+    def test_sorted_by_last_played_descending(self) -> None:
+        """getRecentlyPlayed returns apps sorted by lastPlayed descending (most recent first)."""
+        apps = [
+            MoonlightApp(name="Old", host_uuid="uuid-1", last_played="2026-01-01T00:00:00Z"),
+            MoonlightApp(name="New", host_uuid="uuid-1", last_played="2026-03-22T18:45:00Z"),
+            MoonlightApp(name="Mid", host_uuid="uuid-1", last_played="2026-02-15T12:00:00Z"),
+        ]
+        lib = self._make_lib_with_apps(apps)
+        result = lib.getRecentlyPlayed()
+        names = [r["name"] for r in result]
+        assert names == ["New", "Mid", "Old"]
 
-        source = self._get_moonlight_source(steam)
-        assert source is not None
-        assert source["offline"] is True
-        assert source["loading"] is False
+    def test_limited_to_20_entries(self) -> None:
+        """getRecentlyPlayed returns at most 20 entries."""
+        apps = [
+            MoonlightApp(
+                name=f"Game {i}",
+                host_uuid="uuid-1",
+                last_played=f"2026-03-{i + 1:02d}T00:00:00Z",
+            )
+            for i in range(25)
+        ]
+        lib = self._make_lib_with_apps(apps)
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 20
 
-    def test_offline_false_when_host_online(self) -> None:
-        """offline=False when paired host exists, loading=False, hostOnline=True."""
-        steam = self._make_steam_lib()
-        moonlight = self._make_moonlight_lib(
-            paired_hosts=[_make_host()],
-            all_apps=[_make_app("Game A")],
-            loading=False,
-            host_online=True,
-        )
+    def test_result_shape(self) -> None:
+        """Each entry has name, appId, imagePath, lastPlayed, hostName, hostAddress, source."""
+        host = _make_host("DESKTOP-PC", "uuid-1", "192.168.0.10")
+        apps = [
+            MoonlightApp(
+                name="Desktop",
+                host_uuid="uuid-1",
+                image_path="/art/desktop.jpg",
+                last_played="2026-03-22T18:45:00Z",
+            )
+        ]
+        lib = self._make_lib_with_apps(apps, hosts=[host])
+        result = lib.getRecentlyPlayed()
+        assert len(result) == 1
+        entry = result[0]
+        assert entry["name"] == "Desktop"
+        assert entry["appId"] == ""
+        assert entry["imagePath"] == "/art/desktop.jpg"
+        assert entry["lastPlayed"] == "2026-03-22T18:45:00Z"
+        assert entry["hostName"] == "DESKTOP-PC"
+        assert entry["hostAddress"] == "192.168.0.10"
+        assert entry["source"] == "moonlight"
 
-        self._run_handler(moonlight, steam)
 
-        source = self._get_moonlight_source(steam)
-        assert source is not None
-        assert source["offline"] is False
-        assert source["loading"] is False
-        assert source["gameCount"] == 1
+# ---------------------------------------------------------------------------
+# MoonlightLibrary — clearRecentlyPlayed
+# ---------------------------------------------------------------------------
 
-    def test_offline_false_during_loading(self) -> None:
-        """offline=False while loading=True (loading indicator takes precedence)."""
-        steam = self._make_steam_lib()
-        moonlight = self._make_moonlight_lib(
-            paired_hosts=[_make_host()],
-            loading=True,
-            host_online=False,
-        )
 
-        self._run_handler(moonlight, steam)
+class TestMoonlightLibraryClearRecentlyPlayed:
+    """Tests for MoonlightLibrary.clearRecentlyPlayed()."""
 
-        source = self._get_moonlight_source(steam)
-        assert source is not None
-        assert source["offline"] is False
-        assert source["loading"] is True
+    def test_calls_clear_history(self) -> None:
+        """clearRecentlyPlayed calls clear_history from moonlight_play_history."""
+        from backend.moonlight_library import MoonlightLibrary
 
-    def test_no_moonlight_source_when_no_paired_hosts(self) -> None:
-        """setMoonlightSources([]) is called when no paired hosts exist."""
-        steam = self._make_steam_lib()
-        moonlight = self._make_moonlight_lib(paired_hosts=[])
+        lib = MoonlightLibrary()
+        with patch("backend.moonlight_library.clear_history") as mock_clear:
+            lib.clearRecentlyPlayed()
+        mock_clear.assert_called_once()
 
-        self._run_handler(moonlight, steam)
+    def test_logs_info(self) -> None:
+        """clearRecentlyPlayed emits an INFO log message."""
+        import logging
+        from backend.moonlight_library import MoonlightLibrary
 
-        source = self._get_moonlight_source(steam)
-        assert source is None
-
-    def test_game_count_zero_when_offline(self) -> None:
-        """gameCount is 0 when host is offline (no apps loaded)."""
-        steam = self._make_steam_lib()
-        moonlight = self._make_moonlight_lib(
-            paired_hosts=[_make_host()],
-            all_apps=[],  # no apps when offline
-            loading=False,
-            host_online=False,
-        )
-
-        self._run_handler(moonlight, steam)
-
-        source = self._get_moonlight_source(steam)
-        assert source is not None
-        assert source["gameCount"] == 0
-        assert source["offline"] is True
+        lib = MoonlightLibrary()
+        with patch("backend.moonlight_library.clear_history"), \
+             patch("backend.moonlight_library.logger") as mock_logger:
+            lib.clearRecentlyPlayed()
+        mock_logger.info.assert_called()

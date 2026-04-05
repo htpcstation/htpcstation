@@ -2645,3 +2645,290 @@ class TestSettingsManagerSortPlexArtists:
         manager.setSortPlexArtists("az")
 
         assert len(emitted) == 1
+
+
+# ---------------------------------------------------------------------------
+# Config — show_moonlight_tab
+# ---------------------------------------------------------------------------
+
+
+class TestConfigShowMoonlightTab:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_show_moonlight_tab_default_is_true(self, tmp_path: Path) -> None:
+        """Config.show_moonlight_tab defaults to True."""
+        config = self._make_config(tmp_path)
+        assert config.show_moonlight_tab is True
+
+    def test_show_moonlight_tab_loaded_from_json(self, tmp_path: Path) -> None:
+        """Config._load() reads show_moonlight from the tabs section."""
+        config = self._make_config(
+            tmp_path,
+            {"tabs": {"show_moonlight": False}},
+        )
+        assert config.show_moonlight_tab is False
+
+    def test_show_moonlight_tab_saved_to_json(self, tmp_path: Path) -> None:
+        """Config.save() writes show_moonlight to the tabs section."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config._show_moonlight_tab = False
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_moonlight"] is False
+
+    def test_set_show_moonlight_tab_updates_and_saves(self, tmp_path: Path) -> None:
+        """set_show_moonlight_tab updates the property and persists."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_moonlight_tab(False)
+
+        assert config.show_moonlight_tab is False
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["tabs"]["show_moonlight"] is False
+
+    def test_show_moonlight_tab_round_trip(self, tmp_path: Path) -> None:
+        """show_moonlight_tab survives a save/load round-trip."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_moonlight_tab(False)
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.show_moonlight_tab is False
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — showMoonlightTab property and setShowMoonlightTab slot
+# ---------------------------------------------------------------------------
+
+
+class TestShowMoonlightTab:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_show_moonlight_tab_property_default_true(self, tmp_path: Path) -> None:
+        """showMoonlightTab property returns True by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.showMoonlightTab is True
+
+    def test_show_moonlight_tab_property_reflects_config(self, tmp_path: Path) -> None:
+        """showMoonlightTab property reflects the config value."""
+        manager, _ = self._make_manager(tmp_path, {"tabs": {"show_moonlight": False}})
+        assert manager.showMoonlightTab is False
+
+    def test_set_show_moonlight_tab_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowMoonlightTab updates config and emits showMoonlightTabChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted: list[bool] = []
+        manager.showMoonlightTabChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowMoonlightTab(False)
+
+        assert config.show_moonlight_tab is False
+        assert len(emitted) == 1
+
+    def test_set_show_moonlight_tab_to_true_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setShowMoonlightTab(True) also emits the signal."""
+        manager, config = self._make_manager(tmp_path, {"tabs": {"show_moonlight": False}})
+        emitted: list[bool] = []
+        manager.showMoonlightTabChanged.connect(lambda: emitted.append(True))
+
+        manager.setShowMoonlightTab(True)
+
+        assert config.show_moonlight_tab is True
+        assert len(emitted) == 1
+
+    def test_show_moonlight_tab_config_round_trip(self, tmp_path: Path) -> None:
+        """show_moonlight_tab survives a save/load round-trip via SettingsManager."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_show_moonlight_tab(False)
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.show_moonlight_tab is False
+
+
+# ---------------------------------------------------------------------------
+# Config — moonlight_view_mode
+# ---------------------------------------------------------------------------
+
+
+class TestConfigMoonlightViewMode:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_moonlight_view_mode_default_is_grid(self, tmp_path: Path) -> None:
+        """A fresh Config() has moonlight_view_mode == 'grid'."""
+        config = self._make_config(tmp_path)
+        assert config.moonlight_view_mode == "grid"
+
+    def test_set_moonlight_view_mode_to_list(self, tmp_path: Path) -> None:
+        """set_moonlight_view_mode('list') → moonlight_view_mode == 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_moonlight_view_mode("list")
+
+        assert config.moonlight_view_mode == "list"
+
+    def test_set_moonlight_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """set_moonlight_view_mode('invalid') falls back to 'grid'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_moonlight_view_mode("invalid")
+
+        assert config.moonlight_view_mode == "grid"
+
+    def test_moonlight_view_mode_persistence_round_trip(self, tmp_path: Path) -> None:
+        """Set to 'list', save, reload from same file → reads back 'list'."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_moonlight_view_mode("list")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.moonlight_view_mode == "list"
+
+    def test_load_validation_bogus_value_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with 'moonlight_view_mode': 'bogus' in ui section loads as 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"moonlight_view_mode": "bogus"}},
+        )
+        assert config.moonlight_view_mode == "grid"
+
+    def test_missing_moonlight_view_mode_key_defaults_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """Config JSON with no moonlight_view_mode key defaults to 'grid'."""
+        config = self._make_config(
+            tmp_path,
+            {"ui": {"video_snap_autoplay": True}},
+        )
+        assert config.moonlight_view_mode == "grid"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — moonlightViewMode property and setMoonlightViewMode slot
+# ---------------------------------------------------------------------------
+
+
+class TestMoonlightViewMode:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_moonlight_view_mode_property_default_is_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """moonlightViewMode returns 'grid' by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.moonlightViewMode == "grid"
+
+    def test_set_moonlight_view_mode_to_list(self, tmp_path: Path) -> None:
+        """setMoonlightViewMode('list') → moonlightViewMode returns 'list'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setMoonlightViewMode("list")
+
+        assert manager.moonlightViewMode == "list"
+
+    def test_set_moonlight_view_mode_emits_signal(self, tmp_path: Path) -> None:
+        """setMoonlightViewMode('list') emits moonlightViewModeChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted = []
+        manager.moonlightViewModeChanged.connect(lambda: emitted.append(True))
+
+        manager.setMoonlightViewMode("list")
+
+        assert len(emitted) == 1
+
+    def test_set_moonlight_view_mode_invalid_falls_back_to_grid(
+        self, tmp_path: Path
+    ) -> None:
+        """setMoonlightViewMode('invalid') → moonlightViewMode returns 'grid'."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setMoonlightViewMode("invalid")
+
+        assert manager.moonlightViewMode == "grid"
+
+    def test_set_moonlight_view_mode_persists(self, tmp_path: Path) -> None:
+        """setMoonlightViewMode persists the value via config."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setMoonlightViewMode("list")
+
+        assert config.moonlight_view_mode == "list"

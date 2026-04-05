@@ -255,6 +255,7 @@ class Config:
         # Tab visibility settings
         self._show_retro_games_tab: bool = True
         self._show_pc_games_tab: bool = True
+        self._show_moonlight_tab: bool = True
         self._show_watch_tab: bool = True
         self._show_listen_tab: bool = True
         # Music library selection
@@ -275,6 +276,7 @@ class Config:
         # View mode preferences
         self._retro_games_view_mode: str = "grid"
         self._pc_games_view_mode: str = "grid"
+        self._moonlight_view_mode: str = "grid"
         self._watch_view_mode: str = "grid"
         self._listen_view_mode: str = "grid"
 
@@ -428,6 +430,11 @@ class Config:
         return self._pc_games_view_mode
 
     @property
+    def moonlight_view_mode(self) -> str:
+        """Persisted view mode for the Moonlight screen. Either 'grid' or 'list'."""
+        return self._moonlight_view_mode
+
+    @property
     def watch_view_mode(self) -> str:
         """Persisted view mode for the Watch screen. Either 'grid' or 'list'."""
         return self._watch_view_mode
@@ -527,6 +534,11 @@ class Config:
         self._pc_games_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
+    def set_moonlight_view_mode(self, mode: str) -> None:
+        """Set the view mode for the Moonlight screen and persist the config."""
+        self._moonlight_view_mode = mode if mode in ("grid", "list") else "grid"
+        self.save()
+
     def set_watch_view_mode(self, mode: str) -> None:
         """Set the view mode for the Watch screen and persist the config."""
         self._watch_view_mode = mode if mode in ("grid", "list") else "grid"
@@ -589,6 +601,11 @@ class Config:
         return self._show_pc_games_tab
 
     @property
+    def show_moonlight_tab(self) -> bool:
+        """Whether the Moonlight tab is visible. Defaults to True."""
+        return self._show_moonlight_tab
+
+    @property
     def show_watch_tab(self) -> bool:
         """Whether the Watch tab is visible. Defaults to True."""
         return self._show_watch_tab
@@ -606,6 +623,11 @@ class Config:
     def set_show_pc_games_tab(self, enabled: bool) -> None:
         """Set the PC Games tab visibility and persist the config."""
         self._show_pc_games_tab = enabled
+        self.save()
+
+    def set_show_moonlight_tab(self, enabled: bool) -> None:
+        """Set the Moonlight tab visibility and persist the config."""
+        self._show_moonlight_tab = enabled
         self.save()
 
     def set_show_watch_tab(self, enabled: bool) -> None:
@@ -662,6 +684,7 @@ class Config:
                 "button_layout": self.button_layout,
                 "retro_games_view_mode": self._retro_games_view_mode,
                 "pc_games_view_mode": self._pc_games_view_mode,
+                "moonlight_view_mode": self._moonlight_view_mode,
                 "watch_view_mode": self._watch_view_mode,
                 "listen_view_mode": self._listen_view_mode,
             },
@@ -678,6 +701,7 @@ class Config:
             "tabs": {
                 "show_retro_games": self._show_retro_games_tab,
                 "show_pc_games": self._show_pc_games_tab,
+                "show_moonlight": self._show_moonlight_tab,
                 "show_watch": self._show_watch_tab,
                 "show_listen": self._show_listen_tab,
             },
@@ -798,6 +822,8 @@ class Config:
             self._retro_games_view_mode = raw_view_mode if raw_view_mode in ("grid", "list") else "grid"
             raw_pc_view_mode = ui.get("pc_games_view_mode", "grid")
             self._pc_games_view_mode = raw_pc_view_mode if raw_pc_view_mode in ("grid", "list") else "grid"
+            raw_moonlight_view_mode = ui.get("moonlight_view_mode", "grid")
+            self._moonlight_view_mode = raw_moonlight_view_mode if raw_moonlight_view_mode in ("grid", "list") else "grid"
             raw_watch_view_mode = ui.get("watch_view_mode", "grid")
             self._watch_view_mode = raw_watch_view_mode if raw_watch_view_mode in ("grid", "list") else "grid"
             raw_listen_view_mode = ui.get("listen_view_mode", "grid")
@@ -822,6 +848,8 @@ class Config:
                 self._show_retro_games_tab = bool(tabs["show_retro_games"])
             if "show_pc_games" in tabs:
                 self._show_pc_games_tab = bool(tabs["show_pc_games"])
+            if "show_moonlight" in tabs:
+                self._show_moonlight_tab = bool(tabs["show_moonlight"])
             if "show_watch" in tabs:
                 self._show_watch_tab = bool(tabs["show_watch"])
             if "show_listen" in tabs:

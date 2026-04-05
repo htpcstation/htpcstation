@@ -3,7 +3,6 @@
 import locale
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 # libmpv requires LC_NUMERIC=C. This MUST be set before any other import
@@ -134,10 +133,6 @@ def main() -> None:
     )
     engine.rootContext().setContextProperty("moonlight", moonlight)
 
-    # Give SteamLibrary a reference to MoonlightLibrary so it can dispatch
-    # Moonlight launches from the "Recently Played" source.
-    steam.setMoonlightLibrary(moonlight)
-
     # Gamepad manager — created early so it can be passed to SettingsManager
     gamepad_manager = GamepadManager(app)
 
@@ -226,62 +221,6 @@ def main() -> None:
         browser_launcher.kill()
 
     gamepad_manager.startSelectCombo.connect(_on_start_select_combo)
-
-    # When Moonlight host discovery completes, update the Steam source list
-    # and inject recently played Moonlight data.
-    def _on_moonlight_hosts_changed() -> None:
-        if not moonlight._paired_hosts:
-            steam.setMoonlightSources([])
-            steam.setMoonlightRecentlyPlayed([])
-            return
-        app_count = len(moonlight._all_apps)
-        is_loading = moonlight.loading
-        # After Phase 2 completes (loading=False), check whether the host is online.
-        # During loading, offline is False so the "Loading..." indicator takes precedence.
-        is_offline = (not is_loading) and (not moonlight.hostOnline) and bool(moonlight._paired_hosts)
-        steam.setMoonlightSources([{
-            "name": "Moonlight Games",
-            "gameCount": app_count,
-            "source": "moonlight",
-            "loading": is_loading,
-            "offline": is_offline,
-        }])
-
-        # Build recently played list from Moonlight apps that have been played.
-        # Normalize ISO 8601 timestamps to Unix epoch ints for unified sorting.
-        recent_items = []
-        for app in moonlight._all_apps:
-            if not app.last_played:
-                continue
-            try:
-                dt = datetime.fromisoformat(app.last_played)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                last_played_epoch = int(dt.timestamp())
-            except (ValueError, OSError):
-                continue
-            # Find the host address for this app
-            host = next(
-                (h for h in moonlight._paired_hosts if h.uuid == app.host_uuid),
-                None,
-            )
-            host_address = host.address if host else ""
-            recent_items.append({
-                "name": app.name,
-                "source": "moonlight",
-                "imagePath": app.image_path,
-                "lastPlayed": last_played_epoch,
-                "appId": "",
-                "hostAddress": host_address,
-            })
-        steam.setMoonlightRecentlyPlayed(recent_items)
-        steam.setMoonlightFavoriteCount(moonlight.favoriteCount)
-
-    moonlight.hostsChanged.connect(_on_moonlight_hosts_changed)
-    moonlight.loadingChanged.connect(_on_moonlight_hosts_changed)
-    moonlight.favoriteToggled.connect(
-        lambda _: steam.setMoonlightFavoriteCount(moonlight.favoriteCount)
-    )
 
     # Detect real keyboard input to switch hint labels.
     # Gamepad input is tracked by GamepadManager calling keys.setGamepadInput().

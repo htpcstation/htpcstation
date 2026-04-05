@@ -73,6 +73,7 @@ FocusScope {
         { type: "header",  label: "Tabs" },
         { type: "toggle",  label: "Retro Games",         settingKey: "showRetroGamesTab" },
         { type: "toggle",  label: "PC Games",            settingKey: "showPcGamesTab" },
+        { type: "toggle",  label: "Moonlight",           settingKey: "showMoonlightTab" },
         { type: "toggle",  label: "Plex Media",           settingKey: "showWatchTab" },
         { type: "toggle",  label: "Plex Music",          settingKey: "showListenTab" },
     ]
@@ -140,6 +141,7 @@ FocusScope {
         }
         if (key === "showRetroGamesTab")  return settings.showRetroGamesTab
         if (key === "showPcGamesTab")     return settings.showPcGamesTab
+        if (key === "showMoonlightTab")   return settings.showMoonlightTab
         if (key === "showWatchTab")       return settings.showWatchTab
         if (key === "showListenTab")      return settings.showListenTab
         return ""
@@ -173,6 +175,10 @@ FocusScope {
         }
         else if (key === "showPcGamesTab") {
             settings.setShowPcGamesTab(value)
+            if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "showMoonlightTab") {
+            settings.setShowMoonlightTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showWatchTab") {

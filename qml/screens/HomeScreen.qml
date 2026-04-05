@@ -31,10 +31,11 @@ FocusScope {
 
     // All possible tabs (Settings is always last and always visible)
     readonly property var _allTabs: [
-        { name: "Retro Games", source: "RetroGamesScreen.qml", setting: "showRetroGamesTab" },
-        { name: "PC Games",    source: "PcGamesScreen.qml",    setting: "showPcGamesTab" },
-        { name: "Plex Media",  source: "WatchScreen.qml",      setting: "showWatchTab" },
-        { name: "Plex Music",  source: "ListenScreen.qml",     setting: "showListenTab" },
+        { name: "Retro Games", source: "RetroGamesScreen.qml",  setting: "showRetroGamesTab" },
+        { name: "PC Games",    source: "PcGamesScreen.qml",     setting: "showPcGamesTab" },
+        { name: "Moonlight",   source: "MoonlightScreen.qml",   setting: "showMoonlightTab" },
+        { name: "Plex Media",  source: "WatchScreen.qml",       setting: "showWatchTab" },
+        { name: "Plex Music",  source: "ListenScreen.qml",      setting: "showListenTab" },
     ]
 
     // Tab visibility — built once on startup from saved settings.

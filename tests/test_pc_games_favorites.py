@@ -556,14 +556,12 @@ class TestSteamLibraryPCFavoritesSource:
             return SteamLibrary()
 
     def test_pc_favorites_not_shown_when_no_favorites(self) -> None:
-        """'PC Favorites' source entry is absent when no games are favorited."""
+        """'Favorites' source entry is absent when no games are favorited."""
         games = [
             _make_steam_game("1", "Alpha", favorite=False),
         ]
         lib = self._make_lib(games)
 
-        sources = [lib._sources_model.data(lib._sources_model.index(i, 0), 0x0101)
-                   for i in range(lib._sources_model.rowCount())]
         # Check by iterating source names
         source_names = []
         from backend.steam_library import SteamSourceListModel
@@ -572,10 +570,10 @@ class TestSteamLibraryPCFavoritesSource:
             source_names.append(
                 lib._sources_model.data(idx, SteamSourceListModel.NameRole)
             )
-        assert "PC Favorites" not in source_names
+        assert "Favorites" not in source_names
 
     def test_pc_favorites_shown_when_steam_game_favorited(self, tmp_path: Path) -> None:
-        """'PC Favorites' source entry appears when a Steam game is favorited."""
+        """'Favorites' source entry appears when a Steam game is favorited."""
         from backend.steam_library import SteamSourceListModel
 
         games = [_make_steam_game("440", "TF2", favorite=False)]
@@ -590,10 +588,10 @@ class TestSteamLibraryPCFavoritesSource:
             source_names.append(
                 lib._sources_model.data(idx, SteamSourceListModel.NameRole)
             )
-        assert "PC Favorites" in source_names
+        assert "Favorites" in source_names
 
     def test_pc_favorites_count_reflects_steam_favorites(self, tmp_path: Path) -> None:
-        """'PC Favorites' gameCount reflects the number of favorited Steam games."""
+        """'Favorites' gameCount reflects the number of favorited Steam games."""
         from backend.steam_library import SteamSourceListModel
 
         games = [
@@ -608,15 +606,15 @@ class TestSteamLibraryPCFavoritesSource:
         for i in range(lib._sources_model.rowCount()):
             idx = lib._sources_model.index(i, 0)
             name = lib._sources_model.data(idx, SteamSourceListModel.NameRole)
-            if name == "PC Favorites":
+            if name == "Favorites":
                 count = lib._sources_model.data(idx, SteamSourceListModel.GameCountRole)
                 assert count == 1
                 break
         else:
-            pytest.fail("PC Favorites entry not found in sources model")
+            pytest.fail("Favorites entry not found in sources model")
 
     def test_pc_favorites_disappears_when_unfavorited(self, tmp_path: Path) -> None:
-        """'PC Favorites' source entry disappears when all games are unfavorited."""
+        """'Favorites' source entry disappears when all games are unfavorited."""
         from backend.steam_library import SteamSourceListModel
 
         games = [_make_steam_game("440", "TF2", favorite=False)]
@@ -632,10 +630,10 @@ class TestSteamLibraryPCFavoritesSource:
             source_names.append(
                 lib._sources_model.data(idx, SteamSourceListModel.NameRole)
             )
-        assert "PC Favorites" not in source_names
+        assert "Favorites" not in source_names
 
     def test_pc_favorites_position_after_recently_played(self, tmp_path: Path) -> None:
-        """'PC Favorites' appears after 'Recently Played' and before 'Steam'."""
+        """'Favorites' appears after 'Recently Played' and before 'Steam'."""
         from backend.steam_library import SteamSourceListModel
 
         # Beta has last_played > 0 so "Recently Played" will appear
@@ -659,85 +657,13 @@ class TestSteamLibraryPCFavoritesSource:
             )
 
         assert "Recently Played" in source_names
-        assert "PC Favorites" in source_names
+        assert "Favorites" in source_names
         assert "Steam" in source_names
 
         rp_idx = source_names.index("Recently Played")
-        fav_idx = source_names.index("PC Favorites")
+        fav_idx = source_names.index("Favorites")
         steam_idx = source_names.index("Steam")
         assert rp_idx < fav_idx < steam_idx
-
-
-# ---------------------------------------------------------------------------
-# SteamLibrary — setMoonlightFavoriteCount
-# ---------------------------------------------------------------------------
-
-
-class TestSteamLibrarySetMoonlightFavoriteCount:
-    def _make_lib(self, games: list[SteamGame] | None = None):
-        from backend.steam_library import SteamLibrary
-
-        games = games or []
-        with patch("backend.steam_library.discover_steam_games", return_value=games), \
-             patch("backend.steam_library.read_gamelist", return_value={}):
-            return SteamLibrary()
-
-    def test_moonlight_favorites_included_in_pc_favorites_count(self) -> None:
-        """setMoonlightFavoriteCount adds to the PC Favorites count."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_lib([_make_steam_game("1", "Alpha", favorite=True)])
-        lib.setMoonlightFavoriteCount(3)
-
-        for i in range(lib._sources_model.rowCount()):
-            idx = lib._sources_model.index(i, 0)
-            name = lib._sources_model.data(idx, SteamSourceListModel.NameRole)
-            if name == "PC Favorites":
-                count = lib._sources_model.data(idx, SteamSourceListModel.GameCountRole)
-                assert count == 4  # 1 Steam + 3 Moonlight
-                break
-        else:
-            pytest.fail("PC Favorites entry not found")
-
-    def test_moonlight_favorites_alone_shows_pc_favorites(self) -> None:
-        """PC Favorites appears when only Moonlight games are favorited."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_lib([_make_steam_game("1", "Alpha", favorite=False)])
-        lib.setMoonlightFavoriteCount(2)
-
-        source_names = []
-        for i in range(lib._sources_model.rowCount()):
-            idx = lib._sources_model.index(i, 0)
-            source_names.append(
-                lib._sources_model.data(idx, SteamSourceListModel.NameRole)
-            )
-        assert "PC Favorites" in source_names
-
-    def test_moonlight_favorites_zero_no_pc_favorites_when_no_steam(self) -> None:
-        """PC Favorites absent when both Steam and Moonlight favorites are 0."""
-        from backend.steam_library import SteamSourceListModel
-
-        lib = self._make_lib([_make_steam_game("1", "Alpha", favorite=False)])
-        lib.setMoonlightFavoriteCount(0)
-
-        source_names = []
-        for i in range(lib._sources_model.rowCount()):
-            idx = lib._sources_model.index(i, 0)
-            source_names.append(
-                lib._sources_model.data(idx, SteamSourceListModel.NameRole)
-            )
-        assert "PC Favorites" not in source_names
-
-    def test_set_moonlight_favorite_count_emits_sources_model_changed(self) -> None:
-        """setMoonlightFavoriteCount emits sourcesModelChanged."""
-        lib = self._make_lib()
-
-        signals: list[bool] = []
-        lib.sourcesModelChanged.connect(lambda: signals.append(True))
-        lib.setMoonlightFavoriteCount(1)
-
-        assert len(signals) >= 1
 
 
 # ---------------------------------------------------------------------------

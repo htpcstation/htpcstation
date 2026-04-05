@@ -27,7 +27,7 @@ from backend.moonlight_client import MoonlightLauncher, list_apps
 from backend.moonlight_config import get_moonlight_dir
 from backend.moonlight_models import MoonlightApp, MoonlightHost
 from backend.moonlight_parser import check_host_available, discover_moonlight_hosts
-from backend.moonlight_play_history import get_all_history, record_play
+from backend.moonlight_play_history import clear_history, get_all_history, record_play
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +377,53 @@ class MoonlightLibrary(QObject):
                 "favorite": app.favorite,
             })
         return result
+
+    @Slot(result="QVariant")
+    def getRecentlyPlayed(self) -> list:
+        """Return a list of recently played Moonlight apps.
+
+        Cross-references play history with ``_all_apps`` to get ``imagePath``,
+        ``hostName``, and ``hostAddress``.
+
+        Returns a list of dicts sorted by ``lastPlayed`` descending, limited to 20:
+        ``{"name", "appId", "imagePath", "lastPlayed", "hostName", "hostAddress", "source"}``
+
+        Only includes apps where ``last_played`` is a non-empty string.
+        Returns ``[]`` when ``_all_apps`` is empty.
+        """
+        if not self._all_apps:
+            return []
+
+        items: list[dict] = []
+        for app in self._all_apps:
+            if not app.last_played:
+                continue
+            host = next(
+                (h for h in self._paired_hosts if h.uuid == app.host_uuid),
+                None,
+            )
+            items.append({
+                "name": app.name,
+                "appId": "",
+                "imagePath": app.image_path,
+                "lastPlayed": app.last_played,
+                "hostName": host.display_name if host else "",
+                "hostAddress": host.address if host else "",
+                "source": "moonlight",
+            })
+
+        items.sort(key=lambda x: x.get("lastPlayed", ""), reverse=True)
+        return items[:20]
+
+    @Slot()
+    def clearRecentlyPlayed(self) -> None:
+        """Clear Moonlight play history.
+
+        Calls ``clear_history()`` from ``moonlight_play_history`` to wipe the
+        play_history.json file.
+        """
+        clear_history()
+        logger.info("MoonlightLibrary.clearRecentlyPlayed: cleared Moonlight play history")
 
     @Slot(int)
     def toggleFavorite(self, index: int) -> None:
