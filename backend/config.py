@@ -216,17 +216,17 @@ SYSTEM_COMPATIBLE_CORES: dict[str, list[str]] = {
     "gbc":             ["gambatte_libretro.so", "mgba_libretro.so", "sameboy_libretro.so", "tgbdual_libretro.so"],
     "gb2players":      ["gambatte_libretro.so", "mgba_libretro.so", "tgbdual_libretro.so"],
     "gbc2players":     ["gambatte_libretro.so", "mgba_libretro.so", "tgbdual_libretro.so"],
-    "sgb":             ["mesen_libretro.so", "snes9x_libretro.so", "bsnes_libretro.so"],
+    "sgb":             ["mesen_libretro.so", "snes9x_libretro.so", "bsnes_hd_beta_libretro.so", "bsnes_libretro.so"],
     # GBA
     "gba":             ["mgba_libretro.so", "gpsp_libretro.so", "vba_next_libretro.so", "vbam_libretro.so"],
     # NES / FDS
     "nes":             ["mesen_libretro.so", "nestopia_libretro.so", "fceumm_libretro.so", "quicknes_libretro.so"],
     "fds":             ["mesen_libretro.so", "nestopia_libretro.so", "fceumm_libretro.so"],
     # SNES
-    "snes":            ["snes9x_libretro.so", "bsnes_libretro.so", "mesen-s_libretro.so", "snes9x2010_libretro.so"],
-    "snes-msu1":       ["snes9x_libretro.so", "bsnes_libretro.so"],
-    "sufami":          ["snes9x_libretro.so", "bsnes_libretro.so"],
-    "satellaview":     ["snes9x_libretro.so", "bsnes_libretro.so"],
+    "snes":            ["snes9x_libretro.so", "bsnes_hd_beta_libretro.so", "bsnes_libretro.so", "mesen-s_libretro.so", "snes9x2010_libretro.so"],
+    "snes-msu1":       ["snes9x_libretro.so", "bsnes_hd_beta_libretro.so", "bsnes_libretro.so"],
+    "sufami":          ["snes9x_libretro.so", "bsnes_hd_beta_libretro.so", "bsnes_libretro.so"],
+    "satellaview":     ["snes9x_libretro.so", "bsnes_hd_beta_libretro.so", "bsnes_libretro.so"],
     # N64
     "n64":             ["mupen64plus_next_libretro.so", "parallel_n64_libretro.so"],
     "n64dd":           ["mupen64plus_next_libretro.so", "parallel_n64_libretro.so"],

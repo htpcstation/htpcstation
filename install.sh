@@ -881,7 +881,122 @@ download_retroarch_cores() {
     fi
 }
 
-# ── Phase 7: print_summary ────────────────────────────────────────────────────
+# ── Phase 7: download_retroarch_cores_additional ─────────────────────────────
+download_retroarch_cores_additional() {
+    echo ""
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo "${BOLD}  Phase 7: Additional RetroArch Cores${RESET}"
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+    echo "  Alternative cores for systems already covered, plus less common systems."
+    echo "  Includes: bsnes-HD (SNES widescreen), alternative NES/GBA/PS1 cores,"
+    echo "  Atari, Amiga, additional Commodore, arcade alternatives, and more."
+    echo ""
+
+    if ! prompt_yn "  Download additional RetroArch cores? (~34MB)" N; then
+        echo "  Skipping additional core download."
+        return
+    fi
+
+    # Check required tools (may have been checked in Phase 6, but Phase 6 is optional)
+    if ! check_binary curl; then
+        echo "  ${YELLOW}⚠ curl not found — cannot download cores.${RESET}"
+        echo "    Install hint: $(install_cmd "curl")"
+        return
+    fi
+    if ! check_binary unzip; then
+        echo "  ${YELLOW}⚠ unzip not found — cannot extract cores.${RESET}"
+        echo "    Install hint: $(install_cmd "unzip")"
+        return
+    fi
+
+    local CORES_DIR="$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+    mkdir -p "$CORES_DIR"
+
+    local ADDITIONAL_CORES=(
+        bsnes_hd_beta_libretro   # SNES — bsnes-HD (widescreen hack support)
+        bsnes_libretro           # SNES — bsnes accuracy
+        mesen-s_libretro         # SNES — Mesen-S
+        snes9x2010_libretro      # SNES — snes9x 2010 (performance)
+        nestopia_libretro        # NES — Nestopia
+        fceumm_libretro          # NES — FCEUmm
+        quicknes_libretro        # NES — QuickNES (performance)
+        mgba_libretro            # GBA — mGBA (if not in recommended set)
+        sameboy_libretro         # GB/GBC — SameBoy
+        gpsp_libretro            # GBA — gpSP (performance)
+        vba_next_libretro        # GBA — VBA Next
+        tgbdual_libretro         # GB — TGB Dual (link cable)
+        parallel_n64_libretro    # N64 — ParaLLEl (Vulkan)
+        desmume_libretro         # NDS — DeSmuME
+        desmume2015_libretro     # NDS — DeSmuME 2015 (performance)
+        pcsx_rearmed_libretro    # PS1 — PCSX ReARMed (performance)
+        mednafen_psx_libretro    # PS1 — Mednafen PSX (software)
+        swanstation_libretro     # PS1 — SwanStation (DuckStation fork)
+        mednafen_pce_fast_libretro # PC Engine — fast variant
+        stella_libretro          # Atari 2600 — Stella
+        stella2014_libretro      # Atari 2600 — Stella 2014 (performance)
+        handy_libretro           # Atari Lynx — Handy
+        mednafen_lynx_libretro   # Atari Lynx — Mednafen
+        virtualjaguar_libretro   # Atari Jaguar
+        neocd_libretro           # Neo Geo CD
+        puae_libretro            # Amiga — PUAE (~7.5MB)
+        vice_x64sc_libretro      # C64 — VICE x64sc (accurate)
+        vice_x128_libretro       # C128
+        vice_xvic_libretro       # VIC-20
+        vice_xplus4_libretro     # Plus/4
+        vice_xpet_libretro       # PET
+        fmsx_libretro            # MSX — fMSX
+        gearcoleco_libretro      # ColecoVision — Gearcoleco
+        cap32_libretro           # Amstrad CPC — Caprice32
+        crocods_libretro         # Amstrad CPC — CrocoDS
+        blastem_libretro         # Mega Drive — BlastEm (accuracy)
+        yabause_libretro         # Saturn — Yabause
+    )
+
+    local FAILED_CORES=()
+    local installed_count=0
+    local skipped_count=0
+
+    for core in "${ADDITIONAL_CORES[@]}"; do
+        if [ -f "${CORES_DIR}/${core}.so" ]; then
+            echo "  ${GREEN}✓${RESET} ${core} (already installed)"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        local zip_url="https://buildbot.libretro.com/nightly/linux/x86_64/latest/${core}.so.zip"
+        local zip_tmp="/tmp/${core}.so.zip"
+
+        if ! curl -fsSL --retry 2 --retry-delay 1 "$zip_url" -o "$zip_tmp" 2>/dev/null; then
+            echo "  ${RED}✗${RESET} ${core} (download failed)"
+            FAILED_CORES+=("$core")
+            continue
+        fi
+
+        if ! unzip -q -o "$zip_tmp" "${core}.so" -d "$CORES_DIR" 2>/dev/null; then
+            echo "  ${RED}✗${RESET} ${core} (unzip failed)"
+            FAILED_CORES+=("$core")
+            rm -f "$zip_tmp"
+            continue
+        fi
+
+        rm -f "$zip_tmp"
+        echo "  ${GREEN}✓${RESET} ${core}"
+        installed_count=$((installed_count + 1))
+    done
+
+    echo ""
+    echo "  Cores installed: ${installed_count}  skipped (already present): ${skipped_count}  failed: ${#FAILED_CORES[@]}"
+
+    if [ "${#FAILED_CORES[@]}" -gt 0 ]; then
+        echo "  ${YELLOW}⚠ The following cores failed to download/extract:${RESET}"
+        for failed in "${FAILED_CORES[@]}"; do
+            echo "    ${YELLOW}• ${failed}${RESET}"
+        done
+    fi
+}
+
+# ── Phase 8: print_summary ────────────────────────────────────────────────────
 print_summary() {
     echo ""
     echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -967,6 +1082,7 @@ main() {
     write_config
     if $TAB_RETRO && check_flatpak "org.libretro.RetroArch"; then
         download_retroarch_cores
+        download_retroarch_cores_additional
     fi
     print_summary
 }
