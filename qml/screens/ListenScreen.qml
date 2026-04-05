@@ -355,8 +355,7 @@ FocusScope {
                 Text {
                     id: menuLabel
                     text: modelData.label
-                    color: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
-                        ? Theme.colorText : Theme.colorTextDim
+                    color: Theme.colorText
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeHeading)
                 }
