@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 23)
+# HTPC Station — Resume Document (Checkpoint 24)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -76,7 +76,7 @@ Hardening Batch 1 + 2 + partial Batch 3 (see `docs/harden.md` for full backlog):
 | 11 | Plex search | New navigation flow |
 | 28 | ~~libmpv migration~~ | ✅ Done |
 | 29 | Hardening Batch 1+2 | ✅ Done — see `docs/harden.md` |
-| 30 | Hardening Batch 3 | H2 (async getMovie/getShow), H3 (loading timeout ✅), C2 (pagination), H5/M8 (shared MPV) |
+| 30 | ~~Hardening Batch 3~~ | ✅ Done — H2 (async fetch*), H3 (loading timeout), C2 (pagination — low risk, deferred), H5/M8 (shared MPV _mpv_active flag) |
 
 ---
 

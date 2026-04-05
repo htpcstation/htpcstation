@@ -492,7 +492,7 @@ class TestPlayChannel:
 
 class TestMpvPlaybackSignals:
     def test_mpv_playback_ready_signal_connected_to_launcher(self) -> None:
-        """LiveTvLibrary connects mpv_launcher.mpvPlaybackStarted to mpvPlaybackReady."""
+        """LiveTvLibrary connects mpv_launcher.mpvPlaybackStarted to _on_mpv_playback_started."""
         from backend.live_tv_library import LiveTvLibrary
 
         mock_launcher = MagicMock()
@@ -501,8 +501,7 @@ class TestMpvPlaybackSignals:
             mpv_launcher=mock_launcher,
         )
 
-        # Verify that connect() was called on mpvPlaybackStarted with lib.mpvPlaybackReady
-        mock_launcher.mpvPlaybackStarted.connect.assert_called_once_with(lib.mpvPlaybackReady)
+        mock_launcher.mpvPlaybackStarted.connect.assert_called_once_with(lib._on_mpv_playback_started)
 
     def test_mpv_finished_signal_connected_to_launcher(self) -> None:
         """LiveTvLibrary connects mpv_launcher.processFinished to _on_mpv_finished."""
@@ -514,11 +513,10 @@ class TestMpvPlaybackSignals:
             mpv_launcher=mock_launcher,
         )
 
-        # Verify that connect() was called on processFinished
         mock_launcher.processFinished.connect.assert_called_once_with(lib._on_mpv_finished)
 
-    def test_on_mpv_finished_emits_mpv_finished_signal(self) -> None:
-        """_on_mpv_finished() emits the public mpvFinished signal."""
+    def test_on_mpv_finished_emits_mpv_finished_signal_only_when_active(self) -> None:
+        """_on_mpv_finished() emits mpvFinished only when _mpv_active is True."""
         from backend.live_tv_library import LiveTvLibrary
 
         mock_launcher = MagicMock()
@@ -529,8 +527,37 @@ class TestMpvPlaybackSignals:
 
         emitted: list[bool] = []
         lib.mpvFinished.connect(lambda: emitted.append(True))
-        lib._on_mpv_finished(0)
 
+        # Not active — should not emit
+        lib._on_mpv_finished(0)
+        assert emitted == []
+
+        # Active — should emit and clear flag
+        lib._mpv_active = True
+        lib._on_mpv_finished(0)
+        assert emitted == [True]
+        assert lib._mpv_active is False
+
+    def test_mpv_playback_ready_only_emits_when_active(self) -> None:
+        """_on_mpv_playback_started() emits mpvPlaybackReady only when _mpv_active is True."""
+        from backend.live_tv_library import LiveTvLibrary
+
+        mock_launcher = MagicMock()
+        lib = LiveTvLibrary(
+            plex_client_factory=lambda: None,
+            mpv_launcher=mock_launcher,
+        )
+
+        emitted: list[bool] = []
+        lib.mpvPlaybackReady.connect(lambda: emitted.append(True))
+
+        # Not active — should not emit
+        lib._on_mpv_playback_started()
+        assert emitted == []
+
+        # Active — should emit
+        lib._mpv_active = True
+        lib._on_mpv_playback_started()
         assert emitted == [True]
 
 

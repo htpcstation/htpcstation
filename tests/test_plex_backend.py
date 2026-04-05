@@ -1385,12 +1385,25 @@ class TestLoadMoreMoviesFailureResetsFlag:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getShow — Task 018
+# PlexLibrary.fetchShow — Task 018 (updated to async in harden/002)
 # ---------------------------------------------------------------------------
 
 
+def _run_fetch_worker(lib, method_name, *args):
+    """Submit a fetch* call and run the captured worker synchronously."""
+    submitted = []
+
+    def fake_submit(fn, *a, **kw):
+        submitted.append(fn)
+
+    lib._executor.submit = fake_submit  # type: ignore[method-assign]
+    getattr(lib, method_name)(*args)
+    for fn in submitted:
+        fn()
+
+
 class TestGetShow:
-    """getShow() returns a dict with show metadata for QML consumption."""
+    """fetchShow() emits showReady with show metadata for QML consumption."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -1425,8 +1438,12 @@ class TestGetShow:
         }
         lib._client = mock_client
 
-        result = lib.getShow("200")
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchShow", "200")
 
+        assert len(received) == 1
+        _, result = received[0]
         assert result["ratingKey"] == "200"
         assert result["title"] == "Test Show"
         assert result["year"] == 2018
@@ -1442,7 +1459,13 @@ class TestGetShow:
     def test_returns_empty_dict_when_no_client(self) -> None:
         lib = self._make_lib()
         lib._client = None
-        result = lib.getShow("200")
+
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append((rk, d)))
+        lib.fetchShow("200")
+
+        assert len(received) == 1
+        _, result = received[0]
         assert result == {}
 
     def test_returns_empty_dict_when_metadata_not_found(self) -> None:
@@ -1450,17 +1473,23 @@ class TestGetShow:
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = None
         lib._client = mock_client
-        result = lib.getShow("999")
+
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchShow", "999")
+
+        assert len(received) == 1
+        _, result = received[0]
         assert result == {}
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getSeasons — Task 018
+# PlexLibrary.fetchSeasons — Task 018 (updated to async in harden/002)
 # ---------------------------------------------------------------------------
 
 
 class TestGetSeasons:
-    """getSeasons() returns a list of season dicts for QML consumption."""
+    """fetchSeasons() emits seasonsReady with a list of season dicts for QML consumption."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -1502,8 +1531,12 @@ class TestGetSeasons:
         ]
         lib._client = mock_client
 
-        result = lib.getSeasons("200")
+        received = []
+        lib.seasonsReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchSeasons", "200")
 
+        assert len(received) == 1
+        _, result = received[0]
         assert len(result) == 2
         assert result[0]["ratingKey"] == "300"
         assert result[0]["title"] == "Season 1"
@@ -1523,15 +1556,24 @@ class TestGetSeasons:
         ]
         lib._client = mock_client
 
-        result = lib.getSeasons("200")
+        received = []
+        lib.seasonsReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchSeasons", "200")
 
+        _, result = received[0]
         assert len(result) == 1
         assert result[0]["ratingKey"] == "300"
 
     def test_returns_empty_list_when_no_client(self) -> None:
         lib = self._make_lib()
         lib._client = None
-        result = lib.getSeasons("200")
+
+        received = []
+        lib.seasonsReady.connect(lambda rk, d: received.append((rk, d)))
+        lib.fetchSeasons("200")
+
+        assert len(received) == 1
+        _, result = received[0]
         assert result == []
 
     def test_returns_empty_list_when_no_children(self) -> None:
@@ -1539,17 +1581,22 @@ class TestGetSeasons:
         mock_client = MagicMock()
         mock_client.get_children.return_value = []
         lib._client = mock_client
-        result = lib.getSeasons("200")
+
+        received = []
+        lib.seasonsReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchSeasons", "200")
+
+        _, result = received[0]
         assert result == []
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getEpisodes — Task 018
+# PlexLibrary.fetchEpisodes — Task 018 (updated to async in harden/002)
 # ---------------------------------------------------------------------------
 
 
 class TestGetEpisodes:
-    """getEpisodes() returns a list of episode dicts for QML consumption."""
+    """fetchEpisodes() emits episodesReady with a list of episode dicts for QML consumption."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -1597,8 +1644,12 @@ class TestGetEpisodes:
         ]
         lib._client = mock_client
 
-        result = lib.getEpisodes("300")
+        received = []
+        lib.episodesReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchEpisodes", "300")
 
+        assert len(received) == 1
+        _, result = received[0]
         assert len(result) == 2
         assert result[0]["ratingKey"] == "400"
         assert result[0]["title"] == "Pilot"
@@ -1623,15 +1674,24 @@ class TestGetEpisodes:
         ]
         lib._client = mock_client
 
-        result = lib.getEpisodes("300")
+        received = []
+        lib.episodesReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker(lib, "fetchEpisodes", "300")
 
+        _, result = received[0]
         assert len(result) == 1
         assert result[0]["ratingKey"] == "400"
 
     def test_returns_empty_list_when_no_client(self) -> None:
         lib = self._make_lib()
         lib._client = None
-        result = lib.getEpisodes("300")
+
+        received = []
+        lib.episodesReady.connect(lambda rk, d: received.append((rk, d)))
+        lib.fetchEpisodes("300")
+
+        assert len(received) == 1
+        _, result = received[0]
         assert result == []
 
     def test_watched_indicator_fields_present(self) -> None:
@@ -1643,8 +1703,12 @@ class TestGetEpisodes:
         ]
         lib._client = mock_client
 
-        result = lib.getEpisodes("300")
+        received = []
+        lib.episodesReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchEpisodes", "300")
 
+        assert len(received) == 1
+        result = received[0]
         assert len(result) == 1
         assert "viewed" in result[0]
         assert "viewOffset" in result[0]
@@ -1712,12 +1776,12 @@ class TestSelectLibraryOnDeckGuard:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getMovie — poster caching (Task 023)
+# PlexLibrary.fetchMovie — poster caching (Task 023, updated to async in harden/002)
 # ---------------------------------------------------------------------------
 
 
 class TestGetMoviePosterCaching:
-    """getMovie() must populate posterLocal via the poster cache."""
+    """fetchMovie() must populate posterLocal via the poster cache."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -1735,7 +1799,7 @@ class TestGetMoviePosterCaching:
         return lib
 
     def test_poster_local_populated_when_thumb_path_present(self) -> None:
-        """posterLocal in the returned dict reflects the cached file URL."""
+        """posterLocal in the emitted dict reflects the cached file URL."""
         lib = self._make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {
@@ -1749,8 +1813,11 @@ class TestGetMoviePosterCaching:
         mock_cache.get_poster.return_value = "file:///tmp/poster_cache/abc.jpg"
         lib._poster_cache = mock_cache
 
-        result = lib.getMovie("123")
+        received = []
+        lib.movieReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchMovie", "123")
 
+        result = received[0]
         mock_cache.get_poster.assert_called_once_with(
             mock_client, "/library/metadata/123/thumb/1"
         )
@@ -1769,8 +1836,11 @@ class TestGetMoviePosterCaching:
         mock_cache = MagicMock()
         lib._poster_cache = mock_cache
 
-        result = lib.getMovie("124")
+        received = []
+        lib.movieReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchMovie", "124")
 
+        result = received[0]
         mock_cache.get_poster.assert_not_called()
         assert result["posterLocal"] == ""
 
@@ -1786,18 +1856,21 @@ class TestGetMoviePosterCaching:
         lib._client = mock_client
         lib._poster_cache = None
 
-        result = lib.getMovie("125")
+        received = []
+        lib.movieReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchMovie", "125")
 
+        result = received[0]
         assert result["posterLocal"] == ""
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getShow — poster caching (Task 023)
+# PlexLibrary.fetchShow — poster caching (Task 023, updated to async in harden/002)
 # ---------------------------------------------------------------------------
 
 
 class TestGetShowPosterCaching:
-    """getShow() must populate posterLocal via the poster cache."""
+    """fetchShow() must populate posterLocal via the poster cache."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -1815,7 +1888,7 @@ class TestGetShowPosterCaching:
         return lib
 
     def test_poster_local_populated_when_thumb_path_present(self) -> None:
-        """posterLocal in the returned dict reflects the cached file URL."""
+        """posterLocal in the emitted dict reflects the cached file URL."""
         lib = self._make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {
@@ -1829,8 +1902,11 @@ class TestGetShowPosterCaching:
         mock_cache.get_poster.return_value = "file:///tmp/poster_cache/def.jpg"
         lib._poster_cache = mock_cache
 
-        result = lib.getShow("200")
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchShow", "200")
 
+        result = received[0]
         mock_cache.get_poster.assert_called_once_with(
             mock_client, "/library/metadata/200/thumb/1"
         )
@@ -1849,8 +1925,11 @@ class TestGetShowPosterCaching:
         mock_cache = MagicMock()
         lib._poster_cache = mock_cache
 
-        result = lib.getShow("201")
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchShow", "201")
 
+        result = received[0]
         mock_cache.get_poster.assert_not_called()
         assert result["posterLocal"] == ""
 
@@ -1866,8 +1945,11 @@ class TestGetShowPosterCaching:
         lib._client = mock_client
         lib._poster_cache = None
 
-        result = lib.getShow("202")
+        received = []
+        lib.showReady.connect(lambda rk, d: received.append(d))
+        _run_fetch_worker(lib, "fetchShow", "202")
 
+        result = received[0]
         assert result["posterLocal"] == ""
 
 

@@ -481,6 +481,10 @@ class PlexLibrary(QObject):
     watchHistoryReady = Signal(list)
     lyricsReady = Signal(str, list)       # (rating_key, lines) — lines is list of {ms, text} dicts
     lyricsUnavailable = Signal(str)       # (rating_key) — no lyrics found or error
+    movieReady    = Signal(str, "QVariant")   # (rating_key, movie_dict)
+    showReady     = Signal(str, "QVariant")   # (rating_key, show_dict)
+    seasonsReady  = Signal(str, "QVariant")   # (rating_key, seasons_list)
+    episodesReady = Signal(str, "QVariant")   # (season_rating_key, episodes_list)
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -495,6 +499,10 @@ class PlexLibrary(QObject):
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
     _lyricsReady = Signal(str, list)      # (rating_key, lines)
     _lyricsUnavailable = Signal(str)      # (rating_key)
+    _movieReady    = Signal(str, object)
+    _showReady     = Signal(str, object)
+    _seasonsReady  = Signal(str, object)
+    _episodesReady = Signal(str, object)
 
     def __init__(
         self,
@@ -572,11 +580,16 @@ class PlexLibrary(QObject):
         self._streamInfoReady.connect(self._on_stream_info_ready, Qt.ConnectionType.QueuedConnection)
         self._lyricsReady.connect(self.lyricsReady)
         self._lyricsUnavailable.connect(self.lyricsUnavailable)
+        self._movieReady.connect(lambda rk, d: self.movieReady.emit(rk, d))
+        self._showReady.connect(lambda rk, d: self.showReady.emit(rk, d))
+        self._seasonsReady.connect(lambda rk, d: self.seasonsReady.emit(rk, d))
+        self._episodesReady.connect(lambda rk, d: self.episodesReady.emit(rk, d))
 
         # MPV launcher for direct stream playback
         self._mpv_launcher = LibMpvPlayer(parent=self)
-        self._mpv_launcher.processStarted.connect(self.mpvStarted)
-        self._mpv_launcher.processFinished.connect(lambda _: self.mpvFinished.emit())
+        self._mpv_active = False  # True only while Plex VOD/Live TV owns the MPV instance
+        self._mpv_launcher.processStarted.connect(self._on_mpv_process_started)
+        self._mpv_launcher.processFinished.connect(self._on_mpv_process_finished)
         self._mpv_launcher.mpvPlaybackStarted.connect(self._on_mpv_playback_started)
 
         # Timeline reporter for Plex playback state
@@ -589,9 +602,7 @@ class PlexLibrary(QObject):
         self._current_play_queue_item_id: int = 0
 
 
-        # Connect MPV lifecycle to the timeline reporter
-        self._mpv_launcher.processStarted.connect(self._on_mpv_started_for_timeline)
-        self._mpv_launcher.processFinished.connect(self._on_mpv_finished_for_timeline)
+        # Timeline reporter is driven via _on_mpv_process_finished (above)
 
         # Load My List from file and populate model
         items = self._load_my_list()
@@ -974,19 +985,14 @@ class PlexLibrary(QObject):
         """Return the number of movies currently loaded in the model."""
         return len(self._movies_model._movies)
 
-    @Slot(str, result="QVariant")
-    def getMovie(self, rating_key: str) -> dict:
-        """Return full movie details as a dict (synchronous, blocks briefly)."""
-        if self._client is None:
-            return {}
-        data = self._client.get_metadata(rating_key)
+    def _fetch_movie(self, client, poster_cache, rating_key: str) -> dict:
+        """Worker-thread helper: fetch and parse movie metadata. Returns a dict."""
+        data = client.get_metadata(rating_key)
         if not data:
             return {}
         movie = parse_movie(data)
-        if movie.thumb_path and self._poster_cache:
-            movie.poster_local = self._poster_cache.get_poster(
-                self._client, movie.thumb_path
-            )
+        if movie.thumb_path and poster_cache:
+            movie.poster_local = poster_cache.get_poster(client, movie.thumb_path)
         return {
             "ratingKey": movie.rating_key,
             "title": movie.title,
@@ -1004,19 +1010,14 @@ class PlexLibrary(QObject):
             "viewCount": int(data.get("viewCount", 0) or 0),
         }
 
-    @Slot(str, result="QVariant")
-    def getShow(self, rating_key: str) -> dict:
-        """Return full show details as a dict (synchronous, blocks briefly)."""
-        if self._client is None:
-            return {}
-        data = self._client.get_metadata(rating_key)
+    def _fetch_show(self, client, poster_cache, rating_key: str) -> dict:
+        """Worker-thread helper: fetch and parse show metadata. Returns a dict."""
+        data = client.get_metadata(rating_key)
         if not data:
             return {}
         show = parse_show(data)
-        if show.thumb_path and self._poster_cache:
-            show.poster_local = self._poster_cache.get_poster(
-                self._client, show.thumb_path
-            )
+        if show.thumb_path and poster_cache:
+            show.poster_local = poster_cache.get_poster(client, show.thumb_path)
         return {
             "ratingKey": show.rating_key,
             "title": show.title,
@@ -1033,12 +1034,9 @@ class PlexLibrary(QObject):
             "viewCount": int(data.get("viewCount", 0) or 0),
         }
 
-    @Slot(str, result="QVariant")
-    def getSeasons(self, rating_key: str) -> list:
-        """Return seasons list as a list of dicts (synchronous, blocks briefly)."""
-        if self._client is None:
-            return []
-        children = self._client.get_children(rating_key)
+    def _fetch_seasons(self, client, rating_key: str) -> list:
+        """Worker-thread helper: fetch and parse seasons list. Returns a list of dicts."""
+        children = client.get_children(rating_key)
         seasons = []
         for item in children:
             if item.get("type") == "season":
@@ -1053,12 +1051,9 @@ class PlexLibrary(QObject):
                 })
         return seasons
 
-    @Slot(str, result="QVariant")
-    def getEpisodes(self, season_rating_key: str) -> list:
-        """Return episodes list as a list of dicts (synchronous, blocks briefly)."""
-        if self._client is None:
-            return []
-        children = self._client.get_children(season_rating_key)
+    def _fetch_episodes(self, client, season_rating_key: str) -> list:
+        """Worker-thread helper: fetch and parse episodes list. Returns a list of dicts."""
+        children = client.get_children(season_rating_key)
         episodes = []
         for item in children:
             if item.get("type") == "episode":
@@ -1076,6 +1071,56 @@ class PlexLibrary(QObject):
                     "posterLocal": episode.poster_local,
                 })
         return episodes
+
+    @Slot(str)
+    def fetchMovie(self, rating_key: str) -> None:
+        """Async: fetch movie details and emit movieReady(rating_key, movie_dict)."""
+        if self._client is None:
+            self._movieReady.emit(rating_key, {})
+            return
+        client = self._client
+        poster_cache = self._poster_cache
+        def _worker():
+            result = self._fetch_movie(client, poster_cache, rating_key)
+            self._movieReady.emit(rating_key, result)
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchShow(self, rating_key: str) -> None:
+        """Async: fetch show details and emit showReady(rating_key, show_dict)."""
+        if self._client is None:
+            self._showReady.emit(rating_key, {})
+            return
+        client = self._client
+        poster_cache = self._poster_cache
+        def _worker():
+            result = self._fetch_show(client, poster_cache, rating_key)
+            self._showReady.emit(rating_key, result)
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchSeasons(self, rating_key: str) -> None:
+        """Async: fetch seasons list and emit seasonsReady(rating_key, seasons_list)."""
+        if self._client is None:
+            self._seasonsReady.emit(rating_key, [])
+            return
+        client = self._client
+        def _worker():
+            result = self._fetch_seasons(client, rating_key)
+            self._seasonsReady.emit(rating_key, result)
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchEpisodes(self, season_rating_key: str) -> None:
+        """Async: fetch episodes list and emit episodesReady(season_rating_key, episodes_list)."""
+        if self._client is None:
+            self._episodesReady.emit(season_rating_key, [])
+            return
+        client = self._client
+        def _worker():
+            result = self._fetch_episodes(client, season_rating_key)
+            self._episodesReady.emit(season_rating_key, result)
+        self._executor.submit(_worker)
 
     @Slot(str, result="QVariant")
     def getStreamInfo(self, rating_key: str) -> dict:
@@ -1227,6 +1272,7 @@ class PlexLibrary(QObject):
         self._current_play_duration_ms = duration_ms
         self._current_play_part_id = part_id
         self._current_play_queue_item_id = self._pending_play_queue_item_id
+        self._mpv_active = True
         self._mpv_launcher.launch(url, title, start_ms)
 
     @Slot(str)
@@ -1277,13 +1323,29 @@ class PlexLibrary(QObject):
             play_queue_item_id=self._current_play_queue_item_id,
         )
 
+    def _on_mpv_process_started(self) -> None:
+        """Forward processStarted and start timeline only when Plex owns the MPV instance."""
+        if not self._mpv_active:
+            return
+        self.mpvStarted.emit()
+        self._on_mpv_started_for_timeline()
+
+    def _on_mpv_process_finished(self, exit_code: int) -> None:
+        """Forward processFinished only when Plex owns the MPV instance."""
+        self._on_mpv_finished_for_timeline(exit_code)
+        if not self._mpv_active:
+            return
+        self._mpv_active = False
+        self.mpvFinished.emit()
+
     def _on_mpv_finished_for_timeline(self, exit_code: int) -> None:
         """Stop timeline reporting when MPV exits."""
         self._timeline_reporter.stop()
 
     def _on_mpv_playback_started(self) -> None:
         """Called on main thread when MPV first frame is ready."""
-        self.mpvPlaybackReady.emit()
+        if self._mpv_active:
+            self.mpvPlaybackReady.emit()
 
     @Slot(str, result="QVariant")
     def getArtist(self, rating_key: str) -> dict:

@@ -192,6 +192,7 @@ class LiveTvLibrary(QObject):
         self._loading = False
         self._hdhomerun_host: str = ""
         self._channels: list[LiveTvChannel] = []
+        self._mpv_active = False  # True only while Live TV owns the MPV instance
 
         # Build model
         self._channels_model = LiveTvChannelModel(self)
@@ -203,8 +204,9 @@ class LiveTvLibrary(QObject):
         self._channelsReady.connect(self._on_channels_ready)
         self._loadingUpdate.connect(self._on_loading_update)
 
-        # Forward MPV player signals to QML
-        self._mpv_launcher.mpvPlaybackStarted.connect(self.mpvPlaybackReady)
+        # Forward MPV player signals to QML — gated on _mpv_active so Live TV
+        # signals don't fire during Plex VOD playback and vice versa.
+        self._mpv_launcher.mpvPlaybackStarted.connect(self._on_mpv_playback_started)
         self._mpv_launcher.processFinished.connect(self._on_mpv_finished)
 
     # ------------------------------------------------------------------
@@ -256,6 +258,7 @@ class LiveTvLibrary(QObject):
             return
         title = channel.title if channel else vcn
         logger.info("LiveTvLibrary.playChannel: launching MPV for '%s' url=%s", title, stream_url)
+        self._mpv_active = True
         self._mpv_launcher.launch_live_tv(stream_url, title)
 
     @Slot(str)
@@ -267,9 +270,17 @@ class LiveTvLibrary(QObject):
         """
         logger.info("LiveTvLibrary.playChannelBrowser: vcn=%s (browser fallback not wired)", vcn)
 
+    def _on_mpv_playback_started(self) -> None:
+        """Forward mpvPlaybackStarted only when Live TV owns the MPV instance."""
+        if self._mpv_active:
+            self.mpvPlaybackReady.emit()
+
     @Slot(int)
     def _on_mpv_finished(self, _exit_code: int) -> None:
         """Forward MPV processFinished to the public mpvFinished signal."""
+        if not self._mpv_active:
+            return
+        self._mpv_active = False
         self.mpvFinished.emit()
 
     # ------------------------------------------------------------------

@@ -41,6 +41,8 @@ FocusScope {
     property var seasons: []
     property var episodes: []
     property int currentSeasonIndex: 0
+    // Rating key of the currently selected season — used to guard stale episodesReady responses.
+    property string _selectedSeasonKey: ""
 
     // Plain writable property — WatchScreen sets this to restore focus after resume dialog cancel.
     // Updated imperatively when the episode list index changes.
@@ -64,24 +66,46 @@ FocusScope {
     }
 
     function _loadShow() {
-        showData = plex.getShow(showRatingKey)
-        seasons = plex.getSeasons(showRatingKey)
+        showData = ({})
+        seasons = []
         episodes = []
         currentSeasonIndex = 0
-        // Auto-select first season
-        if (seasons.length > 0) {
-            _loadEpisodes(seasons[0].ratingKey)
-        }
+        _selectedSeasonKey = ""
+        plex.fetchShow(showRatingKey)
+        plex.fetchSeasons(showRatingKey)
     }
 
     function _loadEpisodes(seasonRatingKey) {
-        episodes = plex.getEpisodes(seasonRatingKey)
+        episodes = []
+        _selectedSeasonKey = seasonRatingKey
+        plex.fetchEpisodes(seasonRatingKey)
     }
 
     function _selectSeason(idx) {
         if (idx < 0 || idx >= seasons.length) return
         currentSeasonIndex = idx
         _loadEpisodes(seasons[idx].ratingKey)
+    }
+
+    Connections {
+        target: plex
+        function onShowReady(ratingKey, data) {
+            if (ratingKey === showDetailView.showRatingKey)
+                showDetailView.showData = data
+        }
+        function onSeasonsReady(ratingKey, data) {
+            if (ratingKey === showDetailView.showRatingKey) {
+                showDetailView.seasons = data
+                // Auto-select first season once seasons arrive
+                if (data.length > 0 && showDetailView._selectedSeasonKey === "") {
+                    showDetailView._loadEpisodes(data[0].ratingKey)
+                }
+            }
+        }
+        function onEpisodesReady(ratingKey, data) {
+            if (ratingKey === showDetailView._selectedSeasonKey)
+                showDetailView.episodes = data
+        }
     }
 
     // ── Helper: format duration from milliseconds to "Xh Ym" or "Ym" ─────────

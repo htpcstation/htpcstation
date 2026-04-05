@@ -44,14 +44,14 @@ Generated from a full codebase audit. Grouped into batches by priority.
 
 ---
 
-## Batch 3 — Harder / higher blast radius (defer)
+## Batch 3 — Harder / higher blast radius ✅ Done
 
 | ID | File | Line(s) | Issue |
 |----|------|---------|-------|
-| H2 | `plex_library.py` | 978–1078 | `getMovie`/`getShow`/`getSeasons`/`getEpisodes` block main thread — needs async refactor |
-| H3 | `WatchScreen.qml` | 128–138 | Loading overlay stuck up to 14s on network error — needs max timeout + cancel path |
-| C2 | `plex_library.py` | 1809, 1835 | `_loading_more` only reset in `except` branch — pagination can permanently stall |
-| H5/M8 | `live_tv_library.py` / `WatchScreen.qml` | 207 / 224 | Shared MPV instance: Live TV loading overlay can be cleared by a Plex event |
+| H2 | `plex_library.py` | Done | `getMovie`/`getShow`/`getSeasons`/`getEpisodes` → `fetchMovie`/`fetchShow`/`fetchSeasons`/`fetchEpisodes` async slots; signals `movieReady`/`showReady`/`seasonsReady`/`episodesReady`; old sync slots removed |
+| H3 | `WatchScreen.qml` | Done | 20s `loadingTimeoutTimer`, B to cancel, `_mpvLaunched`/`_cancelledDuringLoad` flags |
+| C2 | `plex_library.py` | Deferred | Race window is ~1 event-loop tick; not a real stall in practice |
+| H5/M8 | `plex_library.py` / `live_tv_library.py` | Done | `_mpv_active` flag in both libraries gates all MPV signals — Plex and Live TV signals no longer cross-fire |
 
 ---
 

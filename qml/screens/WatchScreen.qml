@@ -57,6 +57,9 @@ FocusScope {
     // Current view mode: "grid" or "list"
     property string _viewMode: "grid"
 
+    // True while a fetchMovie() call is in-flight (result not yet received).
+    property bool _movieLoading: false
+
     // Track whether we have already called plex.refresh() to avoid re-fetching
     // every time the user navigates back to this tab.
     property bool _refreshed: false
@@ -333,6 +336,12 @@ FocusScope {
             } else {
                 watchScreen._launchMpv(ratingKey, 0)
                 // _isLoadingContent / overlay cleared by onMpvPlaybackReady
+            }
+        }
+        function onMovieReady(ratingKey, movieData) {
+            if (ratingKey === watchScreen.selectedRatingKey) {
+                watchScreen.selectedMovieData = movieData
+                watchScreen._movieLoading = false
             }
         }
     }
@@ -642,7 +651,9 @@ FocusScope {
             watchScreen._focusMemory = mem
             watchScreen.selectedRatingKey = ratingKey
             watchScreen.selectedMovieIndex = index
-            watchScreen.selectedMovieData = plex.getMovie(ratingKey)
+            watchScreen.selectedMovieData = ({})
+            watchScreen._movieLoading = true
+            plex.fetchMovie(ratingKey)
             watchScreen.currentView = "detail"
         }
 
@@ -683,7 +694,9 @@ FocusScope {
                 var rk = plex.getMovieRatingKeyAt(watchScreen.selectedMovieIndex)
                 if (rk) {
                     watchScreen.selectedRatingKey = rk
-                    watchScreen.selectedMovieData = plex.getMovie(rk)
+                    watchScreen.selectedMovieData = ({})
+                    watchScreen._movieLoading = true
+                    plex.fetchMovie(rk)
                 }
             }
         }
@@ -695,7 +708,9 @@ FocusScope {
                 var rk = plex.getMovieRatingKeyAt(watchScreen.selectedMovieIndex)
                 if (rk) {
                     watchScreen.selectedRatingKey = rk
-                    watchScreen.selectedMovieData = plex.getMovie(rk)
+                    watchScreen.selectedMovieData = ({})
+                    watchScreen._movieLoading = true
+                    plex.fetchMovie(rk)
                 }
             }
         }
@@ -810,7 +825,9 @@ FocusScope {
             watchScreen._focusMemory = mem
             watchScreen.selectedRatingKey = ratingKey
             watchScreen.selectedMovieIndex = index
-            watchScreen.selectedMovieData = plex.getMovie(ratingKey)
+            watchScreen.selectedMovieData = ({})
+            watchScreen._movieLoading = true
+            plex.fetchMovie(ratingKey)
             watchScreen.currentView = "detail"
         }
 
