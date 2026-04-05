@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
+import requests
+
 from PySide6.QtCore import (
     QAbstractListModel,
     QModelIndex,
@@ -25,6 +27,7 @@ from PySide6.QtCore import (
 )
 
 from backend.browser_launcher import BrowserLauncher
+from backend.lrc_parser import parse_lrc, parse_plain
 from backend.config import Config, CONFIG_DIR
 from backend.mpv_launcher import LibMpvPlayer
 from backend.plex_account import PlexAccount
@@ -476,6 +479,8 @@ class PlexLibrary(QObject):
     mpvPlaybackReady = Signal()  # emitted when first frame is ready (wait_until_playing)
     streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
     watchHistoryReady = Signal(list)
+    lyricsReady = Signal(str, list)       # (rating_key, lines) — lines is list of {ms, text} dicts
+    lyricsUnavailable = Signal(str)       # (rating_key) — no lyrics found or error
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -488,6 +493,8 @@ class PlexLibrary(QObject):
     _artistsReady = Signal(list, int)  # (artists, total_size)
     _mpvLaunchReady = Signal(str, str, int, int, int)  # url, title, start_ms, duration_ms, part_id
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
+    _lyricsReady = Signal(str, list)      # (rating_key, lines)
+    _lyricsUnavailable = Signal(str)      # (rating_key)
 
     def __init__(
         self,
@@ -563,6 +570,8 @@ class PlexLibrary(QObject):
         self._artistsReady.connect(self._on_artists_ready)
         self._mpvLaunchReady.connect(self._on_mpv_launch_ready, Qt.ConnectionType.QueuedConnection)
         self._streamInfoReady.connect(self._on_stream_info_ready, Qt.ConnectionType.QueuedConnection)
+        self._lyricsReady.connect(self.lyricsReady)
+        self._lyricsUnavailable.connect(self.lyricsUnavailable)
 
         # MPV launcher for direct stream playback
         self._mpv_launcher = LibMpvPlayer(parent=self)
@@ -1532,6 +1541,33 @@ class PlexLibrary(QObject):
             return ""
         return self._client.get_poster_url(media_key)
 
+    @Slot(str, str, str, str, int)
+    def getLyrics(
+        self,
+        rating_key: str,
+        track_title: str,
+        artist_name: str,
+        album_name: str,
+        duration_ms: int,
+    ) -> None:
+        """Fetch lyrics for a track from LRCLIB asynchronously.
+
+        Emits lyricsReady(rating_key, lines) on success, or
+        lyricsUnavailable(rating_key) when no lyrics are found or an error occurs.
+
+        QML usage:
+            plex.getLyrics(track.ratingKey, track.title,
+                           track.grandparentTitle, track.parentTitle, track.durationMs)
+        """
+        self._executor.submit(
+            self._worker_fetch_lyrics,
+            rating_key,
+            track_title,
+            artist_name,
+            album_name,
+            duration_ms,
+        )
+
     @Slot()
     def launchLiveTv(self) -> None:
         """Launch Plex Web in kiosk browser at the Live TV guide.
@@ -1809,6 +1845,73 @@ class PlexLibrary(QObject):
         local_url = self._poster_cache.get_poster(client, thumb_path)
         if local_url:
             self._posterReady.emit(model_type, row, local_url)
+
+    _LRCLIB_URL = "https://lrclib.net/api/get"
+    _LRCLIB_USER_AGENT = "htpcstation/1.0 (https://github.com/tranxuanthang/lrcget)"
+
+    def _worker_fetch_lyrics(
+        self,
+        rating_key: str,
+        track_title: str,
+        artist_name: str,
+        album_name: str,
+        duration_ms: int,
+    ) -> None:
+        """Worker: fetch lyrics from LRCLIB and emit the appropriate signal."""
+        params = {
+            "track_name": track_title,
+            "artist_name": artist_name,
+            "album_name": album_name,
+            "duration": round(duration_ms / 1000),
+        }
+        headers = {"User-Agent": self._LRCLIB_USER_AGENT}
+        try:
+            response = requests.get(
+                self._LRCLIB_URL,
+                params=params,
+                headers=headers,
+                timeout=10,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("getLyrics: network error for %s: %s", rating_key, exc)
+            self._lyricsUnavailable.emit(rating_key)
+            return
+
+        if response.status_code == 404:
+            self._lyricsUnavailable.emit(rating_key)
+            return
+
+        if response.status_code != 200:
+            logger.warning(
+                "getLyrics: unexpected HTTP %d for %s", response.status_code, rating_key
+            )
+            self._lyricsUnavailable.emit(rating_key)
+            return
+
+        try:
+            data = response.json()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("getLyrics: failed to parse JSON for %s: %s", rating_key, exc)
+            self._lyricsUnavailable.emit(rating_key)
+            return
+
+        if data.get("instrumental") is True:
+            self._lyricsUnavailable.emit(rating_key)
+            return
+
+        synced = data.get("syncedLyrics") or ""
+        if synced:
+            lines = parse_lrc(synced)
+            self._lyricsReady.emit(rating_key, lines)
+            return
+
+        plain = data.get("plainLyrics") or ""
+        if plain:
+            lines = parse_plain(plain)
+            self._lyricsReady.emit(rating_key, lines)
+            return
+
+        self._lyricsUnavailable.emit(rating_key)
 
     # ------------------------------------------------------------------
     # Internal: main-thread result handlers

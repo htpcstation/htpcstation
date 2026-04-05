@@ -788,9 +788,12 @@ FocusScope {
             delegate: Item {
                 id: trackDelegate
 
-                // True when this track is the one currently playing
+                // True when this track is the one currently playing.
+                // _playOrder[_playingIndex] is the actual track index in _playbackTracks;
+                // compare that against this delegate's index in the model.
                 readonly property bool isPlaying: homeScreen._playingAlbumKey === listenScreen._selectedAlbumKey
-                                                  && homeScreen._playingIndex === index
+                                                  && homeScreen._playingIndex >= 0
+                                                  && homeScreen._playOrder[homeScreen._playingIndex] === index
 
                 width: trackList.width
                 height: root.vpx(48)
@@ -904,27 +907,25 @@ FocusScope {
         anchors.fill: parent
         visible: listenScreen.currentView === "nowplaying"
 
+        onActiveFocusChanged: {
+            if (activeFocus) btnPlayPause.forceActiveFocus()
+        }
+
         Keys.onPressed: (event) => {
             if (keys.isCancel(event)) {
                 event.accepted = true
                 listenScreen.currentView = listenScreen._previousView || "menu"
-            } else if (keys.isAccept(event)) {
-                // A button — play/pause
+            } else if (keys.isPrevTab(event)) {
+                // LB — always prev track regardless of which button has focus
                 event.accepted = true
-                homeScreen._togglePlayPause()
-            } else if (keys.isContext1(event)) {
-                // X button — play/pause (handled globally by HomeScreen, but accept here too)
-                event.accepted = true
-                homeScreen._togglePlayPause()
-            } else if (event.key === Qt.Key_Left || keys.isPrevTab(event)) {
-                event.accepted = true
-                if (homeScreen._playingIndex > 0) {
-                    homeScreen._playTrackAtIndex(homeScreen._playingIndex - 1)
-                }
-            } else if (event.key === Qt.Key_Right || keys.isNextTab(event)) {
+                homeScreen._playPrev()
+            } else if (keys.isNextTab(event)) {
+                // RB — always next track regardless of which button has focus
                 event.accepted = true
                 homeScreen._playNext()
             }
+            // Left/Right navigate between buttons (handled by KeyNavigation on each button).
+            // A activates the focused button (handled per-button).
         }
 
         // ── Now Playing header bar ───────────────────────────────────────────
@@ -1006,16 +1007,27 @@ FocusScope {
                 }
             }
 
-            // ── Right: track info + controls ─────────────────────────────────
-            Column {
-                id: nowPlayingInfoColumn
+            // ── Right: track info + controls + lyrics ─────────────────────────
+            Item {
+                id: nowPlayingRightArea
 
                 anchors {
                     top: parent.top
                     left: nowPlayingArtArea.right
                     right: parent.right
+                    bottom: parent.bottom
                     leftMargin: root.vpx(32)
                 }
+
+            // ── Left sub-column: track info + controls ───────────────────────
+            Column {
+                id: nowPlayingInfoColumn
+
+                anchors {
+                    top: parent.top
+                    left: parent.left
+                }
+                width: nowPlayingRightArea.width * 0.58
                 spacing: root.vpx(8)
 
                 // Track title
@@ -1051,79 +1063,308 @@ FocusScope {
                     wrapMode: Text.NoWrap
                 }
 
-                // Year
+                // Year · Track number
                 Text {
                     width: parent.width
-                    text: homeScreen._playbackAlbumData.year > 0
-                        ? "" + homeScreen._playbackAlbumData.year
-                        : ""
+                    text: {
+                        var parts = []
+                        if (homeScreen._playbackAlbumData.year > 0)
+                            parts.push("" + homeScreen._playbackAlbumData.year)
+                        if (homeScreen._nowPlayingTrack.index > 0)
+                            parts.push("Track " + homeScreen._nowPlayingTrack.index)
+                        return parts.join("  ·  ")
+                    }
                     color: Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
                     visible: homeScreen._playbackAlbumData.year > 0
+                             || homeScreen._nowPlayingTrack.index > 0
                 }
 
                 // Spacer
                 Item { width: 1; height: root.vpx(16) }
 
-                // ── Playback controls (visual, not focusable) ────────────────
+                // ── Playback controls (focusable buttons) ────────────────────
                 Row {
-                    spacing: root.vpx(32)
+                    id: controlsRow
+                    spacing: root.vpx(16)
 
-                    // Skip back
-                    Text {
-                        text: "◀◀"
-                        color: homeScreen._playingIndex > 0
-                            ? Theme.colorText : Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(28)
-                        opacity: homeScreen._playingIndex > 0 ? 1.0 : 0.4
+                    // ── Prev ─────────────────────────────────────────────────
+                    FocusScope {
+                        id: btnPrev
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.right: btnPlayPause
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._playPrev()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnPrev.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "◀◀"
+                                color: Theme.colorText
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(24)
+                                opacity: homeScreen._playingIndex > 0 || homeScreen._repeatMode === "all" ? 1.0 : 0.35
+                            }
+                        }
                     }
 
-                    // Play/Pause
-                    Text {
-                        text: homeScreen.musicPlaybackState === 1  // MediaPlayer.PlayingState == 1
-                            ? "❚❚" : "▶"
-                        color: Theme.colorPrimary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(32)
+                    // ── Play/Pause ────────────────────────────────────────────
+                    FocusScope {
+                        id: btnPlayPause
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.left: btnPrev
+                        KeyNavigation.right: btnNext
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._togglePlayPause()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnPlayPause.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: homeScreen.musicPlaybackState === 1 ? "❚❚" : "▶"
+                                color: Theme.colorPrimary
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(28)
+                            }
+                        }
                     }
 
-                    // Skip forward
-                    Text {
-                        text: "▶▶"
-                        color: homeScreen._playingIndex < homeScreen._playbackTracks.length - 1
-                            ? Theme.colorText : Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(28)
-                        opacity: homeScreen._playingIndex < homeScreen._playbackTracks.length - 1
-                            ? 1.0 : 0.4
+                    // ── Next ─────────────────────────────────────────────────
+                    FocusScope {
+                        id: btnNext
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.left: btnPlayPause
+                        KeyNavigation.right: btnShuffle
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._playNext()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnNext.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "▶▶"
+                                color: Theme.colorText
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(24)
+                                opacity: homeScreen._playingIndex < homeScreen._playOrder.length - 1 || homeScreen._repeatMode === "all" ? 1.0 : 0.35
+                            }
+                        }
+                    }
+
+                    // ── Separator ─────────────────────────────────────────────
+                    Rectangle {
+                        width: root.vpx(1)
+                        height: root.vpx(32)
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.colorTextDim
+                        opacity: 0.4
+                    }
+
+                    // ── Shuffle ───────────────────────────────────────────────
+                    FocusScope {
+                        id: btnShuffle
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.left: btnNext
+                        KeyNavigation.right: btnRepeat
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._toggleShuffle()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: homeScreen._shuffleEnabled
+                                ? Qt.rgba(Theme.colorPrimary.r, Theme.colorPrimary.g, Theme.colorPrimary.b, 0.15)
+                                : "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnShuffle.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "⇄"
+                                color: homeScreen._shuffleEnabled ? Theme.colorPrimary : Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(22)
+                            }
+                        }
+                    }
+
+                    // ── Repeat ────────────────────────────────────────────────
+                    FocusScope {
+                        id: btnRepeat
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.left: btnShuffle
+                        KeyNavigation.right: btnLyrics
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._cycleRepeat()
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: homeScreen._repeatMode !== "off"
+                                ? Qt.rgba(Theme.colorPrimary.r, Theme.colorPrimary.g, Theme.colorPrimary.b, 0.15)
+                                : "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnRepeat.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: homeScreen._repeatMode === "one" ? "↺¹" : "↺"
+                                color: homeScreen._repeatMode !== "off" ? Theme.colorPrimary : Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(22)
+                            }
+                        }
+                    }
+
+                    // ── Separator ─────────────────────────────────────────────
+                    Rectangle {
+                        width: root.vpx(1)
+                        height: root.vpx(32)
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: Theme.colorTextDim
+                        opacity: 0.4
+                    }
+
+                    // ── Lyrics toggle ─────────────────────────────────────────
+                    FocusScope {
+                        id: btnLyrics
+                        width: root.vpx(56); height: root.vpx(48)
+                        KeyNavigation.left: btnRepeat
+                        KeyNavigation.down: progressBar
+
+                        Keys.onPressed: (event) => {
+                            if (keys.isAccept(event)) {
+                                event.accepted = true
+                                homeScreen._lyricsEnabled = !homeScreen._lyricsEnabled
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: homeScreen._lyricsEnabled
+                                ? Qt.rgba(Theme.colorPrimary.r, Theme.colorPrimary.g, Theme.colorPrimary.b, 0.15)
+                                : "transparent"
+                            radius: root.vpx(Theme.focusRingRadius)
+                            border.color: Theme.colorFocusRing
+                            border.width: btnLyrics.activeFocus ? root.vpx(Theme.focusRingWidth) : 0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "♪"
+                                color: homeScreen._lyricsEnabled ? Theme.colorPrimary : Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(22)
+                            }
+                        }
                     }
                 }
 
                 // Spacer
                 Item { width: 1; height: root.vpx(8) }
 
-                // ── Progress bar ─────────────────────────────────────────────
-                Item {
+                // ── Progress bar (focusable — Left/Right seek ±10s, LB/RB ±30s) ──
+                FocusScope {
+                    id: progressBar
                     width: parent.width
-                    height: root.vpx(6)
+                    height: root.vpx(20)   // taller hit area; bar drawn inside
 
-                    // Track background
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Qt.darker(Theme.colorSecondary, 1.6)
-                        radius: root.vpx(3)
+                    KeyNavigation.up: btnPlayPause
+
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_Left) {
+                            event.accepted = true
+                            homeScreen._seekBy(-10000)
+                        } else if (event.key === Qt.Key_Right) {
+                            event.accepted = true
+                            homeScreen._seekBy(10000)
+                        } else if (keys.isPrevTab(event)) {
+                            event.accepted = true
+                            homeScreen._seekBy(-30000)
+                        } else if (keys.isNextTab(event)) {
+                            event.accepted = true
+                            homeScreen._seekBy(30000)
+                        }
                     }
 
-                    // Progress fill
+                    // Bar track
                     Rectangle {
-                        width: homeScreen.musicDuration > 0
-                            ? parent.width * (homeScreen.musicPosition / homeScreen.musicDuration)
-                            : 0
-                        height: parent.height
-                        color: Theme.colorPrimary
-                        radius: root.vpx(3)
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
+                        height: progressBar.activeFocus ? root.vpx(8) : root.vpx(6)
+                        color: Qt.darker(Theme.colorSecondary, 1.6)
+                        radius: root.vpx(4)
+
+                        Behavior on height { NumberAnimation { duration: Theme.animDurationFast } }
+
+                        // Progress fill
+                        Rectangle {
+                            width: homeScreen.musicDuration > 0
+                                ? parent.width * (homeScreen.musicPosition / homeScreen.musicDuration)
+                                : 0
+                            height: parent.height
+                            color: Theme.colorPrimary
+                            radius: parent.radius
+                        }
+
+                        // Thumb — visible only when focused
+                        Rectangle {
+                            visible: progressBar.activeFocus && homeScreen.musicDuration > 0
+                            x: homeScreen.musicDuration > 0
+                                ? parent.width * (homeScreen.musicPosition / homeScreen.musicDuration) - width / 2
+                                : 0
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: root.vpx(14)
+                            height: root.vpx(14)
+                            radius: width / 2
+                            color: Theme.colorPrimary
+                        }
                     }
                 }
 
@@ -1137,8 +1378,79 @@ FocusScope {
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
                 }
 
-                // ── Space reserved for future lyrics toggle ──────────────────
-                Item { width: 1; height: root.vpx(16) }
+            }
+
+            // ── Right sub-column: lyrics panel ───────────────────────────────
+            Item {
+                id: lyricsPanel
+
+                anchors {
+                    left: nowPlayingInfoColumn.right
+                    leftMargin: root.vpx(24)
+                    right: parent.right
+                    top: parent.top
+                    bottom: parent.bottom
+                }
+
+                visible: homeScreen._lyricsEnabled
+
+                // ── "No lyrics" placeholder ──────────────────────────────────
+                Text {
+                    anchors.centerIn: parent
+                    visible: homeScreen._lyricsRatingKey !== ""
+                             && !homeScreen._lyricsAvailable
+                    text: "No lyrics available"
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                }
+
+                // ── Lyrics list ───────────────────────────────────────────────
+                ListView {
+                    id: lyricsView
+                    anchors.fill: parent
+                    clip: true
+                    visible: homeScreen._lyricsAvailable && homeScreen._lyricsLines.length > 0
+
+                    model: homeScreen._lyricsLines
+
+                    // Active line index: highest index where line.ms <= musicPosition.
+                    // For plain lyrics (all ms === -1), activeIndex stays -1 (no highlight).
+                    property int activeIndex: {
+                        var pos = homeScreen.musicPosition
+                        var lines = homeScreen._lyricsLines
+                        var idx = -1
+                        for (var i = 0; i < lines.length; i++) {
+                            if (lines[i].ms !== -1 && lines[i].ms <= pos) idx = i
+                        }
+                        return idx
+                    }
+
+                    // Auto-scroll to keep active line centred.
+                    onActiveIndexChanged: {
+                        if (activeIndex >= 0) {
+                            positionViewAtIndex(activeIndex, ListView.Center)
+                        }
+                    }
+
+                    delegate: Text {
+                        width: lyricsView.width
+                        text: modelData.text
+                        color: index === lyricsView.activeIndex
+                            ? Theme.colorPrimary
+                            : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        wrapMode: Text.Wrap
+                        topPadding: root.vpx(3)
+                        bottomPadding: root.vpx(3)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+                    }
+                }
+            }
             }
         }
 
@@ -1156,10 +1468,10 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels
-                    ? "[" + keys.acceptLabel + "] Play/Pause    ["
-                      + keys.cancelLabel + "] Back    [◀] Prev    [▶] Next"
-                    : "[Enter] Play/Pause    [Esc] Back    [←] Prev    [→] Next"
+                    text: keys.useGamepadLabels
+                        ? "[" + keys.acceptLabel + "] Select    ["
+                          + keys.cancelLabel + "] Back    [LB] Prev    [RB] Next    [↓] Seek bar    [←][→] Navigate/Seek"
+                        : "[Enter] Select    [Esc] Back    [LB] Prev    [RB] Next    [↓] Seek bar    [←][→] Navigate/Seek"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

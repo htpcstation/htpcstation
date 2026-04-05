@@ -56,6 +56,9 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 - Browse artists, albums, playlists, and recently added music from your Plex music library.
 - Grid and List views for the artist browser, with sort support (A-Z, Z-A).
 - Full Now Playing screen with album art, track info, and playback controls.
+- **Shuffle** and **Repeat** (off / all / one) — toggled from focusable buttons in the Now Playing controls row.
+- **Seek bar** — navigate down from the controls row to the progress bar; Left/Right seek ±10s, LB/RB seek ±30s.
+- **Synced lyrics** — fetched automatically from [LRCLIB](https://lrclib.net) when a track starts. Active line highlights and auto-scrolls. Falls back to plain text. Toggle lyrics on/off with the ♪ button.
 - Music keeps playing in the background while you browse other tabs.
 - Press X from any tab to pause or resume playback.
 - A persistent "now playing" indicator appears in the top-right corner of the screen.
@@ -108,29 +111,40 @@ HTPC Station turns an old mini PC into a couch-friendly entertainment center. It
 ```bash
 git clone https://github.com/htpcstation/htpcstation.git
 cd htpcstation
+bash install.sh
 ```
 
-Before installing Python dependencies, check that system prerequisites are in place:
+`install.sh` is an interactive CLI installer that:
+
+1. **Detects** your OS (Debian/Ubuntu, Fedora, Arch, or other), graphics hardware (Intel, AMD, NVIDIA), and display server (Wayland or Xorg).
+2. **Interviews** you — which tabs you want, where your ROMs live, your Plex server URL, whether you have an HDHomeRun tuner, and which PC game launchers you use.
+3. **Checks dependencies** — lists every required package with a ✓/✗ status and the exact install command for your distro. Nothing is installed automatically in this version.
+4. **Creates a Python venv** at `<repo>/venv/` and installs pip dependencies from `requirements.txt`.
+5. **Writes** `~/.config/htpcstation/config.json` based on your answers (backs up any existing config first).
+6. **Generates** `htpcstation.sh` — a launcher script that runs the app using the venv.
+
+After `install.sh` completes, install any missing system packages it listed, then:
 
 ```bash
+./htpcstation.sh
+```
+
+The app launches fullscreen. Sign in to Plex from the Settings tab.
+
+#### Manual installation (advanced)
+
+If you prefer to manage dependencies yourself:
+
+```bash
+# Check system prerequisites
 bash scripts/check-deps.sh
-```
 
-This checks for Python 3.10+, kernel headers, MPV, VA-API hardware decode drivers, FFmpeg codec support, optional Flatpak apps (RetroArch, Steam, Moonlight, Brave), and gamepad input devices. Each failed check prints the specific install command for your distro and hardware.
-
-Then install Python packages:
-
-```bash
+# Install Python packages (system-wide or in your own venv)
 pip install -r requirements.txt
-```
 
-### Running
-
-```bash
+# Run
 python3 main.py
 ```
-
-The app launches fullscreen. All configuration is done from the Settings tab inside the app.
 
 ### Running Tests
 
@@ -138,7 +152,7 @@ The app launches fullscreen. All configuration is done from the Settings tab ins
 python3 -m pytest tests/ -q
 ```
 
-The suite currently covers over 1,536 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
+The suite currently covers over 1,579 backend tests. If you want those tests to use your own Moonlight host, Plex server URL, or other personal values, create a git-ignored JSON file with overrides:
 
 1. Copy `tests/local_overrides.sample.json` to `tests/local_overrides.json` (or `tests/.local/test_overrides.json`).
 2. Replace the sample data with your real values.
@@ -190,7 +204,7 @@ The tests automatically load these overrides via `tests/local_overrides.py`, so 
 
 Custom images always override auto-downloaded artwork.
 
-**MPV gamepad bindings:** MPV uses a bundled `input.conf` at `~/.config/htpcstation/mpv/input.conf`. The file is created automatically on first launch and updated when new bindings are added. You can edit it manually — your changes are preserved across updates as long as the version header is current.
+**MPV gamepad bindings:** Bindings are registered programmatically at startup via `player.keybind()` — no `input.conf` file is written to disk.
 
 The table below uses the **wizard mapping** button names (Accept, Cancel, etc.) which correspond to the physical buttons you mapped during controller setup.
 
@@ -205,7 +219,7 @@ The table below uses the **wizard mapping** button names (Accept, Cancel, etc.) 
 | RB | Show track list |
 | Start | Quit (return to HTPC Station) |
 
-> **Note:** Gamepad bindings are registered programmatically at startup — no `input.conf` file is written. If buttons seem swapped, run `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` and press each button to see what name MPV reports, then open an issue.
+> **Note:** If buttons seem swapped, run `mpv --input-gamepad=yes --input-test --force-window --idle --input-conf=/dev/null` and press each button to see what name MPV reports, then open an issue.
 
 ### Controller Reference
 
@@ -241,11 +255,9 @@ The table below uses the **wizard mapping** button names (Accept, Cancel, etc.) 
 
 - Streaming service integration (YouTube, Netflix, and others) via the browser extension framework.
 - Tab management improvements so hiding or showing tabs does not require a restart.
-- Richer music features: shuffle, repeat, a seek bar, and volume control.
 - Metadata (descriptions, genres) for Moonlight apps pulled from Steam.
 - Plex search.
-- Mark watched/unwatched in Plex.
-- First-run setup wizard.
+- First-run setup wizard (in-app complement to `install.sh`).
 - Standalone emulator support (Dolphin, PCSX2, etc.) for systems without a libretro core.
 
 ---

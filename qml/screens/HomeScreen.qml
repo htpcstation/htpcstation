@@ -75,10 +75,24 @@ FocusScope {
         target: plex
         function onMpvStarted() { homeScreen._mpvRunning = true }
         function onMpvFinished() { homeScreen._mpvRunning = false }
+        function onLyricsReady(ratingKey, lines) {
+            if (ratingKey === homeScreen._nowPlayingTrack.ratingKey) {
+                homeScreen._lyricsLines = lines
+                homeScreen._lyricsAvailable = true
+                homeScreen._lyricsRatingKey = ratingKey
+            }
+        }
+        function onLyricsUnavailable(ratingKey) {
+            if (ratingKey === homeScreen._nowPlayingTrack.ratingKey) {
+                homeScreen._lyricsLines = []
+                homeScreen._lyricsAvailable = false
+                homeScreen._lyricsRatingKey = ratingKey
+            }
+        }
     }
 
     // ── Global music playback state ───────────────────────────────────────────
-    // Index into _playbackTracks of the currently playing track (-1 = not playing).
+    // Index into _playOrder of the currently playing position (-1 = not playing).
     property int _playingIndex: -1
     // ratingKey of the album currently being played.
     property string _playingAlbumKey: ""
@@ -90,6 +104,18 @@ FocusScope {
     property var _playbackAlbumData: ({})
     // Track name shown in the persistent status bar indicator.
     property string nowPlayingTrack: ""
+    // Ordered list of indices into _playbackTracks. Shuffled when _shuffleEnabled,
+    // otherwise [0, 1, 2, ...] in natural order.
+    property var _playOrder: []
+    // Whether shuffle is active. Rebuilt on each _playAlbum call.
+    property bool _shuffleEnabled: false
+    // Repeat mode: "off" | "one" | "all"
+    property string _repeatMode: "off"
+    // Lyrics for the currently playing track.
+    property var    _lyricsLines:     []      // list of {ms, text} — empty = not loaded yet
+    property bool   _lyricsAvailable: false   // false = unavailable or not yet fetched
+    property string _lyricsRatingKey: ""      // ratingKey of the track lyrics were fetched for
+    property bool   _lyricsEnabled:   true    // user toggle — hides/shows the lyrics panel
 
     // ── Global audio player ───────────────────────────────────────────────────
     MediaPlayer {
@@ -110,17 +136,41 @@ FocusScope {
     readonly property int musicDuration: musicPlayer.duration
 
     // ── Global playback functions ─────────────────────────────────────────────
+
+    function _buildPlayOrder(length, startTrackIndex) {
+        // Build _playOrder: shuffled or natural. startTrackIndex is the track the
+        // user chose; it is always placed at position 0 in the order so it plays first.
+        var order = []
+        for (var i = 0; i < length; i++) order.push(i)
+        if (_shuffleEnabled) {
+            // Fisher-Yates shuffle
+            for (var j = length - 1; j > 0; j--) {
+                var k = Math.floor(Math.random() * (j + 1))
+                var tmp = order[j]; order[j] = order[k]; order[k] = tmp
+            }
+            // Move startTrackIndex to position 0
+            var pos = order.indexOf(startTrackIndex)
+            if (pos > 0) { order.splice(pos, 1); order.unshift(startTrackIndex) }
+        } else {
+            // Natural order: rotate so startTrackIndex is first
+            order = order.slice(startTrackIndex).concat(order.slice(0, startTrackIndex))
+        }
+        return order
+    }
+
     function _playAlbum(tracks, albumData, startIndex) {
         if (!tracks || tracks.length === 0) return
         _playbackTracks = tracks
         _playbackAlbumData = albumData
         _playingAlbumKey = albumData.ratingKey || ""
-        _playTrackAtIndex(startIndex)
+        _playOrder = _buildPlayOrder(tracks.length, startIndex)
+        _playTrackAtIndex(0)
     }
 
+    // idx is a position in _playOrder, not a direct track index.
     function _playTrackAtIndex(idx) {
-        if (idx < 0 || idx >= _playbackTracks.length) {
-            // End of album
+        if (idx < 0 || idx >= _playOrder.length) {
+            // End of queue — stop (repeat-all wraps before reaching here)
             _playingIndex = -1
             _nowPlayingTrack = {}
             nowPlayingTrack = ""
@@ -128,22 +178,70 @@ FocusScope {
             return
         }
         _playingIndex = idx
-        var track = _playbackTracks[idx]
+        var track = _playbackTracks[_playOrder[idx]]
         _nowPlayingTrack = track
         nowPlayingTrack = track.title || ""
+        _lyricsLines = []
+        _lyricsAvailable = false
+        _lyricsRatingKey = ""
+        if (plex && track.ratingKey) {
+            plex.getLyrics(track.ratingKey, track.title,
+                           track.grandparentTitle, track.parentTitle, track.durationMs)
+        }
         var url = plex.getTrackStreamUrl(track.mediaKey)
         musicPlayer.source = url
         musicPlayer.play()
     }
 
     function _playNext() {
-        if (_playingIndex >= 0 && _playingIndex < _playbackTracks.length - 1) {
+        if (_repeatMode === "one") {
+            // Replay the same track from the start
+            var url = plex.getTrackStreamUrl(_playbackTracks[_playOrder[_playingIndex]].mediaKey)
+            musicPlayer.source = url
+            musicPlayer.play()
+            return
+        }
+        if (_playingIndex < _playOrder.length - 1) {
             _playTrackAtIndex(_playingIndex + 1)
+        } else if (_repeatMode === "all" && _playOrder.length > 0) {
+            _playTrackAtIndex(0)
         } else {
             _playingIndex = -1
             _nowPlayingTrack = {}
             nowPlayingTrack = ""
+            musicPlayer.stop()
         }
+    }
+
+    function _playPrev() {
+        // If more than 3s into the track, restart it instead of going back
+        if (musicPlayer.position > 3000 && _playingIndex >= 0) {
+            musicPlayer.seek(0)
+            return
+        }
+        if (_playingIndex > 0) {
+            _playTrackAtIndex(_playingIndex - 1)
+        } else if (_repeatMode === "all" && _playOrder.length > 0) {
+            _playTrackAtIndex(_playOrder.length - 1)
+        } else {
+            musicPlayer.seek(0)
+        }
+    }
+
+    function _toggleShuffle() {
+        _shuffleEnabled = !_shuffleEnabled
+        if (_playingIndex >= 0 && _playOrder.length > 0) {
+            // Rebuild the play order keeping the current track at position 0
+            var currentTrackIdx = _playOrder[_playingIndex]
+            _playOrder = _buildPlayOrder(_playbackTracks.length, currentTrackIdx)
+            _playingIndex = 0
+        }
+    }
+
+    function _cycleRepeat() {
+        if (_repeatMode === "off")      _repeatMode = "all"
+        else if (_repeatMode === "all") _repeatMode = "one"
+        else                            _repeatMode = "off"
     }
 
     function _togglePlayPause() {
@@ -152,6 +250,12 @@ FocusScope {
         } else {
             musicPlayer.play()
         }
+    }
+
+    function _seekBy(deltaMs) {
+        if (musicPlayer.duration <= 0) return
+        var target = Math.max(0, Math.min(musicPlayer.position + deltaMs, musicPlayer.duration))
+        musicPlayer.seek(target)
     }
 
     function _formatDuration(ms) {
