@@ -31,11 +31,16 @@ FocusScope {
     // Compatible+installed cores for the currently selected row — updated on row change and on open.
     property var _currentRowCores: []
 
+    // Core overrides applied during this session: folderName → core filename.
+    // Delegates read this first so the systems array never needs to be reassigned during cycling.
+    property var _corePatch: ({})
+
     // Emit when B (Escape) is pressed.
     signal back()
 
-    // Update _currentRowCores when the systems list is set (screen opens).
+    // When the systems list is set (screen opens), reset patch and update cores for row 0.
     onSystemsChanged: {
+        systemCoresScreen._corePatch = ({})
         var sys = systemsList.currentIndex >= 0
             ? systemCoresScreen.systems[systemsList.currentIndex]
             : null
@@ -64,9 +69,9 @@ FocusScope {
         }
         var sys = systemCoresScreen.systems[systemsList.currentIndex]
         if (!sys) return
-        var current = sys.core
+        // Use patched core if one exists for this row, otherwise use the original
+        var current = systemCoresScreen._corePatch[sys.folderName] || sys.core
         var idx = cores.indexOf(current)
-        // If current core not in list, delta > 0 → go to index 0, delta < 0 → go to last
         var next
         if (idx < 0) {
             next = delta > 0 ? 0 : cores.length - 1
@@ -75,14 +80,10 @@ FocusScope {
         }
         var newCore = cores[next]
         if (settings) settings.setSystemCore(sys.folderName, newCore)
-        // Update local model
-        var updated = systemCoresScreen.systems.slice()
-        updated[systemsList.currentIndex] = {
-            folderName: sys.folderName,
-            displayName: sys.displayName,
-            core: newCore
-        }
-        systemCoresScreen.systems = updated
+        // Assign a new object so QML detects the change and re-evaluates delegate bindings
+        var patch = Object.assign({}, systemCoresScreen._corePatch)
+        patch[sys.folderName] = newCore
+        systemCoresScreen._corePatch = patch
     }
 
     // ── Key handling ──────────────────────────────────────────────────────────
@@ -253,7 +254,8 @@ FocusScope {
                     width: parent.width * 0.45
                     text: {
                         if (!delegateItem.systemData) return ""
-                        var core = delegateItem.systemData.core
+                        var core = systemCoresScreen._corePatch[delegateItem.systemData.folderName]
+                            || delegateItem.systemData.core
                         if (systemCoresScreen._currentRowCores.length > 0 && delegateItem.isCurrentRow)
                             return "◀  " + core + "  ▶"
                         return core
