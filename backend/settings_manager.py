@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     Slot,
 )
 
-from backend.config import Config
+from backend.config import Config, SYSTEM_COMPATIBLE_CORES
 from backend.controller_mapping import ACTIONS, get_default_mapping, save_mapping
 from backend.library import GameLibrary
 from backend.plex_account import PlexAccount
@@ -631,17 +631,30 @@ class SettingsManager(QObject):
         self._config.set_system_core(folder_name, core)
         self.coresDirectoryChanged.emit()  # reuse signal to notify system core changes
 
-    @Slot(result="QVariant")
-    def getAvailableCores(self) -> list:
-        """Return sorted list of .so filenames in cores_directory.
+    @Slot(str, result="QVariant")
+    def getAvailableCores(self, folder_name: str) -> list:
+        """Return installed cores compatible with the given system folder name.
 
-        Returns [] if the directory doesn't exist or contains no .so files.
+        Returns cores from SYSTEM_COMPATIBLE_CORES[folder_name] that are
+        actually installed in cores_directory, preserving recommendation order.
+
+        Falls back to [current_core] if the system has no entry in the map
+        and the current core is installed. Returns [] if nothing is installed.
         """
-        cores_dir = self._config.cores_directory  # already a Path, already expanduser'd
+        cores_dir = self._config.cores_directory
         if not cores_dir.is_dir():
             return []
-        cores = sorted(p.name for p in cores_dir.glob("*.so"))
-        return cores
+        installed = {p.name for p in cores_dir.glob("*.so")}
+
+        compatible = SYSTEM_COMPATIBLE_CORES.get(folder_name)
+        if compatible is not None:
+            return [c for c in compatible if c in installed]
+
+        # Fallback: return current core if installed
+        sys_config = self._config.get_system(folder_name)
+        if sys_config.core and sys_config.core in installed:
+            return [sys_config.core]
+        return []
 
     # ------------------------------------------------------------------
     # Slots — actions

@@ -210,6 +210,131 @@ SYSTEM_DEFAULTS: dict[str, dict] = {
 }
 
 
+SYSTEM_COMPATIBLE_CORES: dict[str, list[str]] = {
+    # Game Boy / GBC
+    "gb":              ["gambatte_libretro.so", "mgba_libretro.so", "sameboy_libretro.so", "tgbdual_libretro.so"],
+    "gbc":             ["gambatte_libretro.so", "mgba_libretro.so", "sameboy_libretro.so", "tgbdual_libretro.so"],
+    "gb2players":      ["gambatte_libretro.so", "mgba_libretro.so", "tgbdual_libretro.so"],
+    "gbc2players":     ["gambatte_libretro.so", "mgba_libretro.so", "tgbdual_libretro.so"],
+    "sgb":             ["mesen_libretro.so", "snes9x_libretro.so", "bsnes_libretro.so"],
+    # GBA
+    "gba":             ["mgba_libretro.so", "gpsp_libretro.so", "vba_next_libretro.so", "vbam_libretro.so"],
+    # NES / FDS
+    "nes":             ["mesen_libretro.so", "nestopia_libretro.so", "fceumm_libretro.so", "quicknes_libretro.so"],
+    "fds":             ["mesen_libretro.so", "nestopia_libretro.so", "fceumm_libretro.so"],
+    # SNES
+    "snes":            ["snes9x_libretro.so", "bsnes_libretro.so", "mesen-s_libretro.so", "snes9x2010_libretro.so"],
+    "snes-msu1":       ["snes9x_libretro.so", "bsnes_libretro.so"],
+    "sufami":          ["snes9x_libretro.so", "bsnes_libretro.so"],
+    "satellaview":     ["snes9x_libretro.so", "bsnes_libretro.so"],
+    # N64
+    "n64":             ["mupen64plus_next_libretro.so", "parallel_n64_libretro.so"],
+    "n64dd":           ["mupen64plus_next_libretro.so", "parallel_n64_libretro.so"],
+    # NDS
+    "nds":             ["melonds_libretro.so", "desmume_libretro.so", "desmume2015_libretro.so"],
+    # 3DS
+    "n3ds":            ["citra_libretro.so"],
+    # GameCube / Wii
+    "gamecube":        ["dolphin_libretro.so"],
+    "wii":             ["dolphin_libretro.so"],
+    # Virtual Boy
+    "virtualboy":      ["mednafen_vb_libretro.so"],
+    # Game & Watch / Pokémon Mini
+    "gameandwatch":    ["gw_libretro.so"],
+    "pokemini":        ["pokemini_libretro.so"],
+    # Sega Genesis / Mega Drive family
+    "megadrive":       ["genesis_plus_gx_libretro.so", "picodrive_libretro.so", "blastem_libretro.so"],
+    "sega32x":         ["picodrive_libretro.so"],
+    "segacd":          ["genesis_plus_gx_libretro.so", "picodrive_libretro.so"],
+    "mastersystem":    ["genesis_plus_gx_libretro.so", "picodrive_libretro.so", "smsplus_libretro.so"],
+    "gamegear":        ["genesis_plus_gx_libretro.so", "picodrive_libretro.so"],
+    "sg1000":          ["genesis_plus_gx_libretro.so"],
+    "pico":            ["picodrive_libretro.so", "genesis_plus_gx_libretro.so"],
+    "msu-md":          ["genesis_plus_gx_libretro.so"],
+    "megaduck":        ["sameduck_libretro.so"],
+    # Saturn
+    "saturn":          ["mednafen_saturn_libretro.so", "yabause_libretro.so"],
+    # Dreamcast / NAOMI
+    "dreamcast":       ["flycast_libretro.so", "redream_libretro.so"],
+    "naomi":           ["flycast_libretro.so"],
+    "naomi2":          ["flycast_libretro.so"],
+    "atomiswave":      ["flycast_libretro.so"],
+    # PlayStation
+    "psx":             ["mednafen_psx_hw_libretro.so", "mednafen_psx_libretro.so", "pcsx_rearmed_libretro.so", "swanstation_libretro.so"],
+    "ps2":             ["pcsx2_libretro.so"],
+    "psp":             ["ppsspp_libretro.so"],
+    # PC Engine / TurboGrafx
+    "pce":             ["mednafen_pce_libretro.so", "mednafen_pce_fast_libretro.so"],
+    "pcengine":        ["mednafen_pce_libretro.so", "mednafen_pce_fast_libretro.so"],
+    "pcenginecd":      ["mednafen_pce_libretro.so", "mednafen_pce_fast_libretro.so"],
+    "supergrafx":      ["mednafen_supergrafx_libretro.so", "mednafen_pce_libretro.so"],
+    # Neo Geo Pocket
+    "ngp":             ["mednafen_ngp_libretro.so"],
+    "ngpc":            ["mednafen_ngp_libretro.so"],
+    # WonderSwan
+    "wonderswan":      ["mednafen_wswan_libretro.so"],
+    "wonderswancolor": ["mednafen_wswan_libretro.so"],
+    "wswan":           ["mednafen_wswan_libretro.so"],
+    "wswanc":          ["mednafen_wswan_libretro.so"],
+    # Neo Geo / Arcade
+    "neogeo":          ["fbneo_libretro.so", "mame_libretro.so"],
+    "neogeocd":        ["neocd_libretro.so", "fbneo_libretro.so"],
+    "fbneo":           ["fbneo_libretro.so", "mame_libretro.so"],
+    "mame":            ["mame_libretro.so", "fbneo_libretro.so"],
+    "daphne":          ["daphne_libretro.so"],
+    # Atari
+    "atari2600":       ["stella_libretro.so", "stella2014_libretro.so"],
+    "atari7800":       ["prosystem_libretro.so"],
+    "atari5200":       ["atari800_libretro.so"],
+    "atari800":        ["atari800_libretro.so"],
+    "atarilynx":       ["mednafen_lynx_libretro.so", "handy_libretro.so"],
+    "lynx":            ["mednafen_lynx_libretro.so", "handy_libretro.so"],
+    "atarist":         ["hatari_libretro.so"],
+    "xegs":            ["atari800_libretro.so"],
+    "jaguar":          ["virtualjaguar_libretro.so"],
+    "jaguarcd":        ["virtualjaguar_libretro.so"],
+    # Commodore
+    "c64":             ["vice_x64_libretro.so", "vice_x64sc_libretro.so"],
+    "c128":            ["vice_x128_libretro.so"],
+    "c20":             ["vice_xvic_libretro.so"],
+    "cplus4":          ["vice_xplus4_libretro.so"],
+    "pet":             ["vice_xpet_libretro.so"],
+    "amiga500":        ["puae_libretro.so", "uae4arm_libretro.so"],
+    "amiga1200":       ["puae_libretro.so", "uae4arm_libretro.so"],
+    "amigacd32":       ["puae_libretro.so"],
+    "amigacdtv":       ["puae_libretro.so"],
+    # MSX / Coleco
+    "msx1":            ["bluemsx_libretro.so", "fmsx_libretro.so"],
+    "msx2":            ["bluemsx_libretro.so", "fmsx_libretro.so"],
+    "msx2+":           ["bluemsx_libretro.so", "fmsx_libretro.so"],
+    "msxturbor":       ["bluemsx_libretro.so"],
+    "spectravideo":    ["bluemsx_libretro.so"],
+    "colecovision":    ["bluemsx_libretro.so", "gearcoleco_libretro.so"],
+    # ZX Spectrum / Sinclair
+    "zxspectrum":      ["fuse_libretro.so"],
+    "zx81":            ["81_libretro.so"],
+    # Amstrad
+    "amstradcpc":      ["crocods_libretro.so", "cap32_libretro.so"],
+    "gx4000":          ["crocods_libretro.so"],
+    # Apple
+    "apple2":          ["mednafen_apple2_libretro.so"],
+    "apple2gs":        ["gsplus_libretro.so"],
+    "macintosh":       ["minivmac_libretro.so"],
+    # Japanese computers
+    "pc88":            ["quasi88_libretro.so"],
+    "pc98":            ["np2kai_libretro.so"],
+    "x68000":          ["px68k_libretro.so"],
+    "x1":              ["mame_libretro.so"],
+    "fm7":             ["mame_libretro.so"],
+    "fmtowns":         ["mame_libretro.so"],
+    # DOS / ScummVM
+    "dos":             ["dosbox_pure_libretro.so", "dosbox_core_libretro.so", "dosbox_svn_libretro.so"],
+    "scummvm":         ["scummvm_libretro.so"],
+    # Intellivision
+    "intellivision":   ["freeintv_libretro.so"],
+}
+
+
 @dataclass
 class SystemConfig:
     """Configuration for a single emulated system."""

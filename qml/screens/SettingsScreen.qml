@@ -31,7 +31,6 @@ FocusScope {
     // ── System Cores sub-screen ───────────────────────────────────────────────
     function showSystemCores() {
         systemCoresScreen.systems = settings ? settings.getSystemsList() : []
-        systemCoresScreen._availableCores = settings ? settings.getAvailableCores() : []
         systemCoresScreen.visible = true
         systemCoresScreen.forceActiveFocus()
     }

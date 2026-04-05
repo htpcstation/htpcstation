@@ -2962,7 +2962,7 @@ class TestGetAvailableCores:
         nonexistent = tmp_path / "no_such_dir"
         manager = self._make_manager(tmp_path, cores_dir=nonexistent)
 
-        result = manager.getAvailableCores()
+        result = manager.getAvailableCores("gb")
 
         assert result == []
 
@@ -2975,26 +2975,107 @@ class TestGetAvailableCores:
         (cores_dir / "core.info").write_text("not a core")
         manager = self._make_manager(tmp_path, cores_dir=cores_dir)
 
-        result = manager.getAvailableCores()
+        result = manager.getAvailableCores("gb")
 
         assert result == []
 
-    def test_returns_sorted_so_filenames(self, tmp_path: Path) -> None:
-        """getAvailableCores returns sorted list of .so filenames."""
+    def test_returns_only_compatible_cores(self, tmp_path: Path) -> None:
+        """getAvailableCores returns only cores compatible with the given system."""
         cores_dir = tmp_path / "cores"
         cores_dir.mkdir()
-        (cores_dir / "snes9x_libretro.so").write_text("")
+        # Two compatible cores for "gb" + one incompatible (snes9x)
         (cores_dir / "gambatte_libretro.so").write_text("")
-        (cores_dir / "mesen_libretro.so").write_text("")
+        (cores_dir / "mgba_libretro.so").write_text("")
+        (cores_dir / "snes9x_libretro.so").write_text("")
         manager = self._make_manager(tmp_path, cores_dir=cores_dir)
 
-        result = manager.getAvailableCores()
+        result = manager.getAvailableCores("gb")
 
-        assert result == [
-            "gambatte_libretro.so",
-            "mesen_libretro.so",
-            "snes9x_libretro.so",
-        ]
+        assert "gambatte_libretro.so" in result
+        assert "mgba_libretro.so" in result
+        assert "snes9x_libretro.so" not in result
+        assert len(result) == 2
+
+    def test_preserves_recommendation_order(self, tmp_path: Path) -> None:
+        """getAvailableCores preserves the recommendation order from SYSTEM_COMPATIBLE_CORES."""
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        # Install in reverse order — result should still follow recommendation order
+        (cores_dir / "snes9x_libretro.so").write_text("")
+        (cores_dir / "bsnes_libretro.so").write_text("")
+        manager = self._make_manager(tmp_path, cores_dir=cores_dir)
+
+        result = manager.getAvailableCores("snes")
+
+        # snes9x is recommended first for "snes"
+        assert result[0] == "snes9x_libretro.so"
+        assert result[1] == "bsnes_libretro.so"
+
+    def test_fallback_for_unknown_system(self, tmp_path: Path) -> None:
+        """getAvailableCores returns [current_core] for a system not in SYSTEM_COMPATIBLE_CORES."""
+        from backend.settings_manager import SettingsManager
+
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        (cores_dir / "custom_core_libretro.so").write_text("")
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({
+                "retroarch": {"cores_directory": str(cores_dir)},
+                "systems": {
+                    "myunknownsystem": {
+                        "display_name": "My Unknown System",
+                        "core": "custom_core_libretro.so",
+                        "extensions": [".bin"],
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+
+        result = manager.getAvailableCores("myunknownsystem")
+
+        assert result == ["custom_core_libretro.so"]
+
+    def test_fallback_returns_empty_when_core_not_installed(self, tmp_path: Path) -> None:
+        """getAvailableCores returns [] for unknown system when current core is not installed."""
+        from backend.settings_manager import SettingsManager
+
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        # Core is NOT present in the directory
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({
+                "retroarch": {"cores_directory": str(cores_dir)},
+                "systems": {
+                    "myunknownsystem": {
+                        "display_name": "My Unknown System",
+                        "core": "missing_core_libretro.so",
+                        "extensions": [".bin"],
+                    }
+                },
+            }),
+            encoding="utf-8",
+        )
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+
+        result = manager.getAvailableCores("myunknownsystem")
+
+        assert result == []
 
     def test_excludes_non_so_files(self, tmp_path: Path) -> None:
         """getAvailableCores only returns .so files, not .so.zip or .info files."""
@@ -3005,7 +3086,7 @@ class TestGetAvailableCores:
         (cores_dir / "snes9x_libretro.info").write_text("")
         manager = self._make_manager(tmp_path, cores_dir=cores_dir)
 
-        result = manager.getAvailableCores()
+        result = manager.getAvailableCores("snes")
 
         assert result == ["snes9x_libretro.so"]
 
@@ -3016,7 +3097,7 @@ class TestGetAvailableCores:
         (cores_dir / "gambatte_libretro.so").write_text("")
         manager = self._make_manager(tmp_path, cores_dir=cores_dir)
 
-        result = manager.getAvailableCores()
+        result = manager.getAvailableCores("gb")
 
         assert len(result) == 1
         assert result[0] == "gambatte_libretro.so"

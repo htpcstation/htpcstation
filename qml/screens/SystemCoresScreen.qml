@@ -14,7 +14,6 @@ import "../components"
 //
 //   function showSystemCores() {
 //       systemCoresScreen.systems = settings.getSystemsList()
-//       systemCoresScreen._availableCores = settings.getAvailableCores()
 //       systemCoresScreen.visible = true
 //       systemCoresScreen.forceActiveFocus()
 //   }
@@ -29,15 +28,36 @@ FocusScope {
     // The list of systems: [{folderName, displayName, core}]
     property var systems: []
 
-    // Cached list of installed cores — populated once on show, refreshed on coresDirectoryChanged
-    property var _availableCores: []
+    // Compatible+installed cores for the currently selected row — updated on row change and on open.
+    property var _currentRowCores: []
 
     // Emit when B (Escape) is pressed.
     signal back()
 
+    // Update _currentRowCores when the systems list is set (screen opens).
+    onSystemsChanged: {
+        var sys = systemsList.currentIndex >= 0
+            ? systemCoresScreen.systems[systemsList.currentIndex]
+            : null
+        systemCoresScreen._currentRowCores = (sys && settings)
+            ? settings.getAvailableCores(sys.folderName) : []
+    }
+
+    // Update _currentRowCores when the selected row changes.
+    Connections {
+        target: systemsList
+        function onCurrentIndexChanged() {
+            var sys = systemsList.currentIndex >= 0
+                ? systemCoresScreen.systems[systemsList.currentIndex]
+                : null
+            systemCoresScreen._currentRowCores = (sys && settings)
+                ? settings.getAvailableCores(sys.folderName) : []
+        }
+    }
+
     // ── Cycle core by delta (+1 forward, -1 backward) ─────────────────────────
     function _cycleCore(delta) {
-        var cores = systemCoresScreen._availableCores
+        var cores = systemCoresScreen._currentRowCores
         if (cores.length === 0) {
             systemCoresScreen._showToast("No cores installed — run install.sh")
             return
@@ -130,7 +150,7 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: systemCoresScreen._availableCores.length > 0
+                text: systemCoresScreen._currentRowCores.length > 0
                     ? "◀▶  Change core"
                     : "No cores installed"
                 color: Theme.colorTextDim
@@ -234,7 +254,7 @@ FocusScope {
                     text: {
                         if (!delegateItem.systemData) return ""
                         var core = delegateItem.systemData.core
-                        if (systemCoresScreen._availableCores.length > 0 && delegateItem.isCurrentRow)
+                        if (systemCoresScreen._currentRowCores.length > 0 && delegateItem.isCurrentRow)
                             return "◀  " + core + "  ▶"
                         return core
                     }
