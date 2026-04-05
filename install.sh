@@ -259,8 +259,8 @@ interview() {
     echo "  Which tabs do you want to enable?"
     echo "    [1] Retro Games  (requires RetroArch + ROMs)"
     echo "    [2] PC Games     (requires Steam and/or Moonlight)"
-    echo "    [3] Watch        (requires Plex)"
-    echo "    [4] Listen       (requires Plex)"
+    echo "    [3] Plex Media   (requires Plex)"
+    echo "    [4] Plex Music   (requires Plex)"
     printf "  Enter numbers separated by spaces, or press Enter for all: " > /dev/tty
     read -r tab_input < /dev/tty
 
@@ -785,7 +785,103 @@ EOF
     fi
 }
 
-# ── Phase 6: print_summary ────────────────────────────────────────────────────
+# ── Phase 6: download_retroarch_cores ────────────────────────────────────────
+download_retroarch_cores() {
+    echo ""
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo "${BOLD}  Phase 6: RetroArch Core Download${RESET}"
+    echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
+    echo ""
+
+    if ! prompt_yn "  Download recommended RetroArch cores? (~50MB)" N; then
+        echo "  Skipping core download."
+        return
+    fi
+
+    # Check required tools
+    if ! check_binary curl; then
+        echo "  ${YELLOW}⚠ curl not found — cannot download cores.${RESET}"
+        echo "    Install hint: $(install_cmd "curl")"
+        return
+    fi
+    if ! check_binary unzip; then
+        echo "  ${YELLOW}⚠ unzip not found — cannot extract cores.${RESET}"
+        echo "    Install hint: $(install_cmd "unzip")"
+        return
+    fi
+
+    local CORES_DIR="$HOME/.var/app/org.libretro.RetroArch/config/retroarch/cores"
+    mkdir -p "$CORES_DIR"
+
+    local RETROARCH_CORES=(
+        gambatte_libretro        # Game Boy / GBC
+        mgba_libretro            # GBA
+        mesen_libretro           # NES / FDS
+        snes9x_libretro          # SNES
+        mupen64plus_next_libretro # N64
+        melonds_libretro         # NDS
+        genesis_plus_gx_libretro # Mega Drive / Sega CD / Master System / Game Gear
+        picodrive_libretro       # 32X
+        mednafen_psx_hw_libretro # PS1
+        mednafen_pce_libretro    # PC Engine / TurboGrafx
+        mednafen_ngp_libretro    # Neo Geo Pocket
+        mednafen_wswan_libretro  # WonderSwan
+        mednafen_saturn_libretro # Saturn
+        flycast_libretro         # Dreamcast / NAOMI
+        fbneo_libretro           # Neo Geo / FBNeo arcade
+        ppsspp_libretro          # PSP
+        pcsx2_libretro           # PS2
+        vice_x64_libretro        # C64
+        bluemsx_libretro         # MSX / ColecoVision
+        fuse_libretro            # ZX Spectrum
+        dosbox_pure_libretro     # DOS
+        scummvm_libretro         # ScummVM
+    )
+
+    local FAILED_CORES=()
+    local installed_count=0
+    local skipped_count=0
+
+    for core in "${RETROARCH_CORES[@]}"; do
+        if [ -f "${CORES_DIR}/${core}.so" ]; then
+            echo "  ${GREEN}✓${RESET} ${core} (already installed)"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        local zip_url="https://buildbot.libretro.com/nightly/linux/x86_64/latest/${core}.so.zip"
+        local zip_tmp="/tmp/${core}.so.zip"
+
+        if ! curl -fsSL --retry 2 --retry-delay 1 "$zip_url" -o "$zip_tmp" 2>/dev/null; then
+            echo "  ${RED}✗${RESET} ${core} (download failed)"
+            FAILED_CORES+=("$core")
+            continue
+        fi
+
+        if ! unzip -q -o "$zip_tmp" "${core}.so" -d "$CORES_DIR" 2>/dev/null; then
+            echo "  ${RED}✗${RESET} ${core} (unzip failed)"
+            FAILED_CORES+=("$core")
+            rm -f "$zip_tmp"
+            continue
+        fi
+
+        rm -f "$zip_tmp"
+        echo "  ${GREEN}✓${RESET} ${core}"
+        installed_count=$((installed_count + 1))
+    done
+
+    echo ""
+    echo "  Cores installed: ${installed_count}  skipped (already present): ${skipped_count}  failed: ${#FAILED_CORES[@]}"
+
+    if [ "${#FAILED_CORES[@]}" -gt 0 ]; then
+        echo "  ${YELLOW}⚠ The following cores failed to download/extract:${RESET}"
+        for failed in "${FAILED_CORES[@]}"; do
+            echo "    ${YELLOW}• ${failed}${RESET}"
+        done
+    fi
+}
+
+# ── Phase 7: print_summary ────────────────────────────────────────────────────
 print_summary() {
     echo ""
     echo "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"
@@ -824,8 +920,8 @@ print_summary() {
     local tabs_list=""
     $TAB_RETRO  && tabs_list="${tabs_list:+${tabs_list}, }Retro Games" || true
     $TAB_PC     && tabs_list="${tabs_list:+${tabs_list}, }PC Games"    || true
-    $TAB_WATCH  && tabs_list="${tabs_list:+${tabs_list}, }Watch"       || true
-    $TAB_LISTEN && tabs_list="${tabs_list:+${tabs_list}, }Listen"      || true
+    $TAB_WATCH  && tabs_list="${tabs_list:+${tabs_list}, }Plex Media"  || true
+    $TAB_LISTEN && tabs_list="${tabs_list:+${tabs_list}, }Plex Music"  || true
     [ -z "$tabs_list" ] && tabs_list="(none)" || true
 
     echo "  OS:           ${distro_display}"
@@ -869,6 +965,9 @@ main() {
     check_dependencies
     setup_venv
     write_config
+    if $TAB_RETRO && check_flatpak "org.libretro.RetroArch"; then
+        download_retroarch_cores
+    fi
     print_summary
 }
 
