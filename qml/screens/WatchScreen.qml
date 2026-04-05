@@ -504,12 +504,9 @@ FocusScope {
                      && watchScreen._libraryEntries.length === 0
         }
 
-        // The library list itself.
-        // "Plex" is shown as a non-selectable header; library items are
-        // indented below it.  Since Plex is the only service, it is always
-        // auto-expanded.
-        Column {
-            id: libraryListColumn
+        // ── Library entries ───────────────────────────────────────────────────
+        ListView {
+            id: libraryList
 
             anchors {
                 top: parent.top
@@ -519,55 +516,17 @@ FocusScope {
                 margins: root.vpx(32)
             }
 
-            // ── "Plex" service header (non-selectable) ────────────────────────
-            Item {
-                id: plexHeader
+            clip: true
+            keyNavigationEnabled: true
+            focus: true
+            highlightMoveDuration: Theme.animDurationFast
 
-                width: parent.width
-                height: root.vpx(48)
-
-                Text {
-                    anchors {
-                        left: parent.left
-                        leftMargin: root.vpx(8)
-                        verticalCenter: parent.verticalCenter
-                    }
-                    text: "Plex"
-                    color: Theme.colorPrimary
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeBody)
-                    font.bold: true
-                }
-
-                // Subtle separator below the header
-                Rectangle {
-                    anchors {
-                        left: parent.left
-                        right: parent.right
-                        bottom: parent.bottom
-                        leftMargin: root.vpx(8)
-                        rightMargin: root.vpx(8)
-                    }
-                    height: root.vpx(1)
-                    color: Theme.colorPrimary
-                    opacity: 0.4
-                }
+            // Use the JS array built from plex.getLibraryList().
+            model: watchScreen._libraryEntries
+            onModelChanged: {
+                currentIndex = 0
+                positionViewAtBeginning()
             }
-
-            // ── Library entries (indented under "Plex") ───────────────────────
-            ListView {
-                id: libraryList
-
-                width: parent.width
-                height: parent.height - plexHeader.height
-
-                clip: true
-                keyNavigationEnabled: true
-                focus: true
-                highlightMoveDuration: Theme.animDurationFast
-
-                // Use the JS array built from plex.getLibraryList().
-                model: watchScreen._libraryEntries
 
                 Keys.onPressed: (event) => {
                     if (event.key === Qt.Key_Up && currentIndex === 0) {
@@ -688,7 +647,6 @@ FocusScope {
                 }
             }
         }
-    }
 
     // ── Movie grid (task 017) ─────────────────────────────────────────────────
     PlexMovieGrid {
@@ -1050,6 +1008,11 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
+        }
+        if (plex && !_refreshed) {
+            _refreshed = true
+            _availabilityKnown = false
+            plex.refresh()
         }
     }
 

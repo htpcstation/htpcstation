@@ -295,38 +295,12 @@ FocusScope {
         }
     }
 
-    // ── Header bar (menu view only — artists view has its own header) ──────────
-    Rectangle {
-        id: headerBar
-
-        anchors {
-            top: parent.top
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(56)
-        color: Theme.colorSecondary
-        visible: listenScreen.currentView === "menu"
-
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: "Listen"
-            color: Theme.colorText
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-    }
-
     // ── Menu list ─────────────────────────────────────────────────────────────
     ListView {
         id: listenMenu
 
         anchors {
-            top: headerBar.bottom
+            top: parent.top
             left: parent.left
             right: parent.right
             bottom: parent.bottom
