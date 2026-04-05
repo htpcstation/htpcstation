@@ -3,7 +3,7 @@ import ".."
 import "../components"
 
 // System Cores sub-screen — lists all discovered ROM systems and lets the
-// user edit the .so core filename for each one.
+// user cycle through installed .so cores for each one using Left/Right arrows.
 //
 // Usage (from SettingsScreen.qml):
 //   SystemCoresScreen {
@@ -14,6 +14,7 @@ import "../components"
 //
 //   function showSystemCores() {
 //       systemCoresScreen.systems = settings.getSystemsList()
+//       systemCoresScreen._availableCores = settings.getAvailableCores()
 //       systemCoresScreen.visible = true
 //       systemCoresScreen.forceActiveFocus()
 //   }
@@ -28,19 +29,44 @@ FocusScope {
     // The list of systems: [{folderName, displayName, core}]
     property var systems: []
 
-    // Index of the row currently being edited (-1 = none)
-    property int _editingIndex: -1
+    // Cached list of installed cores — populated once on show, refreshed on coresDirectoryChanged
+    property var _availableCores: []
 
-    // Emit when B (Escape) is pressed and no row is being edited.
+    // Emit when B (Escape) is pressed.
     signal back()
+
+    // ── Cycle core by delta (+1 forward, -1 backward) ─────────────────────────
+    function _cycleCore(delta) {
+        var cores = systemCoresScreen._availableCores
+        if (cores.length === 0) {
+            systemCoresScreen._showToast("No cores installed — run install.sh")
+            return
+        }
+        var sys = systemCoresScreen.systems[systemsList.currentIndex]
+        if (!sys) return
+        var current = sys.core
+        var idx = cores.indexOf(current)
+        // If current core not in list, delta > 0 → go to index 0, delta < 0 → go to last
+        var next
+        if (idx < 0) {
+            next = delta > 0 ? 0 : cores.length - 1
+        } else {
+            next = (idx + delta + cores.length) % cores.length
+        }
+        var newCore = cores[next]
+        if (settings) settings.setSystemCore(sys.folderName, newCore)
+        // Update local model
+        var updated = systemCoresScreen.systems.slice()
+        updated[systemsList.currentIndex] = {
+            folderName: sys.folderName,
+            displayName: sys.displayName,
+            core: newCore
+        }
+        systemCoresScreen.systems = updated
+    }
 
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        // If a row is being edited, let the TextInput handle keys
-        if (systemCoresScreen._editingIndex >= 0) {
-            return
-        }
-
         if (event.key === Qt.Key_Up) {
             event.accepted = true
             if (systemsList.currentIndex > 0) {
@@ -53,11 +79,12 @@ FocusScope {
                 systemsList.currentIndex += 1
                 systemsList.positionViewAtIndex(systemsList.currentIndex, ListView.Contain)
             }
-        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+        } else if (event.key === Qt.Key_Left) {
             event.accepted = true
-            if (systemsList.count > 0) {
-                systemCoresScreen._editingIndex = systemsList.currentIndex
-            }
+            systemCoresScreen._cycleCore(-1)
+        } else if (event.key === Qt.Key_Right || keys.isAccept(event)) {
+            event.accepted = true
+            systemCoresScreen._cycleCore(1)
         } else if (keys.isCancel(event)) {
             event.accepted = true
             systemCoresScreen.back()
@@ -94,16 +121,29 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
 
-        Text {
+        Row {
             anchors {
                 right: parent.right
                 rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
-            text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            spacing: root.vpx(16)
+
+            Text {
+                text: systemCoresScreen._availableCores.length > 0
+                    ? "◀▶  Change core"
+                    : "No cores installed"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
+                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
         }
     }
 
@@ -155,20 +195,19 @@ FocusScope {
 
             readonly property var systemData: modelData
             readonly property bool isCurrentRow: systemsList.currentIndex === index
-            readonly property bool isEditing: systemCoresScreen._editingIndex === index
 
             // ── Highlight for current row ─────────────────────────────────────
             Rectangle {
                 anchors.fill: parent
                 color: Theme.colorSecondary
-                opacity: delegateItem.isCurrentRow && !delegateItem.isEditing ? 0.4 : 0.0
+                opacity: delegateItem.isCurrentRow ? 0.4 : 0.0
 
                 Behavior on opacity {
                     NumberAnimation { duration: Theme.animDurationFast }
                 }
             }
 
-            // ── Normal display row ────────────────────────────────────────────
+            // ── Display row ───────────────────────────────────────────────────
             Row {
                 id: displayRow
                 anchors {
@@ -178,7 +217,6 @@ FocusScope {
                     leftMargin: root.vpx(8)
                     rightMargin: root.vpx(8)
                 }
-                visible: !delegateItem.isEditing
 
                 Text {
                     width: parent.width * 0.55
@@ -193,108 +231,20 @@ FocusScope {
 
                 Text {
                     width: parent.width * 0.45
-                    text: delegateItem.systemData ? delegateItem.systemData.core : ""
-                    color: Theme.colorTextDim
+                    text: {
+                        if (!delegateItem.systemData) return ""
+                        var core = delegateItem.systemData.core
+                        if (systemCoresScreen._availableCores.length > 0 && delegateItem.isCurrentRow)
+                            return "◀  " + core + "  ▶"
+                        return core
+                    }
+                    color: delegateItem.isCurrentRow ? Theme.colorText : Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                     elide: Text.ElideRight
                     horizontalAlignment: Text.AlignRight
                     verticalAlignment: Text.AlignVCenter
                     height: root.vpx(56)
-                }
-            }
-
-            // ── Inline edit row ───────────────────────────────────────────────
-            Item {
-                id: editRow
-                anchors {
-                    left: parent.left
-                    right: parent.right
-                    verticalCenter: parent.verticalCenter
-                    leftMargin: root.vpx(8)
-                    rightMargin: root.vpx(8)
-                }
-                height: root.vpx(40)
-                visible: delegateItem.isEditing
-
-                // Label on the left
-                Text {
-                    id: editLabel
-                    anchors {
-                        left: parent.left
-                        verticalCenter: parent.verticalCenter
-                    }
-                    width: parent.width * 0.45
-                    text: delegateItem.systemData ? delegateItem.systemData.displayName : ""
-                    color: Theme.colorText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeBody)
-                    elide: Text.ElideRight
-                }
-
-                // Text input on the right
-                Rectangle {
-                    id: inputBg
-                    anchors {
-                        left: editLabel.right
-                        right: parent.right
-                        leftMargin: root.vpx(8)
-                        verticalCenter: parent.verticalCenter
-                    }
-                    height: root.vpx(36)
-                    color: Qt.darker(Theme.colorSecondary, 1.3)
-                    border.color: Theme.colorPrimary
-                    border.width: root.vpx(1)
-                    radius: root.vpx(4)
-
-                    TextInput {
-                        id: coreInput
-                        anchors {
-                            left: parent.left
-                            right: parent.right
-                            verticalCenter: parent.verticalCenter
-                            leftMargin: root.vpx(8)
-                            rightMargin: root.vpx(8)
-                        }
-                        text: delegateItem.systemData ? delegateItem.systemData.core : ""
-                        color: Theme.colorText
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        selectByMouse: true
-                        activeFocusOnTab: false
-                        clip: true
-
-                        // Focus the input when the edit row becomes visible
-                        onVisibleChanged: {
-                            if (visible) {
-                                coreInput.forceActiveFocus()
-                                coreInput.selectAll()
-                            }
-                        }
-
-                        Keys.onReturnPressed: {
-                            var newCore = coreInput.text.trim()
-                            if (settings && delegateItem.systemData) {
-                                settings.setSystemCore(delegateItem.systemData.folderName, newCore)
-                                // Update the local model so the display row reflects the change
-                                var updated = systemCoresScreen.systems.slice()
-                                updated[index] = {
-                                    folderName: delegateItem.systemData.folderName,
-                                    displayName: delegateItem.systemData.displayName,
-                                    core: newCore
-                                }
-                                systemCoresScreen.systems = updated
-                            }
-                            systemCoresScreen._editingIndex = -1
-                            systemCoresScreen._showToast("Saved")
-                            systemCoresScreen.forceActiveFocus()
-                        }
-
-                        Keys.onEscapePressed: {
-                            systemCoresScreen._editingIndex = -1
-                            systemCoresScreen.forceActiveFocus()
-                        }
-                    }
                 }
             }
 

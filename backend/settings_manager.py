@@ -631,6 +631,18 @@ class SettingsManager(QObject):
         self._config.set_system_core(folder_name, core)
         self.coresDirectoryChanged.emit()  # reuse signal to notify system core changes
 
+    @Slot(result="QVariant")
+    def getAvailableCores(self) -> list:
+        """Return sorted list of .so filenames in cores_directory.
+
+        Returns [] if the directory doesn't exist or contains no .so files.
+        """
+        cores_dir = self._config.cores_directory  # already a Path, already expanduser'd
+        if not cores_dir.is_dir():
+            return []
+        cores = sorted(p.name for p in cores_dir.glob("*.so"))
+        return cores
+
     # ------------------------------------------------------------------
     # Slots — actions
     # ------------------------------------------------------------------

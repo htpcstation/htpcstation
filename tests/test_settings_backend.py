@@ -2932,3 +2932,92 @@ class TestMoonlightViewMode:
         manager.setMoonlightViewMode("list")
 
         assert config.moonlight_view_mode == "list"
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — getAvailableCores
+# ---------------------------------------------------------------------------
+
+
+class TestGetAvailableCores:
+    def _make_manager(self, tmp_path: Path, cores_dir=None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        data: dict = {}
+        if cores_dir is not None:
+            data["retroarch"] = {"cores_directory": str(cores_dir)}
+        config_file.write_text(json.dumps(data), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager
+
+    def test_returns_empty_when_directory_does_not_exist(self, tmp_path: Path) -> None:
+        """getAvailableCores returns [] when cores_directory does not exist."""
+        nonexistent = tmp_path / "no_such_dir"
+        manager = self._make_manager(tmp_path, cores_dir=nonexistent)
+
+        result = manager.getAvailableCores()
+
+        assert result == []
+
+    def test_returns_empty_when_directory_has_no_so_files(self, tmp_path: Path) -> None:
+        """getAvailableCores returns [] when cores_directory exists but has no .so files."""
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        (cores_dir / "readme.txt").write_text("not a core")
+        (cores_dir / "core.so.zip").write_text("not a core")
+        (cores_dir / "core.info").write_text("not a core")
+        manager = self._make_manager(tmp_path, cores_dir=cores_dir)
+
+        result = manager.getAvailableCores()
+
+        assert result == []
+
+    def test_returns_sorted_so_filenames(self, tmp_path: Path) -> None:
+        """getAvailableCores returns sorted list of .so filenames."""
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        (cores_dir / "snes9x_libretro.so").write_text("")
+        (cores_dir / "gambatte_libretro.so").write_text("")
+        (cores_dir / "mesen_libretro.so").write_text("")
+        manager = self._make_manager(tmp_path, cores_dir=cores_dir)
+
+        result = manager.getAvailableCores()
+
+        assert result == [
+            "gambatte_libretro.so",
+            "mesen_libretro.so",
+            "snes9x_libretro.so",
+        ]
+
+    def test_excludes_non_so_files(self, tmp_path: Path) -> None:
+        """getAvailableCores only returns .so files, not .so.zip or .info files."""
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        (cores_dir / "snes9x_libretro.so").write_text("")
+        (cores_dir / "snes9x_libretro.so.zip").write_text("")
+        (cores_dir / "snes9x_libretro.info").write_text("")
+        manager = self._make_manager(tmp_path, cores_dir=cores_dir)
+
+        result = manager.getAvailableCores()
+
+        assert result == ["snes9x_libretro.so"]
+
+    def test_returns_filenames_not_full_paths(self, tmp_path: Path) -> None:
+        """getAvailableCores returns bare filenames, not full paths."""
+        cores_dir = tmp_path / "cores"
+        cores_dir.mkdir()
+        (cores_dir / "gambatte_libretro.so").write_text("")
+        manager = self._make_manager(tmp_path, cores_dir=cores_dir)
+
+        result = manager.getAvailableCores()
+
+        assert len(result) == 1
+        assert result[0] == "gambatte_libretro.so"
+        assert "/" not in result[0]
