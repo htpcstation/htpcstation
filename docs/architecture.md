@@ -1,7 +1,7 @@
 # HTPC Station — Architecture Reference
 
-> Full codebase structure, gotchas, architecture notes, and checkpoint history.
-> For the lean session-start context, see `resume-project.md`.
+> Full codebase structure, gotchas, and architecture notes.
+> Session-start context: `resume-project.md` | Roadmap: `milestones.md` | History: `changelog.md`
 
 ---
 
@@ -57,7 +57,7 @@ htpcstation/
                                        # plexPlayer toggle (mpv/browser)
     steam_config.py                    # Shared Steam directory helper (~/.config/htpcstation/steam/)
     steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played,
-                                       # metadata fetch, favorites, PC Favorites source
+                                       # metadata fetch, favorites. GOG-ready source list model.
     steam_metadata.py                  # Steam Store API metadata fetcher (appdetails endpoint)
     steam_models.py                    # SteamGame dataclass
     steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution + caching
@@ -96,14 +96,15 @@ htpcstation/
       GameGridView.qml
       GameDetailView.qml
       GameListView.qml                 # Split-panel list view for retro games
-      PcGamesScreen.qml                # Source list + game grid + detail (3-state), PC Favorites
+      PcGamesScreen.qml                # Steam source list + game grid + detail (3-state), Steam Favorites
+      MoonlightScreen.qml              # Moonlight source list (Recently Played, Favorites, Apps) + app grid + detail
       SteamGameGrid.qml
       SteamGameDetail.qml
       SteamGameList.qml
       MoonlightAppGrid.qml
       MoonlightAppDetail.qml
       MoonlightAppList.qml
-      RecentlyPlayedGrid.qml           # Unified Steam+Moonlight recently played / PC Favorites grid
+      RecentlyPlayedGrid.qml           # Shared recently played / favorites grid (used by PC Games + Moonlight tabs)
       RecentlyPlayedList.qml
       RecentlyPlayedDetail.qml
       WatchScreen.qml                  # Plex library list + movie/show grids + detail + My List + Live TV
@@ -120,7 +121,7 @@ htpcstation/
       LiveTvScreen.qml                 # Embedded Live TV channel guide
       MpvSubtitleOverlay.qml           # Always-on-top Window for subtitle track selection during MPV
       MpvSkipIntroOverlay.qml          # Always-on-top Window for skip intro button (bottom-right)
-      ListenScreen.qml                 # All music views: menu, artists, albums, tracks, now playing
+      ListenScreen.qml                 # Plex Music: menu, artists, albums, tracks, now playing
       ControllerMappingDialog.qml
       SystemCoresScreen.qml            # Per-system RetroArch core editor
       SettingsScreen.qml               # 7-section settings menu, Video Player toggle (MPV/Browser)
@@ -214,13 +215,14 @@ htpcstation/
 
 ### Steam Architecture
 - `steam_parser.py`: VDF/ACF recursive descent parser. Discovers games from Flatpak + native paths. Filters non-games (Proton, runtimes, incomplete installs).
-- `steam_library.py`: `SteamSourceListModel` (sources including PC Favorites when non-empty) + `SteamGameListModel`. `toggleFavorite(index)` persists to `gamelist.xml`. `getFavorites()` returns `{source: "steam", ...}` — source key required for badge rendering.
+- `steam_library.py`: `SteamSourceListModel` (extensible — designed for future GOG/Epic sources) + `SteamGameListModel`. `toggleFavorite(index)` persists to `gamelist.xml`. `getFavorites()` returns `{source: "steam", ...}` — source key required for badge rendering. Steam-only: no Moonlight injection.
 - Artwork: custom override → HTPC cache → local Steam cache → CDN download. Always returns local path.
 
 ### Moonlight Architecture
 - Two-phase refresh: Phase 1 (sync, local config read) → Phase 2 (threaded: TCP probe + app enumeration + artwork + play history).
 - `artwork_index.json` tracks `steam_app_id` per app — used for future rich metadata.
-- Moonlight hosts injected into Steam's `SteamSourceListModel` via `setMoonlightSources()`.
+- `MoonlightLibrary` owns its own `getRecentlyPlayed()` (reads `moonlight_play_history.py`, returns up to 20 entries sorted by `last_played` desc) and `clearRecentlyPlayed()`. No injection into `SteamLibrary`.
+- `MoonlightScreen.qml`: dedicated tab with sources (Recently Played, Favorites, Apps), app grid/list, detail view. View mode persisted via `settings.moonlightViewMode` — `on_ViewModeChanged` overrides child components' `setPcGamesViewMode()` calls.
 
 ### Browser Extension Architecture
 - No ES modules — files concatenated via manifest `js` array: `generated_mapping.js` → `mappings/*.js` → `content.js`
@@ -241,7 +243,8 @@ htpcstation/
   "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
-  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard" }
+  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid" },
+  "tabs": { "show_retro_games": true, "show_pc_games": true, "show_moonlight": true, "show_watch": true, "show_listen": true }
 }
 ```
 
@@ -369,48 +372,6 @@ Button Layout setting swaps both display labels AND functional mapping.
 
 ---
 
-## Checkpoint History
+## History
 
-- **CP 1** — M0+M1: shell, retro games
-- **CP 2** — Settings UI
-- **CP 3** — Plex server discovery, browser extension, M6 hardening
-- **CP 4** — Plex polish
-- **CP 5** — M3 Steam
-- **CP 6** — M4 Moonlight
-- **CP 7** — M5 Home Screen
-- **CP 8** — Controller mapping, Flatpak gamepad access, Plex modal navigation, button layout
-- **CP 9** — Plex player popup/dropdown navigation, layered cancel, focus stack, stale focus recovery
-- **CP 10** — Auto-expand minimized player, auto-resume playback, autoplay policy flag
-- **CP 11** — M5 rich metadata for Steam, grid spacing fix, UI navigation improvements
-- **CP 12** — Listen tab backend
-- **CP 13** — Full Listen tab v1
-- **CP 14** — Now Playing view, persistent background playback, global play/pause, sort persistence, tab visibility, Clear Recently Played
-- **CP 15** — Public release prep (README, MIT license, PII sanitization, requirements.txt, check-deps), list views for all tabs, LT/RT quick jump, Plex Live TV gamepad navigation
-- **CP 16** — PC Games Favorites, System Cores settings, SYSTEM_DEFAULTS expansion (~130 systems), Plex My List, MPV video player (VA-API, Wayland, resume, subtitle overlay), embedded Live TV guide (EPG + HDHomeRun), hardware-aware check-deps
-- **CP 17** — UI Refresh 4a: Theme.qml token interface (palette vars + semantic tokens), all hardcoded hex colors replaced across 26 QML files
-- **CP 18** — MPV UX overhaul (gamepad controls, loading overlay, async playback, resume focus restore, My List fixes); Plex P0 (timeline heartbeat, client identity, track persistence); Plex P1 (mark watched/unwatched, transient token, skip intro overlay); poster cache parallelism (10-worker executor, pre-resolve cached); Live TV overhaul (HDHomeRun guide API replaces Plex cloud EPG — 58 channels, 56 with live data, ~2s load)
-- **CP 19** — Backend optimizations #17–#22 (continueWatching endpoint, PlexError enum + retry, play queue, codec profile header, playback history, self-healing server connection); SSE library event listener; rating backend; per-row focus memory; in-app Plex PIN login overlay; loading overlay fixes; MPV gamepad input enabled + correct button mapping for 8BitDo Micro D-input; Live TV channels with no guide data hidden; Plex PIN code fix (4-char)
-- **CP 20** — libmpv migration (roadmap #28): replaced MpvLauncher subprocess + MpvIpc socket with LibMpvPlayer (python-mpv/libmpv in-process); programmatic keybinds via player.keybind(); exact loading overlay timing via wait_until_playing(); L2/R2 debounce; subtitle picker overlay restored as in-process FocusScope; push-based timeline reporter via property observers; MpvIpc deleted; removed broken MpvSubtitleOverlay/MpvSkipIntroOverlay Windows; 1,536 tests passing
-
----
-
-## Task Brief Archive
-
-All task briefs at `~/opencode/misc/coding-team/`:
-- `m0-shell/` (001–004), `m1-games/` (005–014), `m2-plex/` (015–020)
-- `deferred-batch-1/` (021–024), `settings/` (025–026)
-- `m6-hardening-pullforward/` (001–003), `browser-gamepad-extension/` (001–004)
-- `plex-server-discovery/` (001–004), `plex-polish/` (001–003)
-- `m3-steam/` (001–003), `m4-moonlight/` (001–012)
-- `plex-show-pagination/` (001), `plex-live-tv/` (001)
-- `m5-home-screen/` (001–006), `plex-resume-modal/` (001)
-- `controller-mapping/` (001–003), `plex-player-popups/` (001–005)
-- `plex-mini-player-expand/` (001–004), `dpad-up-to-tabbar/` (001)
-- `m5-rich-metadata/` (001–004, Steam complete, Moonlight pending)
-- `listen-tab/` (001–012), `remember-sort/` (001), `phase1-bugs/` (001)
-- `kernel-headers-dep/` (001–002), `pc-games-favorites/` (001–003)
-- `system-cores-settings/` (001), `system-defaults-expansion/` (001)
-- `plex-watchlist/` (001–002), `plex-mylist/` (001–002)
-- `mpv-player/` (001–004), `mpv-subtitle-overlay/` (001)
-- `ui-refresh-4a/` (001)
-- `mpv-ux-fixes/` (001–015): MPV UX, Plex P0/P1, poster cache, Live TV HDHomeRun guide
+Checkpoint history and task brief archive: `docs/changelog.md`

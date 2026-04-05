@@ -4,57 +4,28 @@ Ordered by priority. Each milestone is self-contained and can be handed to the c
 
 ---
 
-## M1 — Music Library UX fix ✅ Ready to implement
+## M1 — Music Library UX fix ✅ Done (CP27)
 
-**What:** After first Plex sign-in, the Music Library dropdown in Settings is empty until the user visits the Watch tab (which triggers `plex.refresh()` and populates `_libraries_model`). `getMusicLibraries()` reads from that model, so it returns nothing until the model is loaded.
-
-**Fix:** When the Music Library select row is opened in Settings and `plex.getMusicLibraries()` returns empty, trigger `plex.refresh()` so the model loads. Alternatively, expose a `plex.librariesReady` signal that Settings listens to and re-queries on.
-
-**Scope:** `SettingsScreen.qml` (or `PlexLibrary` + `SettingsScreen`). No config changes.
-
-**Effort:** Small (1 task).
+Music Library dropdown in Settings now populates immediately after first Plex sign-in. `SettingsScreen` calls `plex.refresh()` when `getMusicLibraries()` returns empty, and re-evaluates the dropdown when `librariesModelChanged` fires via `_librariesVersion` counter.
 
 ---
 
-## M2 — Rename tabs ✅ Ready to implement
+## M2 — Rename tabs ✅ Done (CP27)
 
-**What:** Display label changes only. Config keys (`show_watch`, `show_listen`) are unchanged.
-
-| Old label | New label |
-|---|---|
-| Watch | Plex Media |
-| Listen | Plex Music |
-
-**Scope:** `HomeScreen.qml` tab definitions only (lines ~34–37). No backend, no config, no key renames.
-
-**Effort:** Trivial (bundle with M1 or any other task).
+Watch → "Plex Media", Listen → "Plex Music". Display labels only — config keys (`show_watch`, `show_listen`) unchanged.
 
 ---
 
-## M3 — Steam and Moonlight dedicated tabs
+## M3 — Moonlight dedicated tab ✅ Done (CP27)
 
-**What:** Split `PcGamesScreen` into two independent tabs. Each tab gets its own Favorites and Recently Played. The combined cross-library lists (`RecentlyPlayedGrid/List` mixing Steam + Moonlight, `PC Favorites`) are dropped.
+**What shipped (differs from original plan):** PC Games tab stays as the home for local launchers (Steam + future GOG). Moonlight splits into its own dedicated tab. `PcGamesScreen.qml` was not retired — it was simplified to Steam-only.
 
-**Current state:**
-- `PcGamesScreen` uses `SteamSourceListModel` with sources: Steam, Moonlight hosts (injected via `setMoonlightSources()`), Recently Played (unified), PC Favorites (unified).
-- `steam.getRecentlyPlayed()` returns a unified Steam + Moonlight list.
-- `steam.getFavorites()` + `moonlight.getFavorites()` are merged in QML for PC Favorites.
-
-**Target state:**
-- **Steam tab** (`SteamScreen.qml`): Steam games only. Favorites = `steam.getFavorites()`. Recently Played = Steam-only recently played (filter out Moonlight entries from `getRecentlyPlayed()`).
-- **Moonlight tab** (`MoonlightScreen.qml`): Moonlight hosts + apps. Favorites = `moonlight.getFavorites()`. Recently Played = Moonlight play history from `moonlight_play_history.py`.
-- `PcGamesScreen.qml` retired.
-- `SteamSourceListModel` no longer needs `setMoonlightSources()` — Steam tab is Steam-only.
-- `steam.getRecentlyPlayed()` simplified to Steam-only (remove Moonlight injection).
-- `MoonlightLibrary` gets a `getRecentlyPlayed()` slot (reads `moonlight_play_history.py`).
-
-**Config:** Add `show_steam_tab` and `show_moonlight_tab` keys (replacing `show_pc_games`). Migration: if `show_pc_games` is true in existing config, set both new keys to true.
-
-**Effort:** Medium (4–5 tasks).
-
-**Caveats:**
-- `RecentlyPlayedGrid/List/Detail` QML components are currently shared between Steam and Moonlight — they can stay shared (parameterized by model), just sourced separately per tab.
-- `setMoonlightSources()` wiring in `main.py` and `MoonlightLibrary` refresh callback needs cleanup.
+- `MoonlightScreen.qml`: new tab with sources (Recently Played, Favorites, Apps), app grid/list, detail view
+- `PcGamesScreen.qml`: Moonlight stripped out, Steam-only, `SteamSourceListModel` kept and GOG-ready
+- `MoonlightLibrary`: gained `getRecentlyPlayed()` and `clearRecentlyPlayed()`
+- All `steam.setMoonlight*` injection removed from `SteamLibrary` and `main.py`
+- Config: `show_moonlight_tab` + `moonlight_view_mode` added. `show_pc_games` unchanged.
+- Tab order: Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
 ---
 
