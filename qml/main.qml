@@ -38,6 +38,17 @@ ApplicationWindow {
         controllerMappingDialog.start()
     }
 
+    // When the window regains focus after Alt+Tab, re-deliver focus to the
+    // last active item. Without this, FocusScopes with `enabled: focus` can
+    // end up with activeFocus but no focused child, silently eating all input.
+    onActiveChanged: {
+        if (active) {
+            var item = root.activeFocusItem
+            if (item) item.forceActiveFocus()
+            else homeScreen.forceActiveFocus()
+        }
+    }
+
     HomeScreen {
         id: homeScreen
         anchors.fill: parent

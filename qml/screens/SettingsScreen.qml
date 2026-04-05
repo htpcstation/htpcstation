@@ -194,6 +194,11 @@ FocusScope {
     // ── Focus routing ─────────────────────────────────────────────────────────
     onActiveFocusChanged: {
         if (activeFocus) {
+            // If the system cores sub-screen is open, let it keep focus
+            if (systemCoresScreen.visible) {
+                systemCoresScreen.forceActiveFocus()
+                return
+            }
             // Route focus to the current setting item
             var item = settingsList.currentItem
             if (item && item.children[0] && item.children[0].item) {
