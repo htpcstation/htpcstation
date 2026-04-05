@@ -28,6 +28,10 @@ Generated from a full codebase audit. Grouped into batches by priority.
 | M5 | — | Dropped — no Up-escape is correct UX for Listen submenus |
 | H4 | `WatchScreen.qml` | Three `target: plex` Connections blocks merged into one |
 
+**Additional fixes in this batch (post-commit):**
+- Alt+F4 (GNOME/Wayland): libmpv `quit` destroys core → `_on_shutdown` callback → `_recreate_player` on main thread → `terminate()` cleans zombie Wayland surface → fresh `set_wid()` restores playback capability
+- `launch()` / `launch_live_tv()` force-stop zombie player instead of silently ignoring
+
 **Additional fixes in this batch:**
 - Loading overlay: 20s hard timeout, B to cancel, `_mpvLaunched` / `_cancelledDuringLoad` flags prevent video playing after cancel
 - `vid = "no"` during buffering prevents flash on cancel

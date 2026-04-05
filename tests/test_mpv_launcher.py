@@ -193,22 +193,25 @@ class TestLibMpvPlayerLaunch:
 
         assert pause_at_play == [False]
 
-    def test_launch_noop_when_running(self) -> None:
-        """launch() does nothing when is_running() returns True."""
+    def test_launch_force_stops_when_already_running(self) -> None:
+        """launch() force-stops a zombie/running player before launching a new URL."""
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = _make_mock_mpv_instance()
-        # Simulate playing: filename is set (non-None/non-empty)
+        # Simulate zombie: filename is set (is_running() returns True)
         type(mock_instance).filename = PropertyMock(return_value="file.mkv")
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
-             patch("backend.mpv_launcher.threading"):
+             patch("backend.mpv_launcher.threading"), \
+             patch("backend.mpv_launcher.time"):
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()
             player.set_wid(123)
-            player.launch("http://server/file.mkv")
+            player.launch("http://server/new.mkv")
 
-        mock_instance.play.assert_not_called()
+        # stop() called to clear zombie, then play() called for new URL
+        mock_instance.stop.assert_called()
+        mock_instance.play.assert_called_once_with("http://server/new.mkv")
 
 
 # ---------------------------------------------------------------------------

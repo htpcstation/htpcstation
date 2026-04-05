@@ -737,27 +737,28 @@ class TestMpvLauncherLiveTv:
         assert mock_instance.title == "ABC Channel"
         assert mock_instance.force_media_title == "ABC Channel"
 
-    def test_launch_live_tv_noop_when_already_running(self, tmp_path: Path) -> None:
-        """launch_live_tv() is a no-op when MPV is already playing."""
+    def test_launch_live_tv_force_stops_when_already_running(self, tmp_path: Path) -> None:
+        """launch_live_tv() force-stops a zombie/running player before launching a new stream."""
         from unittest.mock import PropertyMock
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = MagicMock()
-        # Simulate playing: filename is set (non-None)
+        # Simulate zombie: filename is set (is_running() returns True)
         type(mock_instance).core_idle = PropertyMock(return_value=False)
         type(mock_instance).filename = PropertyMock(return_value="stream.ts")
         mock_instance.__setitem__.side_effect = lambda key, value: None
-        mock_instance.on_key_press.return_value = lambda fn: fn
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
-             patch("backend.mpv_launcher.threading"):
+             patch("backend.mpv_launcher.threading"), \
+             patch("backend.mpv_launcher.time"):
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()
             player.set_wid(123)
-            player.launch_live_tv("http://192.168.0.80:5004/auto/v7.1")
             player.launch_live_tv("http://192.168.0.80:5004/auto/v4.1")
 
-        mock_instance.play.assert_not_called()
+        # stop() called to clear zombie, then play() called for new stream
+        mock_instance.stop.assert_called()
+        mock_instance.play.assert_called_once()
 
     def test_build_live_tv_args_uses_128mib_buffer(self, tmp_path: Path) -> None:
         """launch_live_tv() sets demuxer-max-bytes to 128MiB (larger than VOD's 50MiB)."""

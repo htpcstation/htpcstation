@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 22)
+# HTPC Station — Resume Document (Checkpoint 23)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -50,8 +50,12 @@ Hardening Batch 1 + 2 + partial Batch 3 (see `docs/harden.md` for full backlog):
 
 ### Alt+F4 during MPV playback (GNOME/Wayland)
 - On GNOME/Wayland, `fullscreen=yes` causes MPV to own a separate compositor surface; Alt+F4 destroys it at the compositor level (bypasses Qt event filter)
-- `_show_window_after_mpv`: calls `window.hide()` then `showFullScreen()` after 150ms delay — forces Qt to recreate the Wayland surface after Mutter destroys it
-- Event filter on `window` intercepts `QEvent.Type.Close` and calls `plex.stopMpv()` when MPV is running (handles cases where Qt does see the close event)
+- Alt+F4 triggers libmpv's internal `quit` (not `stop`), destroying the core and raising `ShutdownError` on any subsequent property access
+- `_on_shutdown` callback: stashes dead player in `_dead_player`, nulls `_player`, schedules `_recreate_player` via `QueuedConnection`
+- `_recreate_player` (main thread): calls `dead_player.terminate()` → releases Wayland surface (zombie gone from Alt+~) → calls `set_wid(self._wid)` to create fresh core
+- `_show_window_after_mpv`: calls `window.hide()` then `showFullScreen()` after 150ms — forces Qt to recreate the Wayland surface after Mutter destroys it
+- `launch()` and `launch_live_tv()` force-stop and proceed if `is_running()` is true (zombie recovery fallback)
+- Event filter on `window` intercepts `QEvent.Type.Close` and calls `plex.stopMpv()` when MPV is running
 
 ---
 
@@ -162,6 +166,10 @@ bash install.sh
 **`vid = "no"` set before `player.play()`.** Video suppressed during buffering to prevent flash on cancel. Re-enabled in `_wait_and_signal` after `_cancel_requested` check.
 
 **`kill()` is non-blocking.** Sets `_cancel_requested` event immediately, dispatches `player.stop()` off-thread. Safe to call from Qt main thread.
+
+**Alt+F4 calls libmpv `quit`, not `stop`.** This destroys the core. `_on_shutdown` callback detects this, stashes the dead player, and schedules `_recreate_player` on the main thread. `_recreate_player` calls `terminate()` on the dead player (releases Wayland surface) then `set_wid()` to create a fresh core. Never call `terminate()` from the mpv event thread — use `QueuedConnection` to the main thread.
+
+**`_wid` is stored on first `set_wid()` call** so `_recreate_player` can recreate without external input. `set_wid()` is idempotent after a shutdown — it checks `self._player is not None` before creating.
 
 **`PlexTimelineReporter.stop()` calls `thread.join(timeout=5)`.** This blocks the calling thread for up to 5s. It is called from `_on_mpv_finished_for_timeline` which runs on the main thread via signal. Only fires after `processStarted` — not on cancel (where `processStarted` is suppressed).
 

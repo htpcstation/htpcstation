@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from typing import Callable, Optional
 
 import mpv
@@ -57,8 +58,10 @@ class LibMpvPlayer(QObject):
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._player: Optional[mpv.MPV] = None
+        self._dead_player: Optional[mpv.MPV] = None  # held for cleanup after shutdown
         self._is_live_tv: bool = False
         self._cancel_requested = threading.Event()
+        self._wid: Optional[int] = None  # stored so we can recreate after shutdown
 
     # ------------------------------------------------------------------
     # Public API
@@ -68,7 +71,9 @@ class LibMpvPlayer(QObject):
         """Create the MPV instance bound to the given Qt native window handle.
 
         Must be called after the Qt window is shown (so winId() is valid).
+        Safe to call again after a shutdown — recreates the player with the same wid.
         """
+        self._wid = wid
         if self._player is not None:
             logger.warning("LibMpvPlayer.set_wid: player already created — ignoring")
             return
@@ -117,6 +122,18 @@ class LibMpvPlayer(QObject):
                 except Exception:  # noqa: BLE001
                     pass
                 self._is_live_tv = False
+            # Explicitly stop to clear player.filename — libmpv keeps the last
+            # filename set after end_file, which causes is_running() to return
+            # True and block subsequent launch() calls. This is a no-op if
+            # already stopped (e.g. user pressed Stop keybind).
+            try:
+                self._player.stop()
+                # Release the video output surface so the Wayland toplevel
+                # created by fullscreen=yes is destroyed. Without this, the
+                # surface lingers as a zombie after the WM closes it (Alt+F4).
+                self._player["vid"] = "no"
+            except Exception:  # noqa: BLE001
+                pass
             QMetaObject.invokeMethod(
                 self,
                 "_emit_finished",
@@ -125,6 +142,22 @@ class LibMpvPlayer(QObject):
 
         # Register programmatic keybinds (replaces input.conf)
         self._setup_keybinds()
+
+        # When the WM sends a close event (e.g. Alt+F4), libmpv calls quit and
+        # fires SHUTDOWN, destroying the core. Detect this and schedule a
+        # recreation of the player on the main thread so subsequent launches work.
+        @player.event_callback("shutdown")
+        def _on_shutdown(_event):  # noqa: ANN001
+            logger.info("LibMpvPlayer: core shutdown detected — scheduling recreation")
+            # Stash the dead player so _recreate_player can terminate() it on
+            # the main thread, which cleans up the zombie Wayland surface.
+            self._dead_player = self._player
+            self._player = None
+            QMetaObject.invokeMethod(
+                self,
+                "_recreate_player",
+                Qt.ConnectionType.QueuedConnection,
+            )
 
         logger.info("LibMpvPlayer: MPV instance created (wid=%d)", wid)
 
@@ -142,9 +175,12 @@ class LibMpvPlayer(QObject):
 
         if self.is_running():
             logger.warning(
-                "LibMpvPlayer.launch: already playing — ignoring new launch request"
+                "LibMpvPlayer.launch: player reports running — force-stopping before new launch"
             )
-            return
+            self._player.stop()
+            # Brief yield to let the stop command propagate through the mpv event loop
+            # before we call play() with the new URL.
+            time.sleep(0.05)
 
         if title:
             self._player.title = title
@@ -217,9 +253,10 @@ class LibMpvPlayer(QObject):
 
         if self.is_running():
             logger.warning(
-                "LibMpvPlayer.launch_live_tv: already playing — ignoring new launch request"
+                "LibMpvPlayer.launch_live_tv: player reports running — force-stopping before new launch"
             )
-            return
+            self._player.stop()
+            time.sleep(0.05)
 
         # Override options for live TV
         self._player["demuxer-max-bytes"] = "128MiB"
@@ -328,6 +365,31 @@ class LibMpvPlayer(QObject):
     # ------------------------------------------------------------------
     # Slots (must be on main thread)
     # ------------------------------------------------------------------
+
+    @Slot()
+    def _recreate_player(self) -> None:
+        """Recreate the libmpv core after a shutdown (e.g. Alt+F4 WM close).
+
+        Called on the main thread via QueuedConnection from the shutdown callback.
+        Terminates the dead player first to clean up the zombie Wayland surface.
+        """
+        if self._wid is None:
+            logger.warning("LibMpvPlayer._recreate_player: no wid stored — cannot recreate")
+            return
+        if self._player is not None:
+            logger.warning("LibMpvPlayer._recreate_player: player already exists — skipping")
+            return
+        # Terminate the dead core on the main thread (safe — not the event thread).
+        # This calls _mpv_terminate_destroy which releases the Wayland surface,
+        # removing the zombie from the compositor's window list.
+        if self._dead_player is not None:
+            try:
+                self._dead_player.terminate()
+            except Exception:  # noqa: BLE001
+                pass
+            self._dead_player = None
+        logger.info("LibMpvPlayer._recreate_player: recreating MPV core with wid=%d", self._wid)
+        self.set_wid(self._wid)
 
     @Slot()
     def _emit_started(self) -> None:
