@@ -29,19 +29,9 @@ Watch → "Plex Media", Listen → "Plex Music". Display labels only — config 
 
 ---
 
-## M4 — RetroArch core selector: dropdown replacing text entry
+## M4 — RetroArch core selector ✅ Done (CP29)
 
-**What:** Replace the `TextInput` in `SystemCoresScreen` with a dropdown that lists `.so` files found in `cores_directory`. User picks from installed cores; no manual typing.
-
-**Backend:** Add `SettingsManager.getAvailableCores() -> list[str]` — scans `config.cores_directory` for `*.so` files, returns sorted filenames. Empty list if directory missing or no cores installed.
-
-**QML:** Replace `TextInput` + edit mode in `SystemCoresScreen` with a cycle/select component (same pattern as Video Player setting). Show `"(none)"` if no cores installed with a hint to use the installer.
-
-**Effort:** Small-medium (2 tasks: backend scan + QML replacement).
-
-**Caveats:**
-- If `cores_directory` is empty or no `.so` files exist, show a graceful empty state ("No cores installed — run install.sh").
-- The current text entry allowed typing arbitrary paths; the dropdown only shows what's installed. This is intentional — manual entry was error-prone.
+`TextInput` edit mode replaced with Left/Right cycle-through-installed-cores. `SettingsManager.getAvailableCores()` scans `cores_directory` for `*.so` files (sorted, excludes `.so.zip`/`.info`). Delegate shows `"◀  core  ▶"` on current row when cores available. Header hint updates dynamically. Empty state shows toast "No cores installed — run install.sh". Saves immediately on cycle via existing `setSystemCore()`.
 
 ---
 

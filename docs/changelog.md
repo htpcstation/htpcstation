@@ -36,3 +36,4 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 | 26 | Harden remaining: config wipe prevention (`BrowserLauncher` fix + `Config.save()` guard), `plexError` notifications on Watch+Listen, lyrics zero-duration guard, `_previousView` fix | `harden-remaining/` (001–005) |
 | 27 | M1–M3: Music Library UX fix, tab renames (Plex Media/Plex Music), Moonlight dedicated tab, PC Games Steam-only | `m1-m2-tab-renames-music-library-fix/`, `m3-steam-moonlight-tabs/` (001–003) |
 | 28 | M5: RetroArch core downloader in install.sh (22 curated cores, ~50MB, default N); fix stale tab labels in installer | `m5-retroarch-core-installer/` (001) |
+| 29 | M4: RetroArch core selector — cycle through installed cores, remove TextInput from SystemCoresScreen | `m4-retroarch-core-selector/` (001) |
