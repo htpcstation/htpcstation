@@ -20,9 +20,10 @@ from PySide6.QtCore import (
 )
 
 from backend.config import Config, SYSTEM_COMPATIBLE_CORES
-from backend.controller_mapping import ACTIONS, get_default_mapping, save_mapping
+from backend.controller_mapping import ACTIONS, get_default_mapping, load_mapping, save_mapping
 from backend.library import GameLibrary
 from backend.plex_account import PlexAccount
+import backend.retroarch_config as _ra_cfg
 
 logger = logging.getLogger(__name__)
 
@@ -918,3 +919,158 @@ class SettingsManager(QObject):
 
         if self._gamepad_manager is not None:
             self._gamepad_manager.reloadMapping()  # type: ignore[union-attr]
+
+    # ------------------------------------------------------------------
+    # Slots — RetroArch hotkey configuration
+    # ------------------------------------------------------------------
+
+    # Ordered list of HTPC actions for the hotkey UI rows.
+    _HTPC_ACTION_ORDER = [
+        "accept", "cancel", "context1", "context2",
+        "left_shoulder", "right_shoulder",
+        "start", "select",
+        "left_trigger", "right_trigger",
+    ]
+
+    # Human-readable labels for evdev button codes.
+    _EVDEV_LABELS: dict[int, str] = {
+        304: "B/South", 305: "A/East", 307: "X/North", 308: "Y/West",
+        310: "L1", 311: "R1", 312: "L2", 313: "R2",
+        314: "Select", 315: "Start", 316: "Home",
+        317: "L3", 318: "R3",
+    }
+
+    def _get_hotkey_button_label(self, evdev_code: int) -> str:
+        """Return a human-readable label for an evdev button code."""
+        return self._EVDEV_LABELS.get(evdev_code, f"Button {evdev_code}")
+
+    @Slot(result="QVariant")
+    def getRetroarchHotkeyConfig(self) -> dict:
+        """Return current hotkey config for QML.
+
+        Returns dict with:
+          - modifier_evdev: int | None  (evdev code of modifier button)
+          - modifier_sdl: int | None    (SDL index, derived from evdev code)
+          - modifier_label: str         (human-readable button name, e.g. "Home")
+          - mapping: dict[str, int|None]  (hotkey_action → SDL index)
+          - htpc_actions: list[dict]    (ordered list for UI rows)
+          - cfg_path: str
+        """
+        modifier_evdev = self._config.hotkey_modifier_evdev
+        modifier_sdl = (
+            _ra_cfg.evdev_code_to_sdl_index(modifier_evdev)
+            if modifier_evdev is not None
+            else None
+        )
+        modifier_label = (
+            self._get_hotkey_button_label(modifier_evdev)
+            if modifier_evdev is not None
+            else ""
+        )
+
+        # If hotkey_mapping is empty (first run), derive defaults from controller mapping.
+        mapping = dict(self._config.hotkey_mapping)
+        if not mapping:
+            controller_mapping = load_mapping()
+            for htpc_action, hotkey_action in _ra_cfg.HTPC_TO_HOTKEY.items():
+                entry = controller_mapping.get(htpc_action)
+                if entry is not None and entry.get("type") == "button":
+                    evdev_code = entry.get("code")
+                    if isinstance(evdev_code, int):
+                        mapping[hotkey_action] = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
+                    else:
+                        mapping[hotkey_action] = None
+                else:
+                    mapping[hotkey_action] = None
+
+        # Build ordered htpc_actions list for UI rows.
+        htpc_actions = []
+        for htpc_action in self._HTPC_ACTION_ORDER:
+            hotkey_action = _ra_cfg.HTPC_TO_HOTKEY.get(htpc_action, "")
+            sdl_index = mapping.get(hotkey_action)
+            htpc_actions.append({
+                "htpc_action": htpc_action,
+                "hotkey_action": hotkey_action,
+                "label": hotkey_action.replace("_", " ").title(),
+                "sdl_index": sdl_index,
+            })
+
+        return {
+            "modifier_evdev": modifier_evdev,
+            "modifier_sdl": modifier_sdl,
+            "modifier_label": modifier_label,
+            "mapping": mapping,
+            "htpc_actions": htpc_actions,
+            "cfg_path": self._config.retroarch_cfg_path_str,
+        }
+
+    @Slot(str, int)
+    def setHotkeyAction(self, hotkey_action: str, sdl_index: int) -> None:
+        """Set a single hotkey action to a SDL button index. Persists immediately."""
+        mapping = dict(self._config.hotkey_mapping)
+        mapping[hotkey_action] = sdl_index
+        self._config.set_hotkey_mapping(mapping)
+        logger.debug("setHotkeyAction: %s → SDL %d", hotkey_action, sdl_index)
+
+    @Slot(int)
+    def setHotkeyModifier(self, evdev_code: int) -> None:
+        """Set the modifier button by evdev code. Derives SDL index. Persists."""
+        self._config.set_hotkey_modifier_evdev(evdev_code)
+        sdl = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
+        logger.debug(
+            "setHotkeyModifier: evdev %d → SDL %s", evdev_code, sdl
+        )
+
+    @Slot()
+    def clearHotkeyModifier(self) -> None:
+        """Clear the modifier button (set to None). Persists."""
+        self._config.set_hotkey_modifier_evdev(None)
+        logger.debug("clearHotkeyModifier: modifier cleared")
+
+    @Slot()
+    def applyRetroarchHotkeys(self) -> None:
+        """Write current hotkey config to retroarch.cfg.
+
+        Calls retroarch_config.build_hotkey_cfg() then write_cfg().
+        Logs success or error. Does not raise.
+        """
+        modifier_evdev = self._config.hotkey_modifier_evdev
+        modifier_sdl = (
+            _ra_cfg.evdev_code_to_sdl_index(modifier_evdev)
+            if modifier_evdev is not None
+            else None
+        )
+
+        mapping = dict(self._config.hotkey_mapping)
+        # If mapping is empty, derive from controller mapping (same logic as getRetroarchHotkeyConfig)
+        if not mapping:
+            controller_mapping = load_mapping()
+            for htpc_action, hotkey_action in _ra_cfg.HTPC_TO_HOTKEY.items():
+                entry = controller_mapping.get(htpc_action)
+                if entry is not None and entry.get("type") == "button":
+                    evdev_code = entry.get("code")
+                    if isinstance(evdev_code, int):
+                        mapping[hotkey_action] = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
+                    else:
+                        mapping[hotkey_action] = None
+                else:
+                    mapping[hotkey_action] = None
+
+        cfg_updates = _ra_cfg.build_hotkey_cfg(mapping, modifier_sdl)
+        cfg_path = self._config.retroarch_cfg_path
+        try:
+            _ra_cfg.write_cfg(cfg_path, cfg_updates)
+            logger.info("applyRetroarchHotkeys: wrote %d keys to %s", len(cfg_updates), cfg_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("applyRetroarchHotkeys: failed to write %s: %s", cfg_path, exc)
+
+    @Slot(result=str)
+    def getRetroarchCfgPath(self) -> str:
+        """Return the current retroarch.cfg path."""
+        return self._config.retroarch_cfg_path_str
+
+    @Slot(str)
+    def setRetroarchCfgPath(self, path: str) -> None:
+        """Set the retroarch.cfg path and persist."""
+        self._config.set_retroarch_cfg_path(path)
+        logger.debug("setRetroarchCfgPath: %s", path)

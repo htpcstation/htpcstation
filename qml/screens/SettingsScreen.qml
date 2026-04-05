@@ -35,6 +35,13 @@ FocusScope {
         systemCoresScreen.forceActiveFocus()
     }
 
+    // ── RetroArch Hotkeys sub-screen ──────────────────────────────────────────
+    function showRetroarchHotkeys() {
+        retroarchHotkeysScreen.config = settings ? settings.getRetroarchHotkeyConfig() : {}
+        retroarchHotkeysScreen.visible = true
+        retroarchHotkeysScreen.forceActiveFocus()
+    }
+
     // ── Settings model ────────────────────────────────────────────────────────
     // Each entry specifies the type and properties of a setting row.
     // Headers are non-focusable visual separators.
@@ -44,6 +51,7 @@ FocusScope {
         { type: "text",    label: "RetroArch Command", settingKey: "retroarchCommand" },
         { type: "text",    label: "Cores Directory",   settingKey: "coresDirectory" },
         { type: "button",  label: "System Cores...",   action: "systemCores" },
+        { type: "button",  label: "RetroArch Hotkeys", action: "retroarchHotkeys" },
         { type: "button",  label: "Rescan Library",    action: "rescan" },
         { type: "button",  label: "Clear Retro Games History", action: "clearRetroRecent" },
         { type: "header",  label: "Plex" },
@@ -197,6 +205,11 @@ FocusScope {
             // If the system cores sub-screen is open, let it keep focus
             if (systemCoresScreen.visible) {
                 systemCoresScreen.forceActiveFocus()
+                return
+            }
+            // If the retroarch hotkeys sub-screen is open, let it keep focus
+            if (retroarchHotkeysScreen.visible) {
+                retroarchHotkeysScreen.forceActiveFocus()
                 return
             }
             // Route focus to the current setting item
@@ -428,6 +441,8 @@ FocusScope {
                             actionButton.statusText = "Opening..."
                         } else if (action === "systemCores") {
                             settingsScreen.showSystemCores()
+                        } else if (action === "retroarchHotkeys") {
+                            settingsScreen.showRetroarchHotkeys()
                         } else if (action === "mapController") {
                             settingsScreen.showControllerMapping()
                         } else if (action === "resetController") {
@@ -683,6 +698,18 @@ FocusScope {
 
         onBack: {
             systemCoresScreen.visible = false
+            settingsList.forceActiveFocus()
+        }
+    }
+
+    // ── RetroArch Hotkeys sub-screen ──────────────────────────────────────────
+    RetroarchHotkeysScreen {
+        id: retroarchHotkeysScreen
+        anchors.fill: parent
+        visible: false
+
+        onBack: {
+            retroarchHotkeysScreen.visible = false
             settingsList.forceActiveFocus()
         }
     }

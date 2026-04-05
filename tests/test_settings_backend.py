@@ -3102,3 +3102,122 @@ class TestGetAvailableCores:
         assert len(result) == 1
         assert result[0] == "gambatte_libretro.so"
         assert "/" not in result[0]
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — RetroArch hotkey config
+# ---------------------------------------------------------------------------
+
+
+def _make_hotkey_manager(tmp_path: Path, config_data: dict | None = None):
+    """Create a SettingsManager with a real Config and mock dependencies."""
+    from backend.settings_manager import SettingsManager
+
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data or {}), encoding="utf-8")
+    with patch("backend.config.CONFIG_FILE", config_file), \
+         patch("backend.config.CONFIG_DIR", tmp_path):
+        config = Config()
+
+    config.save = MagicMock()
+    library = MagicMock()
+    plex_library = MagicMock()
+    manager = SettingsManager(config, library, plex_library)
+    return manager, config
+
+
+class TestRetroarchHotkeyConfig:
+    def test_get_config_returns_expected_shape(self, tmp_path: Path) -> None:
+        """getRetroarchHotkeyConfig result has all required keys."""
+        manager, _ = _make_hotkey_manager(tmp_path)
+        result = manager.getRetroarchHotkeyConfig()
+        assert "modifier_evdev" in result
+        assert "modifier_sdl" in result
+        assert "modifier_label" in result
+        assert "mapping" in result
+        assert "htpc_actions" in result
+        assert "cfg_path" in result
+
+    def test_htpc_actions_has_10_entries(self, tmp_path: Path) -> None:
+        """htpc_actions has one entry per HTPC action in HTPC_TO_HOTKEY."""
+        import backend.retroarch_config as ra_cfg
+
+        manager, _ = _make_hotkey_manager(tmp_path)
+        result = manager.getRetroarchHotkeyConfig()
+        assert len(result["htpc_actions"]) == len(ra_cfg.HTPC_TO_HOTKEY)
+
+    def test_set_hotkey_modifier_persists(self, tmp_path: Path) -> None:
+        """setHotkeyModifier(316) → config saved, modifier_evdev == 316, modifier_sdl == 8."""
+        manager, config = _make_hotkey_manager(tmp_path)
+        manager.setHotkeyModifier(316)
+        config.save.assert_called()
+        result = manager.getRetroarchHotkeyConfig()
+        assert result["modifier_evdev"] == 316
+        assert result["modifier_sdl"] == 8
+
+    def test_clear_hotkey_modifier(self, tmp_path: Path) -> None:
+        """clearHotkeyModifier() → modifier_evdev is None."""
+        manager, config = _make_hotkey_manager(tmp_path)
+        manager.setHotkeyModifier(316)
+        manager.clearHotkeyModifier()
+        result = manager.getRetroarchHotkeyConfig()
+        assert result["modifier_evdev"] is None
+
+    def test_set_hotkey_action_persists(self, tmp_path: Path) -> None:
+        """setHotkeyAction('menu_toggle', 3) → mapping updated and saved."""
+        manager, config = _make_hotkey_manager(tmp_path)
+        manager.setHotkeyAction("menu_toggle", 3)
+        config.save.assert_called()
+        result = manager.getRetroarchHotkeyConfig()
+        assert result["mapping"]["menu_toggle"] == 3
+
+    def test_apply_retroarch_hotkeys_writes_cfg(self, tmp_path: Path) -> None:
+        """applyRetroarchHotkeys calls write_cfg with correct args."""
+        import backend.retroarch_config as ra_cfg
+
+        manager, config = _make_hotkey_manager(tmp_path)
+        cfg_path = tmp_path / "retroarch.cfg"
+        config.retroarch_cfg_path = cfg_path
+        config._hotkey_modifier_evdev = 316  # BTN_MODE → SDL 8
+        config._hotkey_mapping = {"menu_toggle": 3}
+
+        with patch.object(ra_cfg, "write_cfg") as mock_write:
+            manager.applyRetroarchHotkeys()
+
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args
+        written_path = call_args[0][0]
+        written_updates = call_args[0][1]
+        assert written_path == cfg_path
+        assert written_updates["input_menu_toggle_btn"] == "3"
+        assert written_updates["input_enable_hotkey_btn"] == "8"
+
+    def test_apply_retroarch_hotkeys_handles_missing_file_gracefully(
+        self, tmp_path: Path
+    ) -> None:
+        """applyRetroarchHotkeys with write_cfg raising OSError → no exception propagated."""
+        import backend.retroarch_config as ra_cfg
+
+        manager, config = _make_hotkey_manager(tmp_path)
+        config.retroarch_cfg_path = Path("/nonexistent/readonly/retroarch.cfg")
+        config._hotkey_mapping = {"menu_toggle": 3}
+
+        # Should not raise even when write_cfg raises OSError
+        with patch.object(ra_cfg, "write_cfg", side_effect=OSError("permission denied")):
+            manager.applyRetroarchHotkeys()  # must not raise
+
+    def test_first_run_derives_mapping_from_controller(self, tmp_path: Path) -> None:
+        """When _hotkey_mapping is empty (first run), getRetroarchHotkeyConfig derives
+        the hotkey mapping from the controller mapping via load_mapping."""
+        manager, config = _make_hotkey_manager(tmp_path)
+        # Confirm first-run state: no stored mapping
+        assert config.hotkey_mapping == {}
+
+        fake_mapping = {
+            "accept": {"type": "button", "code": 305, "value": 1},  # BTN_EAST → SDL 0
+        }
+        with patch("backend.settings_manager.load_mapping", return_value=fake_mapping):
+            result = manager.getRetroarchHotkeyConfig()
+
+        # accept → menu_toggle; BTN_EAST (305) → SDL 0
+        assert result["mapping"]["menu_toggle"] == 0

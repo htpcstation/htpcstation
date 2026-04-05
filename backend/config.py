@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from backend.retroarch_config import DEFAULT_RETROARCH_CFG
+
 logger = logging.getLogger(__name__)
 
 CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "htpcstation"
@@ -357,7 +359,11 @@ class Config:
 
         self.retroarch_command: str = _DEFAULT_RETROARCH_COMMAND
         self.cores_directory: Path = Path(_DEFAULT_CORES_DIRECTORY).expanduser()
+        self.retroarch_cfg_path: Path = DEFAULT_RETROARCH_CFG
         self.rom_directory: Optional[Path] = None
+        # RetroArch hotkey configuration
+        self._hotkey_modifier_evdev: int | None = None   # evdev code of modifier button
+        self._hotkey_mapping: dict[str, int | None] = {}  # hotkey_action → SDL index or None
         # Merged system configs: built-in defaults overridden by user config.
         self._systems: dict[str, SystemConfig] = {
             key: SystemConfig(**values) for key, values in SYSTEM_DEFAULTS.items()
@@ -674,6 +680,36 @@ class Config:
         self._listen_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
+    @property
+    def hotkey_modifier_evdev(self) -> int | None:
+        """evdev code of the modifier (enable_hotkey) button. None if not configured."""
+        return self._hotkey_modifier_evdev
+
+    def set_hotkey_modifier_evdev(self, code: int | None) -> None:
+        """Set the modifier button evdev code and persist the config."""
+        self._hotkey_modifier_evdev = code
+        self.save()
+
+    @property
+    def hotkey_mapping(self) -> dict[str, int | None]:
+        """Hotkey action → SDL index mapping. Empty dict means not yet configured."""
+        return self._hotkey_mapping
+
+    def set_hotkey_mapping(self, mapping: dict[str, int | None]) -> None:
+        """Set the full hotkey mapping and persist the config."""
+        self._hotkey_mapping = dict(mapping)
+        self.save()
+
+    @property
+    def retroarch_cfg_path_str(self) -> str:
+        """RetroArch config file path as a string."""
+        return str(self.retroarch_cfg_path)
+
+    def set_retroarch_cfg_path(self, path: str) -> None:
+        """Set the RetroArch config file path and persist the config."""
+        self.retroarch_cfg_path = Path(path).expanduser()
+        self.save()
+
     def set_retroarch_command(self, command: str) -> None:
         """Set the RetroArch launch command and persist the config."""
         self.retroarch_command = command
@@ -777,6 +813,9 @@ class Config:
             "retroarch": {
                 "command": self.retroarch_command,
                 "cores_directory": str(self.cores_directory),
+                "hotkey_modifier_evdev": self._hotkey_modifier_evdev,
+                "hotkey_mapping": self._hotkey_mapping,
+                "retroarch_cfg_path": str(self.retroarch_cfg_path),
             },
             "systems": {
                 key: {
@@ -876,6 +915,20 @@ class Config:
                 self.retroarch_command = retroarch["command"]
             if "cores_directory" in retroarch:
                 self.cores_directory = Path(retroarch["cores_directory"]).expanduser()
+            if "retroarch_cfg_path" in retroarch:
+                self.retroarch_cfg_path = Path(retroarch["retroarch_cfg_path"]).expanduser()
+            # hotkey_modifier_evdev: stored as int or null
+            raw_modifier = retroarch.get("hotkey_modifier_evdev")
+            if raw_modifier is None or isinstance(raw_modifier, int):
+                self._hotkey_modifier_evdev = raw_modifier
+            # hotkey_mapping: stored as dict of str → int|null; default {} (not yet configured)
+            raw_mapping = retroarch.get("hotkey_mapping")
+            if isinstance(raw_mapping, dict):
+                loaded: dict[str, int | None] = {}
+                for k, v in raw_mapping.items():
+                    if v is None or isinstance(v, int):
+                        loaded[k] = v
+                self._hotkey_mapping = loaded
 
         # systems — merge: built-in defaults first, then user overrides
         user_systems: dict = raw.get("systems", {})
