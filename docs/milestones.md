@@ -43,40 +43,13 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 
 ## M6 — RetroArch hotkey configuration (V1) ✅ Done (CP30)
 
-**What:** Read and write RetroArch's `retroarch.cfg` to map HTPC Station's button layout to RetroArch hotkeys. V1 scope: hotkeys only (no per-system overrides, no rewind settings yet).
+- `backend/retroarch_config.py`: `EVDEV_TO_SDL` table (8BitDo Micro D-input), `read_cfg`/`write_cfg` (flat INI, preserves existing keys), `build_hotkey_cfg` (10 hotkeys + `input_enable_hotkey_btn`, None→"nul")
+- `RetroarchHotkeysScreen.qml`: modifier row + 10 read-only hotkey rows + Apply button. Accessible from Settings → RetroArch section.
+- `ModifierCaptureDialog.qml`: raw mode capture (evdev `rawInput` signal), 10s timeout, all exit paths stop raw mode. Home button (BTN_MODE/316) confirmed working on 8BitDo Micro D-input.
+- Hotkey mapping derived from controller mapping on first run; stored as explicit dict in config for V2 per-row overrides without schema change.
+- `hotkey_modifier_evdev`, `hotkey_mapping`, `retroarch_cfg_path` persisted under `retroarch` section in config.json.
 
-**retroarch.cfg location:** `~/.var/app/org.libretro.RetroArch/config/retroarch/retroarch.cfg` (Flatpak). Expose as a configurable path in Settings (default auto-detected from Flatpak path).
-
-**Hotkey mappings to expose (V1):**
-
-| HTPC Station action | RetroArch cfg key | Notes |
-|---|---|---|
-| Accept (A/East) | `input_menu_toggle_btn` | Open RetroArch menu |
-| Cancel (B/South) | `input_exit_emulator_btn` | Quit to HTPC Station |
-| Context1 (X/North) | `input_save_state_btn` | Save state |
-| Context2 (Y/West) | `input_load_state_btn` | Load state |
-| Left Shoulder | `input_state_slot_decrease_btn` | State slot − |
-| Right Shoulder | `input_state_slot_increase_btn` | State slot + |
-| Start | `input_pause_toggle_btn` | Pause |
-| Select | `input_screenshot_btn` | Screenshot |
-| L2/Left Trigger | `input_rewind_btn` | Hold to rewind (requires rewind enabled) |
-| R2/Right Trigger | `input_fast_forward_btn` | Fast forward |
-
-Button values in `retroarch.cfg` are joypad button indices (0-based). HTPC Station's evdev codes map to RetroArch joypad indices via the controller mapping.
-
-**Backend:** New `backend/retroarch_config.py` — reads/writes `retroarch.cfg` (simple key=value INI, no sections). Exposes `read_hotkeys()` and `write_hotkeys(mapping: dict)`. Handles missing file gracefully (creates with defaults).
-
-**SettingsManager:** New slots `getRetroarchHotkeys()` and `setRetroarchHotkeys(mapping)`. New config key `retroarch_cfg_path` (default: Flatpak path, auto-detected).
-
-**QML:** New sub-screen `RetroarchHotkeysScreen.qml` accessible from Settings. Shows each action with its current button assignment. A/Accept to edit a row cycles through available buttons. Inherits button layout from HTPC Station's current mapping.
-
-**Effort:** Large (5–6 tasks).
-
-**Caveats:**
-- RetroArch joypad button indices depend on the SDL gamepad mapping, not evdev codes directly. Need to map HTPC Station's evdev codes → SDL button indices for the specific controller. For the 8BitDo Micro D-input: BTN_EAST(305)→0, BTN_SOUTH(304)→1, BTN_NORTH(307)→3, BTN_WEST(308)→2, BTN_TL(310)→4, BTN_TR(311)→5, BTN_SELECT(314)→6, BTN_START(315)→7.
-- `retroarch.cfg` uses `nul` for unbound. Write `nul` when clearing a binding.
-- V2 (rewind settings, per-system overrides) is a follow-up milestone. Note it here so the backend module is designed with extension in mind.
-- The hotkey enable button (`input_enable_hotkey_btn`) should be set to Select so hotkeys don't fire during normal gameplay — include this as a non-editable default.
+**V2 scope (deferred):** per-row hotkey overrides, rewind settings, per-system cfg overrides.
 
 ---
 

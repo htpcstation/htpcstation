@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 30)
+# HTPC Station — Resume Document (Checkpoint 31)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -32,7 +32,7 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,792 tests pas
 - M3: Moonlight split into its own tab (`MoonlightScreen.qml`). PC Games is now Steam-only and GOG-ready. Each tab has its own Favorites and Recently Played. `MoonlightLibrary` gained `getRecentlyPlayed()` / `clearRecentlyPlayed()`. All `steam.setMoonlight*` injection removed.
 - M5: `install.sh` Phase 6 — optional RetroArch core downloader. 22 curated cores from libretro buildbot nightly, ~50MB total, default N, non-fatal per-core failures. Also fixed stale "Watch"/"Listen" labels in installer.
 - M4: `SystemCoresScreen` TextInput replaced with Left/Right cycle-through-installed-cores. `SettingsManager.getAvailableCores(folder_name)` returns compatible+installed cores for the selected system. `SYSTEM_COMPATIBLE_CORES` map in `config.py`.
-- M6: RetroArch hotkey configuration V1. `backend/retroarch_config.py` (evdev→SDL mapping, read/write retroarch.cfg). `RetroarchHotkeysScreen` + `ModifierCaptureDialog` in Settings. Modifier captured via evdev raw mode (Home button = BTN_MODE/316 confirmed). 10 hotkeys derived from controller mapping on first run, stored independently for V2 per-row overrides.
+- M6: RetroArch hotkey configuration V1. `backend/retroarch_config.py` (evdev→SDL mapping, read/write retroarch.cfg). `RetroarchHotkeysScreen` + `ModifierCaptureDialog` in Settings. Modifier captured via evdev raw mode (Home button = BTN_MODE/316 confirmed). 10 hotkeys derived from controller mapping on first run, stored independently for V2 per-row overrides. Post-ship fix: focus `hotkeysList` after dialog closes so FocusScope receives Keys events.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 
