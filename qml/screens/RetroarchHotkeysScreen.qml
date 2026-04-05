@@ -475,11 +475,12 @@ FocusScope {
                 // Refresh config so modifier_label updates
                 hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
             }
-            hotkeysScreen.forceActiveFocus()
+            // Focus the list directly — FocusScope needs a focused child to receive Keys events
+            hotkeysList.forceActiveFocus()
         }
 
         onCancelled: {
-            hotkeysScreen.forceActiveFocus()
+            hotkeysList.forceActiveFocus()
         }
     }
 
