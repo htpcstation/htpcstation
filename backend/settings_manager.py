@@ -568,6 +568,21 @@ class SettingsManager(QObject):
         self._config.set_plex_player(player)
         self.plexPlayerChanged.emit()
 
+    # -- Auto-skip intro ----------------------------------------------
+
+    autoSkipIntroChanged = Signal()
+
+    def _get_auto_skip_intro(self) -> bool:
+        return self._config.auto_skip_intro
+
+    autoSkipIntro = Property(bool, fget=_get_auto_skip_intro, notify=autoSkipIntroChanged)
+
+    @Slot(bool)
+    def setAutoSkipIntro(self, enabled: bool) -> None:
+        """Set whether to automatically skip intro markers during Plex playback."""
+        self._config.set_auto_skip_intro(enabled)
+        self.autoSkipIntroChanged.emit()
+
     @Slot(str)
     def setButtonLayout(self, layout: str) -> None:
         """Set the button layout ('standard' or 'alternate')."""

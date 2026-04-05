@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 24)
+# HTPC Station — Resume Document (Checkpoint 25)
 
 > Hand this file to a fresh agent to resume development.
 > For full codebase structure, gotchas, architecture notes, and history: `docs/architecture.md`
@@ -7,55 +7,54 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,590 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. All 5 tabs working: Retro Games, PC Games, Watch, Listen, Settings. **1,683 tests passing.**
 
-**What's new since Checkpoint 21:**
+Checkpoint 25 work is **complete but not yet committed** (working tree has uncommitted changes).
 
-Hardening Batch 1 + 2 + partial Batch 3 (see `docs/harden.md` for full backlog):
+**What's new since Checkpoint 24:**
 
-### Batch 1 — crash and stuck-UI fixes
-- **C1**: `_mpvLaunchReady.emit()` fixed from 8 args to 5 (matched `Signal(str,str,int,int,int)`)
-- **C3**: `assert` in `config.set_plex_player` replaced with guard + warning (safe under `-O`)
-- **C4**: `_save_my_list` wrapped in `try/except OSError`
-- **M1**: `wait_until_playing` timeout now emits `_emit_finished` so loading overlay clears
-- **M3**: `InvalidMedia` handled separately from `EndOfMedia` — bad URL no longer auto-advances
-- **H6**: `_artists_cache_path` uses `CONFIG_DIR / "poster_cache"` (was hardcoded `~/.config/htpcstation`)
-- **M9**: `config.save()` wrapped in `try/except OSError`
+### Skip Intro (auto-seek)
+- `auto_skip_intro` bool setting added to `Config`, `SettingsManager`, and Settings screen ("Auto-Skip Intro" toggle)
+- `playWithMpv` worker calls `get_metadata(include_markers=True)`; parses `Marker` array for `type == "intro"` → `intro_end_ms`
+- `_mpvLaunchReady` signal extended from 5 to **6 args**: `(url, title, start_ms, duration_ms, part_id, intro_end_ms)`
+- `markersReady(intro_end_ms: int)` public signal emitted from `_on_mpv_launch_ready`
+- `mpvPositionChanged(int)` public signal — push-based from `observe_time_pos`, marshalled via `_mpvPositionMs` internal signal + `QueuedConnection`
+- `seekMpv(ms: int)` slot — calls `player.seek(ms / 1000.0, "absolute")`
+- `WatchScreen`: `onMarkersReady` stores `_introEndMs`; `onMpvPositionChanged` auto-seeks + shows "Skipping intro..." toast; `_introSkipped` flag prevents re-triggering; markers cleared on each new launch
 
-### Batch 2 — UX fixes
-- **H7**: `plex.plexError` wired to error banner in `WatchScreen` — auth/network errors now visible
-- **H8**: B from show detail (entered via My List) now returns to My List (added `_showDetailOrigin`)
-- **H4**: Three `target: plex` Connections blocks consolidated into one
-- **B2-3**: `_routeFocus()` and `onActiveFocusChanged` guard against stealing focus from modal overlays (`_resumeDialogVisible`, `_loadingOverlayVisible`)
+### Watch screen header fade
+- `_contentFocused` bool on `WatchScreen`; `libraryListArea` fades to 30% opacity with 160ms `NumberAnimation` when content grid/list has focus; restores on library list or detail view; managed entirely through `_routeFocus()`
 
-### Listen tab seek bar fixes
-- `MediaPlayer.seek()` does not exist in Qt6 — replaced all calls with `musicPlayer.position =`
-- Progress bar `FocusScope` → plain `Item` with `focus: true` (FocusScope never received key events)
-- Mouse drag added to progress bar via `MouseArea` with `hoverEnabled` + `cursorShape`
-- `homeScreen._seekTo(ms)` added for absolute seeking
+### Test coverage (Batch 3 follow-up — new untracked files)
+- `tests/test_poster_cache.py` — locking, partial-file cleanup, thread-safety, download failure
+- `tests/test_plex_timeline_reporter.py` — start/stop, heartbeat loop, position/pause updates
+- `tests/test_config_edge_cases.py` — missing/empty/malformed file, partial config, save roundtrip, OSError, validation, `auto_skip_intro`
+- `tests/test_skip_intro.py` — marker parsing, `_mpvLaunchReady` 6-arg emit, `markersReady`, `seekMpv`, config roundtrip
 
-### Watch tab loading/cancel hardening
-- Loading overlay: 20s hard timeout (`loadingTimeoutTimer`), B to cancel, `[B] Cancel` hint
-- Cancel during load: `_mpvLaunched` flag tracks whether `plex.playWithMpv()` was called; `_cancelledDuringLoad` flag stops MPV when `onMpvPlaybackReady` fires after cancel
-- `plex.stopMpv()` slot added to `PlexLibrary` (calls `_mpv_launcher.kill()`)
-- `kill()` now sets `_cancel_requested` event and dispatches `player.stop()` off-thread (non-blocking)
-- `vid = "no"` set before `player.play()` — video suppressed during buffering; re-enabled in `_wait_and_signal` after cancel check, preventing flash on cancel
-- `focusRestoreTimer` (50ms) calls `_routeFocus()` after loading overlay hides
-- `loadingOverlay.onVisibleChanged` uses `forceActiveFocus()` instead of `focus:` binding
-- `onMpvFinished` ignores stale finish events when `_mpvLaunched` is true (new launch in progress)
-- Resume dialog: loading overlay stays as backdrop until dialog is dismissed; `loadingOverlayTimer` skips hide while `_resumeDialogVisible`; confirm path keeps overlay visible through `_launchMpv`
+### Updated existing tests
+- `tests/test_harden_batch1.py` — C1 test updated: `_mpvLaunchReady` now expects 6 args
+- `tests/test_plex_stream.py` — all `_mpvLaunchReady` mock calls updated to 6 args
 
-### My List navigation
-- Show detail entered from My List: `_showDetailOrigin = "mylist"` set; B returns to My List with saved focus index
+---
 
-### Alt+F4 during MPV playback (GNOME/Wayland)
-- On GNOME/Wayland, `fullscreen=yes` causes MPV to own a separate compositor surface; Alt+F4 destroys it at the compositor level (bypasses Qt event filter)
-- Alt+F4 triggers libmpv's internal `quit` (not `stop`), destroying the core and raising `ShutdownError` on any subsequent property access
-- `_on_shutdown` callback: stashes dead player in `_dead_player`, nulls `_player`, schedules `_recreate_player` via `QueuedConnection`
-- `_recreate_player` (main thread): calls `dead_player.terminate()` → releases Wayland surface (zombie gone from Alt+~) → calls `set_wid(self._wid)` to create fresh core
-- `_show_window_after_mpv`: calls `window.hide()` then `showFullScreen()` after 150ms — forces Qt to recreate the Wayland surface after Mutter destroys it
-- `launch()` and `launch_live_tv()` force-stop and proceed if `is_running()` is true (zombie recovery fallback)
-- Event filter on `window` intercepts `QEvent.Type.Close` and calls `plex.stopMpv()` when MPV is running
+## Uncommitted changes (checkpoint 25)
+
+```
+modified:   backend/config.py
+modified:   backend/plex_library.py
+modified:   backend/settings_manager.py
+modified:   docs/resume-project.md
+modified:   qml/screens/SettingsScreen.qml
+modified:   qml/screens/WatchScreen.qml
+modified:   tests/test_harden_batch1.py
+modified:   tests/test_plex_stream.py
+
+untracked:  misc/coding-team/skip-intro-header-tests/
+untracked:  tests/test_config_edge_cases.py
+untracked:  tests/test_plex_timeline_reporter.py
+untracked:  tests/test_poster_cache.py
+untracked:  tests/test_skip_intro.py
+```
 
 ---
 
@@ -75,8 +74,8 @@ Hardening Batch 1 + 2 + partial Batch 3 (see `docs/harden.md` for full backlog):
 | 10 | ~~Mark watched/unwatched (Plex)~~ | ✅ Done |
 | 11 | Plex search | New navigation flow |
 | 28 | ~~libmpv migration~~ | ✅ Done |
-| 29 | Hardening Batch 1+2 | ✅ Done — see `docs/harden.md` |
-| 30 | ~~Hardening Batch 3~~ | ✅ Done — H2 (async fetch*), H3 (loading timeout), C2 (pagination — low risk, deferred), H5/M8 (shared MPV _mpv_active flag) |
+| 29 | ~~Hardening Batch 1+2+3~~ | ✅ Done — see `docs/harden.md` |
+| 30 | ~~Skip Intro + header fade + test gaps~~ | ✅ Done (uncommitted) |
 
 ---
 
@@ -145,37 +144,41 @@ bash install.sh
 
 **HomeScreen tab arrays must be built imperatively, not via bindings.** Build in `Component.onCompleted` only.
 
-**Only ONE `Component.onCompleted` per QML scope.** QML silently fails with "Property value set multiple times".
+**Only ONE `Component.onCompleted` per QML scope.**
 
 **Plex managed user tokens get 401 from the media server.** Always use the admin token for server API calls.
 
 **MPV on Wayland needs `hwdec=vaapi-copy` and `gpu_context=wayland`.** On Xorg use `hwdec=vaapi` and `gpu_context=x11`. Auto-detected from `XDG_SESSION_TYPE`.
 
-**`fullscreen=yes` is required in `mpv.MPV()` kwargs.** Without it, OS UI elements (status bar) remain visible over the video. On GNOME/Wayland this causes MPV to own a separate compositor surface — Alt+F4 destroys it at the Mutter level. Recovery: `_show_window_after_mpv` calls `window.hide()` then `showFullScreen()` after 150ms.
+**`fullscreen=yes` is required in `mpv.MPV()` kwargs.** Without it, OS UI elements remain visible. On GNOME/Wayland this causes MPV to own a separate compositor surface — Alt+F4 destroys it at the Mutter level. Recovery: `_show_window_after_mpv` calls `window.hide()` then `showFullScreen()` after 150ms.
 
-**`MediaPlayer.seek()` does not exist in Qt6.** Use `musicPlayer.position = ms` for seeking.
+**Alt+F4 calls libmpv `quit`, not `stop`.** Destroys the core. `_on_shutdown` callback stashes dead player, schedules `_recreate_player` on main thread. `_recreate_player` calls `terminate()` (releases Wayland surface) then `set_wid()` for fresh core. Never call `terminate()` from the mpv event thread.
 
-**`FocusScope` does not receive `Keys` events unless a focusable child exists.** Use a plain `Item` with `focus: true` instead when you need key handling without child focus delegation.
+**`MediaPlayer.seek()` does not exist in Qt6.** Use `musicPlayer.position = ms`.
+
+**`FocusScope` does not receive `Keys` events unless a focusable child exists.** Use plain `Item` with `focus: true`.
 
 **`_routeFocus()` and `onActiveFocusChanged` in WatchScreen guard against modal overlays.** Always check `_resumeDialogVisible` and `_loadingOverlayVisible` before redirecting focus.
 
-**`_mpvLaunchReady` signal carries 5 args** `(url, title, start_ms, duration_ms, part_id)`. All test mocks must match this signature.
+**`_mpvLaunchReady` signal carries 6 args** `(url, title, start_ms, duration_ms, part_id, intro_end_ms)`. All test mocks must match this signature.
 
-**`_mpvLaunched` flag in WatchScreen.** Set to `true` when `plex.playWithMpv()` is called, cleared in `onMpvPlaybackReady` (success) or `_clearLoading()` (cancel). `onMpvFinished` ignores stale finish events when `_mpvLaunched` is true.
+**`_mpvLaunched` flag in WatchScreen.** Set when `plex.playWithMpv()` is called, cleared in `onMpvPlaybackReady` (success) or `_clearLoading()` (cancel). `onMpvFinished` ignores stale events when `_mpvLaunched` is true.
 
-**`vid = "no"` set before `player.play()`.** Video suppressed during buffering to prevent flash on cancel. Re-enabled in `_wait_and_signal` after `_cancel_requested` check.
+**`vid = "no"` set before `player.play()`.** Video suppressed during buffering to prevent flash on cancel. Re-enabled in `_wait_and_signal` after cancel check.
 
-**`kill()` is non-blocking.** Sets `_cancel_requested` event immediately, dispatches `player.stop()` off-thread. Safe to call from Qt main thread.
+**`kill()` is non-blocking.** Sets `_cancel_requested`, dispatches `player.stop()` off-thread.
 
-**Alt+F4 calls libmpv `quit`, not `stop`.** This destroys the core. `_on_shutdown` callback detects this, stashes the dead player, and schedules `_recreate_player` on the main thread. `_recreate_player` calls `terminate()` on the dead player (releases Wayland surface) then `set_wid()` to create a fresh core. Never call `terminate()` from the mpv event thread — use `QueuedConnection` to the main thread.
+**`PlexTimelineReporter.stop()` calls `thread.join(timeout=5)`.** Blocks calling thread up to 5s. Called from `_on_mpv_process_finished` on main thread — only fires after `processStarted`, not on cancel.
 
-**`_wid` is stored on first `set_wid()` call** so `_recreate_player` can recreate without external input. `set_wid()` is idempotent after a shutdown — it checks `self._player is not None` before creating.
+**`_mpv_active` flag in both `PlexLibrary` and `LiveTvLibrary`.** Gates all MPV signals — Plex and Live TV signals never cross-fire.
 
-**`PlexTimelineReporter.stop()` calls `thread.join(timeout=5)`.** This blocks the calling thread for up to 5s. It is called from `_on_mpv_finished_for_timeline` which runs on the main thread via signal. Only fires after `processStarted` — not on cancel (where `processStarted` is suppressed).
+**`mpvPositionChanged(int)` fires continuously during playback.** Connected in `WatchScreen` for intro skip. Keep handlers lightweight — they run on every position tick.
+
+**`seekMpv(ms)` uses `player.seek(ms / 1000.0, "absolute")`.** python-mpv seek takes seconds (float), not ms.
 
 **`LibMpvPlayer.set_wid()` must be called after `window.showFullScreen()`.** `winId()` is only valid after the window is mapped.
 
-**`LibMpvPlayer.launch()` sets `pause=False` before `play()`.** MPV can retain a paused state across loads.
+**`LibMpvPlayer.launch()` sets `pause=False` before `play()`.** MPV can retain paused state across loads.
 
 **Fedora ships codec-restricted packages.** `ffmpeg-free` → swap for `ffmpeg` (RPM Fusion). `check-deps.sh` detects and reports these.
 
@@ -187,13 +190,15 @@ bash install.sh
 
 **`PlexOnDeckGrid` and `PlexOnDeckList` expose `currentIndex` as writable.** Writing sets `_suppressIndexReset = true` first.
 
-**HDHomeRun guide API uses `DeviceAuth` token** from `http://{host}/discover.json`. The Plex cloud EPG grid endpoint ignores `channelGridKey` — do not use it for per-channel data.
+**HDHomeRun guide API uses `DeviceAuth` token** from `http://{host}/discover.json`.
 
 **Plex EPG timestamps are unreliable.** Use HDHomeRun guide timestamps instead.
 
-**MPV gamepad key names are SDL positional, not label-based.** Dpad scrobbling uses `GAMEPAD_DPAD_LEFT/RIGHT`. L2/R2 are not bound.
+**MPV gamepad key names are SDL positional, not label-based.** Dpad scrobbling uses `GAMEPAD_DPAD_LEFT/RIGHT`. L2/R2 not bound.
 
 **python-mpv callbacks run on the mpv event thread.** Never call Qt UI methods directly — use `QMetaObject.invokeMethod` with `QueuedConnection`.
+
+**Markers are at top level of metadata item.** `metadata.get("Marker", [])`, not inside `Media.Part.Stream`. Type field is `"intro"` or `"credits"`. Pass `include_markers=True` to `get_metadata()`.
 
 ---
 

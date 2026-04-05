@@ -1,7 +1,7 @@
 """Tests for Task 001 — Batch 1 crash and stuck-UI fixes.
 
 Covers:
-  - C1: _mpvLaunchReady emitted with exactly 5 args on empty stream URL
+  - C1: _mpvLaunchReady emitted with exactly 6 args on empty stream URL
   - C3: set_plex_player ignores invalid values and does not call save()
   - C4: _save_my_list swallows OSError without propagating
   - M9: Config.save() swallows OSError without propagating
@@ -86,15 +86,15 @@ def _make_config(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# C1 — _mpvLaunchReady emitted with exactly 5 args on empty stream URL
+# C1 — _mpvLaunchReady emitted with exactly 6 args on empty stream URL
 # ---------------------------------------------------------------------------
 
 
 class TestC1MpvLaunchReadyArgCount:
-    """_mpvLaunchReady must be emitted with exactly 5 args (matching Signal declaration)."""
+    """_mpvLaunchReady must be emitted with exactly 6 args (matching Signal declaration)."""
 
-    def test_empty_url_emits_five_args(self, tmp_path: Path) -> None:
-        """When get_stream_url returns empty, _mpvLaunchReady fires with 5 zero/empty args."""
+    def test_empty_url_emits_six_args(self, tmp_path: Path) -> None:
+        """When get_stream_url returns empty, _mpvLaunchReady fires with 6 zero/empty args."""
         lib = _make_lib(tmp_path)
 
         mock_client = MagicMock()
@@ -103,8 +103,8 @@ class TestC1MpvLaunchReadyArgCount:
 
         received: list = []
 
-        def _capture(url, title, start_ms, duration_ms, part_id):
-            received.append((url, title, start_ms, duration_ms, part_id))
+        def _capture(url, title, start_ms, duration_ms, part_id, intro_end_ms):
+            received.append((url, title, start_ms, duration_ms, part_id, intro_end_ms))
 
         lib._mpvLaunchReady.connect(_capture)
 
@@ -116,12 +116,13 @@ class TestC1MpvLaunchReadyArgCount:
         QCoreApplication.processEvents()
 
         assert len(received) == 1, "Signal should have been emitted exactly once"
-        url, title, start_ms, duration_ms, part_id = received[0]
+        url, title, start_ms, duration_ms, part_id, intro_end_ms = received[0]
         assert url == ""
         assert title == ""
         assert start_ms == 0
         assert duration_ms == 0
         assert part_id == 0
+        assert intro_end_ms == 0
 
 
 # ---------------------------------------------------------------------------

@@ -261,6 +261,8 @@ class Config:
         self._music_library_key: str = ""
         # Plex player selection: "mpv" or "browser"
         self._plex_player: str = "mpv"
+        # Auto-skip intro markers during Plex playback
+        self._auto_skip_intro: bool = False
         # Sort preferences
         self._sort_retro_games: str = "az"
         self._sort_steam_games: str = "az"
@@ -363,6 +365,16 @@ class Config:
             logger.warning("set_plex_player: invalid value %r — ignored", player)
             return
         self._plex_player = player
+        self.save()
+
+    @property
+    def auto_skip_intro(self) -> bool:
+        """Whether to automatically skip intro markers during Plex playback."""
+        return self._auto_skip_intro
+
+    def set_auto_skip_intro(self, enabled: bool) -> None:
+        """Set auto-skip intro and persist the config."""
+        self._auto_skip_intro = bool(enabled)
         self.save()
 
     @property
@@ -634,6 +646,7 @@ class Config:
                 "client_id": self._plex_client_id,
                 "music_library_key": self._music_library_key,
                 "player": self._plex_player,
+                "auto_skip_intro": self._auto_skip_intro,
             },
             "browser": {
                 "command": self._browser_command,
@@ -740,6 +753,7 @@ class Config:
             player = plex.get("player", "mpv")
             if player in ("mpv", "browser"):
                 self._plex_player = player
+            self._auto_skip_intro = bool(plex.get("auto_skip_intro", False))
             # Backward compatibility: old configs may have server_url — ignore it gracefully
 
         # browser section

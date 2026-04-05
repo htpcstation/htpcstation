@@ -64,6 +64,10 @@ FocusScope {
     // every time the user navigates back to this tab.
     property bool _refreshed: false
 
+    // True when focus is inside a content grid/list — drives the library area
+    // fade so the content area receives visual prominence.
+    property bool _contentFocused: false
+
     // Set to true once plex.availableChanged fires after a refresh, so we can
     // distinguish "still loading" from "finished but unavailable".
     property bool _availabilityKnown: false
@@ -129,6 +133,8 @@ FocusScope {
         _cancelledDuringLoad = false
         _isLoadingContent = true
         _loadingOverlayVisible = true
+        watchScreen._introEndMs = 0
+        watchScreen._introSkipped = false
         loadingOverlayTimer.restart()
         loadingTimeoutTimer.restart()
         plex.playWithMpv(ratingKey, startMs)
@@ -194,6 +200,10 @@ FocusScope {
     // Set when the user cancels after MPV was already launched — causes
     // onMpvPlaybackReady to immediately stop playback instead of showing video.
     property bool _cancelledDuringLoad: false
+
+    // Intro marker state for auto-skip
+    property int  _introEndMs:   0      // 0 = no intro for current title
+    property bool _introSkipped: false  // prevent double-skip
 
     // Toast text for My List add/remove notifications
     property string _toastText: ""
@@ -344,6 +354,23 @@ FocusScope {
                 watchScreen._movieLoading = false
             }
         }
+        function onMarkersReady(introEndMs) {
+            watchScreen._introEndMs = introEndMs
+            watchScreen._introSkipped = false
+        }
+        function onMpvPositionChanged(posMs) {
+            if (!settings || !settings.autoSkipIntro) return
+            if (watchScreen._introEndMs <= 0) return
+            if (watchScreen._introSkipped) return
+            // Seek when position enters the intro window (any position < introEndMs
+            // and > 5s to avoid triggering at the very start before the observer fires)
+            if (posMs > 5000 && posMs < watchScreen._introEndMs) {
+                watchScreen._introSkipped = true
+                plex.seekMpv(watchScreen._introEndMs)
+                watchScreen._toastText = "Skipping intro..."
+                toastTimer.restart()
+            }
+        }
     }
 
     // Connect liveTV signals for channel list updates and loading overlay.
@@ -367,6 +394,7 @@ FocusScope {
     on_ViewModeChanged: { if (currentView === "content") _routeFocus() }
     onActiveFocusChanged: {
         if (activeFocus) {
+            _contentFocused = false   // reset; _routeFocus will set correctly
             if (!_refreshed || _libraryEntries.length === 0) {
                 _refreshed = true
                 _availabilityKnown = false
@@ -385,8 +413,10 @@ FocusScope {
         if (_resumeDialogVisible) { resumeDialog.forceActiveFocus(); return }
         if (_loadingOverlayVisible) { loadingOverlay.forceActiveFocus(); return }
         if (currentView === "libraries") {
+            _contentFocused = false
             libraryList.forceActiveFocus()
         } else if (currentView === "content") {
+            _contentFocused = true
             if (selectedLibraryType === "movie") {
                 if (_viewMode === "list") movieList.forceActiveFocus()
                 else movieGrid.forceActiveFocus()
@@ -405,6 +435,7 @@ FocusScope {
                 contentPlaceholder.forceActiveFocus()
             }
         } else if (currentView === "detail") {
+            _contentFocused = false   // don't fade in detail view
             if (selectedLibraryType === "movie") {
                 movieDetail.forceActiveFocus()
             } else if (selectedLibraryType === "show") {
@@ -419,6 +450,8 @@ FocusScope {
 
         anchors.fill: parent
         visible: watchScreen.currentView === "libraries"
+        opacity: watchScreen._contentFocused ? 0.3 : 1.0
+        Behavior on opacity { NumberAnimation { duration: 160 } }
 
         // Loading indicator — shown immediately after refresh() is called,
         // before any data has arrived.

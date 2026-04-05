@@ -49,6 +49,7 @@ FocusScope {
         { type: "select",  label: "User",              settingKey: "plexUser" },
         { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
         { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
+        { type: "toggle",  label: "Auto-Skip Intro",   settingKey: "autoSkipIntro" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
         { type: "header",  label: "Moonlight" },

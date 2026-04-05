@@ -477,6 +477,8 @@ class PlexLibrary(QObject):
     mpvStarted = Signal()
     mpvFinished = Signal()
     mpvPlaybackReady = Signal()  # emitted when first frame is ready (wait_until_playing)
+    markersReady = Signal(int)        # intro_end_ms (0 = no intro marker)
+    mpvPositionChanged = Signal(int)  # current MPV position in ms (push-based)
     streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
     watchHistoryReady = Signal(list)
     lyricsReady = Signal(str, list)       # (rating_key, lines) — lines is list of {ms, text} dicts
@@ -495,7 +497,8 @@ class PlexLibrary(QObject):
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
     _artistsReady = Signal(list, int)  # (artists, total_size)
-    _mpvLaunchReady = Signal(str, str, int, int, int)  # url, title, start_ms, duration_ms, part_id
+    _mpvLaunchReady = Signal(str, str, int, int, int, int)  # url, title, start_ms, duration_ms, part_id, intro_end_ms
+    _mpvPositionMs = Signal(int)  # internal: marshal time-pos from mpv thread to main thread
     _streamInfoReady = Signal(str, str, int)  # rating_key, url, view_offset_ms
     _lyricsReady = Signal(str, list)      # (rating_key, lines)
     _lyricsUnavailable = Signal(str)      # (rating_key)
@@ -578,6 +581,7 @@ class PlexLibrary(QObject):
         self._artistsReady.connect(self._on_artists_ready)
         self._mpvLaunchReady.connect(self._on_mpv_launch_ready, Qt.ConnectionType.QueuedConnection)
         self._streamInfoReady.connect(self._on_stream_info_ready, Qt.ConnectionType.QueuedConnection)
+        self._mpvPositionMs.connect(self.mpvPositionChanged)
         self._lyricsReady.connect(self.lyricsReady)
         self._lyricsUnavailable.connect(self.lyricsUnavailable)
         self._movieReady.connect(lambda rk, d: self.movieReady.emit(rk, d))
@@ -617,6 +621,12 @@ class PlexLibrary(QObject):
         self._mpv_launcher.set_wid(wid)
         self._mpv_launcher.observe_time_pos(self._timeline_reporter.update_position)
         self._mpv_launcher.observe_pause(self._timeline_reporter.update_paused)
+
+        def _on_time_pos(pos_seconds: float) -> None:
+            if pos_seconds is not None:
+                self._mpvPositionMs.emit(int(pos_seconds * 1000))
+
+        self._mpv_launcher.observe_time_pos(_on_time_pos)
 
     def shutdown(self) -> None:
         """Shut down thread pools. Call before application exit."""
@@ -1215,7 +1225,7 @@ class PlexLibrary(QObject):
         def _worker():
             url, _ = client.get_stream_url(rating_key)
             if not url:
-                self._mpvLaunchReady.emit("", "", 0, 0, 0)
+                self._mpvLaunchReady.emit("", "", 0, 0, 0, 0)
                 return
 
             # Replace long-lived token with a short-lived transient token
@@ -1225,7 +1235,7 @@ class PlexLibrary(QObject):
                 if main_token and main_token in url:
                     url = url.replace(main_token, transient)
 
-            meta = client.get_metadata(rating_key)
+            meta = client.get_metadata(rating_key, include_markers=True)
             title = meta.get("title", "")
             grandparent = meta.get("grandparentTitle", "")
             if grandparent:
@@ -1239,6 +1249,12 @@ class PlexLibrary(QObject):
                 parts = media[0].get("Part", [])
                 if parts:
                     part_id = int(parts[0].get("id", 0) or 0)
+            # Parse intro marker end time
+            intro_end_ms = 0
+            for marker in meta.get("Marker", []):
+                if marker.get("type") == "intro":
+                    intro_end_ms = int(marker.get("endTimeOffset", 0) or 0)
+                    break
             # Register play queue with server (enables Plex Companion + Up Next)
             play_queue_item_id = 0
             machine_id = self._machine_identifier  # already cached from identity fetch
@@ -1252,7 +1268,7 @@ class PlexLibrary(QObject):
                 logger.info("playWithMpv: playQueueItemID=%d", play_queue_item_id)
             self._pending_play_queue_item_id = play_queue_item_id
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
-            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id)
+            self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id, intro_end_ms)
         self._executor.submit(_worker)
 
     def _on_mpv_launch_ready(
@@ -1262,6 +1278,7 @@ class PlexLibrary(QObject):
         start_ms: int,
         duration_ms: int,
         part_id: int,
+        intro_end_ms: int = 0,
     ) -> None:
         """Launch MPV on the main thread after worker fetched stream info."""
         if not url:
@@ -1274,6 +1291,7 @@ class PlexLibrary(QObject):
         self._current_play_queue_item_id = self._pending_play_queue_item_id
         self._mpv_active = True
         self._mpv_launcher.launch(url, title, start_ms)
+        self.markersReady.emit(intro_end_ms)
 
     @Slot(str)
     def playWithMpvFromStart(self, rating_key: str) -> None:
@@ -1284,6 +1302,16 @@ class PlexLibrary(QObject):
     def stopMpv(self) -> None:
         """Stop MPV playback immediately. Safe to call when nothing is playing."""
         self._mpv_launcher.kill()
+
+    @Slot(int)
+    def seekMpv(self, position_ms: int) -> None:
+        """Seek MPV to an absolute position in milliseconds."""
+        if self._mpv_launcher._player is None:
+            return
+        try:
+            self._mpv_launcher._player.seek(position_ms / 1000.0, "absolute")
+        except Exception:  # noqa: BLE001
+            pass
 
     @Slot(str)
     def markPlayed(self, rating_key: str) -> None:
