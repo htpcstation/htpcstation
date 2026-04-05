@@ -125,6 +125,11 @@ FocusScope {
         onMediaStatusChanged: {
             if (mediaStatus === MediaPlayer.EndOfMedia) {
                 homeScreen._playNext()
+            } else if (mediaStatus === MediaPlayer.InvalidMedia) {
+                // Track failed to load — stop rather than silently skipping.
+                // The user can press Next manually.
+                console.warn("HomeScreen: track failed to load (InvalidMedia) —",
+                             homeScreen._nowPlayingTrack.title || "unknown")
             }
         }
     }
@@ -216,7 +221,7 @@ FocusScope {
     function _playPrev() {
         // If more than 3s into the track, restart it instead of going back
         if (musicPlayer.position > 3000 && _playingIndex >= 0) {
-            musicPlayer.seek(0)
+            musicPlayer.position = 0
             return
         }
         if (_playingIndex > 0) {
@@ -224,7 +229,7 @@ FocusScope {
         } else if (_repeatMode === "all" && _playOrder.length > 0) {
             _playTrackAtIndex(_playOrder.length - 1)
         } else {
-            musicPlayer.seek(0)
+            musicPlayer.position = 0
         }
     }
 
@@ -254,8 +259,12 @@ FocusScope {
 
     function _seekBy(deltaMs) {
         if (musicPlayer.duration <= 0) return
-        var target = Math.max(0, Math.min(musicPlayer.position + deltaMs, musicPlayer.duration))
-        musicPlayer.seek(target)
+        musicPlayer.position = Math.max(0, Math.min(musicPlayer.position + deltaMs, musicPlayer.duration))
+    }
+
+    function _seekTo(ms) {
+        if (musicPlayer.duration <= 0) return
+        musicPlayer.position = Math.max(0, Math.min(Math.round(ms), musicPlayer.duration))
     }
 
     function _formatDuration(ms) {

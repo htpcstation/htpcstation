@@ -52,7 +52,7 @@ os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
 #
 # _start_stderr_filter()
 
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QKeyEvent
 from PySide6.QtQml import QQmlApplicationEngine
 
@@ -181,6 +181,22 @@ def main() -> None:
         window.raise_()
         window.requestActivate()
 
+    def _show_window_after_mpv(*_args):
+        """Restore the Qt window after MPV closes.
+
+        On GNOME/Wayland with fullscreen=yes, MPV takes over the compositor
+        surface. When the WM closes it (Alt+F4), the underlying Qt surface is
+        also destroyed. We must force Qt to recreate the surface by hiding the
+        window first, then showing it fullscreen again after a short delay to
+        give Mutter time to process the surface destruction.
+        """
+        window.hide()
+        QTimer.singleShot(150, lambda: (
+            window.showFullScreen(),
+            window.raise_(),
+            window.requestActivate(),
+        ))
+
     launcher.processStarted.connect(_hide_window)
     launcher.processFinished.connect(_show_window)
     browser_launcher.processStarted.connect(_hide_window)
@@ -201,7 +217,7 @@ def main() -> None:
     # gamepad via SDL; injecting the same events into Qt causes double-handling.
     plex_library.mpvStarted.connect(lambda: gamepad_manager.setMpvActive(True))
     plex_library.mpvFinished.connect(lambda: gamepad_manager.setMpvActive(False))
-    plex_library.mpvFinished.connect(_show_window)
+    plex_library.mpvFinished.connect(_show_window_after_mpv)
 
     # Start+Select combo: kill the browser process (equivalent to Alt+F4).
     # The browser extension can't close kiosk windows via window.close(),
@@ -280,10 +296,21 @@ def main() -> None:
                 # spontaneous, injected events via sendEvent() are not.
                 if event.spontaneous():
                     keys.setKeyboardInput()
+            # Intercept Alt+F4 / WM close events on the main window while MPV is
+            # active. MPV renders into the Qt window surface — a WM close event
+            # would kill the entire app. Instead, stop MPV and let HTPC Station
+            # continue running.
+            if (event.type() == QEvent.Type.Close
+                    and obj is window
+                    and plex_library._mpv_launcher.is_running()):
+                event.ignore()
+                plex_library.stopMpv()
+                return True
             return False
 
     kb_detector = _KeyboardDetector(app)
     app.installEventFilter(kb_detector)
+    window.installEventFilter(kb_detector)
 
     # Gamepad manager — inject events into the root QML window and expose to QML
     gamepad_manager.window = window

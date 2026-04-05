@@ -50,6 +50,10 @@ FocusScope {
     // ratingKey of the show selected for detail view.
     property string selectedShowRatingKey: ""
 
+    // Where the show detail view was entered from — used by onBack to return
+    // to the correct origin view. Values: "show" | "mylist" | "ondeck" | ""
+    property string _showDetailOrigin: ""
+
     // Current view mode: "grid" or "list"
     property string _viewMode: "grid"
 
@@ -118,9 +122,12 @@ FocusScope {
 
     function _launchMpv(ratingKey, startMs) {
         _resumeDialogVisible = false
+        _mpvLaunched = true
+        _cancelledDuringLoad = false
         _isLoadingContent = true
         _loadingOverlayVisible = true
         loadingOverlayTimer.restart()
+        loadingTimeoutTimer.restart()
         plex.playWithMpv(ratingKey, startMs)
         // Overlay cleared by onMpvPlaybackReady → _clearLoading()
     }
@@ -130,9 +137,12 @@ FocusScope {
             plex.launchContent(ratingKey)
             return
         }
+        _mpvLaunched = false
+        _cancelledDuringLoad = false
         _isLoadingContent = true
         _loadingOverlayVisible = true
         loadingOverlayTimer.restart()
+        loadingTimeoutTimer.restart()
         plex.fetchStreamInfo(ratingKey, knownViewOffset || 0)
         // Response arrives via plex.streamInfoReady signal — handled in Connections below
     }
@@ -142,18 +152,45 @@ FocusScope {
     // timer do the hide; otherwise hide immediately.
     property bool _loadingHidePending: false
     function _clearLoading() {
+        if (_mpvLaunched) {
+            // MPV was already told to launch — stop it immediately so it never
+            // renders a frame. Also keep _cancelledDuringLoad set as a safety
+            // net in case onMpvPlaybackReady fires before the stop takes effect.
+            _cancelledDuringLoad = true
+            plex.stopMpv()
+        }
         _isLoadingContent = false
+        _mpvLaunched = false
+        loadingTimeoutTimer.stop()
         if (loadingOverlayTimer.running) {
             _loadingHidePending = true
         } else {
             _loadingOverlayVisible = false
             _loadingHidePending = false
         }
+        // Restore focus to the correct content item. Use a short delay so the
+        // overlay's focus binding updates before _routeFocus() runs — otherwise
+        // the overlay may still hold focus and swallow key events.
+        focusRestoreTimer.restart()
+    }
+
+    Timer {
+        id: focusRestoreTimer
+        interval: 50
+        onTriggered: {
+            if (!watchScreen._resumeDialogVisible)
+                watchScreen._routeFocus()
+        }
     }
 
     // Loading state for content playback
     property bool _isLoadingContent: false
     property bool _loadingOverlayVisible: false
+    // True from the moment plex.playWithMpv() is called until playback starts or is cancelled.
+    property bool _mpvLaunched: false
+    // Set when the user cancels after MPV was already launched — causes
+    // onMpvPlaybackReady to immediately stop playback instead of showing video.
+    property bool _cancelledDuringLoad: false
 
     // Toast text for My List add/remove notifications
     property string _toastText: ""
@@ -169,15 +206,67 @@ FocusScope {
         onTriggered: watchScreen._toastText = ""
     }
 
+    // Error banner — shown when plex.plexError fires
+    property string _errorMessage: ""
+    property bool _errorPersistent: false   // true = auth error, stays until dismissed
+
+    function _showPlexError(errorType) {
+        switch (errorType) {
+            case "auth":
+                _errorMessage = "Plex sign-in required — go to Settings to sign in"
+                _errorPersistent = true
+                break
+            case "server":
+                _errorMessage = "Plex server unavailable"
+                _errorPersistent = false
+                break
+            case "network":
+                _errorMessage = "Network error — check your connection"
+                _errorPersistent = false
+                break
+            case "not_found":
+                _errorMessage = "Content not found"
+                _errorPersistent = false
+                break
+            default:
+                _errorMessage = "An unexpected error occurred"
+                _errorPersistent = false
+                break
+        }
+        if (!_errorPersistent) errorBannerTimer.restart()
+    }
+
+    Timer {
+        id: errorBannerTimer
+        interval: 5000
+        onTriggered: watchScreen._errorMessage = ""
+    }
+
     Timer {
         id: loadingOverlayTimer
         interval: 400
         onTriggered: {
             // Minimum display time elapsed. Hide now if loading is done,
             // or if a hide was requested while the timer was still running.
+            // Do NOT hide while the resume dialog is visible — the overlay
+            // serves as its backdrop and should stay until the dialog closes.
+            if (watchScreen._resumeDialogVisible) return
             if (!watchScreen._isLoadingContent || watchScreen._loadingHidePending) {
                 watchScreen._loadingOverlayVisible = false
                 watchScreen._loadingHidePending = false
+            }
+        }
+    }
+
+    // 20s hard timeout — clears the overlay and shows an error if playback
+    // never started (e.g. server offline, stream URL bad, MPV hung).
+    Timer {
+        id: loadingTimeoutTimer
+        interval: 20000
+        onTriggered: {
+            if (watchScreen._isLoadingContent) {
+                watchScreen._clearLoading()
+                watchScreen._showPlexError("network")
             }
         }
     }
@@ -211,6 +300,41 @@ FocusScope {
             watchScreen._libraryEntries = watchScreen._getVideoLibraries()
             watchScreen._showMyListToast(added)
         }
+        function onMpvPlaybackReady() {
+            if (watchScreen._cancelledDuringLoad) {
+                watchScreen._cancelledDuringLoad = false
+                plex.stopMpv()
+                return
+            }
+            // Playback started successfully — clear the launch flag before
+            // calling _clearLoading() so it doesn't treat this as a cancel.
+            watchScreen._mpvLaunched = false
+            watchScreen._clearLoading()
+        }
+        function onMpvStarted() { /* keep for _mpvRunning flag in HomeScreen */ }
+        function onMpvFinished() {
+            // Ignore a finish event if a new launch is already in progress —
+            // this happens when the previous stop (from cancel or resume-dialog
+            // confirm) fires processFinished after the next playWithMpv has started.
+            if (watchScreen._mpvLaunched) return
+            watchScreen._clearLoading()
+        }
+        function onPlexError(errorType) { watchScreen._showPlexError(errorType) }
+        function onStreamInfoReady(ratingKey, url, viewOffsetMs) {
+            if (!watchScreen._isLoadingContent) return  // cancelled or stale
+            if (!url) {
+                watchScreen._clearLoading()
+                plex.launchContent(ratingKey)
+                return
+            }
+            if (viewOffsetMs > 0) {
+                watchScreen._clearLoading()
+                watchScreen._showResumeDialog(ratingKey, viewOffsetMs)
+            } else {
+                watchScreen._launchMpv(ratingKey, 0)
+                // _isLoadingContent / overlay cleared by onMpvPlaybackReady
+            }
+        }
     }
 
     // Connect liveTV signals for channel list updates and loading overlay.
@@ -222,7 +346,10 @@ FocusScope {
             // so any future count display can be wired up without structural changes.
         }
         function onMpvPlaybackReady() { watchScreen._clearLoading() }
-        function onMpvFinished()      { watchScreen._clearLoading() }
+        function onMpvFinished() {
+            if (watchScreen._mpvLaunched) return
+            watchScreen._clearLoading()
+        }
     }
 
     // Give focus to the appropriate child whenever the view changes or this
@@ -236,11 +363,18 @@ FocusScope {
                 _availabilityKnown = false
                 plex.refresh()
             }
+            if (_resumeDialogVisible) {
+                resumeDialog.forceActiveFocus()
+                return
+            }
             _routeFocus()
         }
     }
 
     function _routeFocus() {
+        // Never steal focus from modal overlays.
+        if (_resumeDialogVisible) { resumeDialog.forceActiveFocus(); return }
+        if (_loadingOverlayVisible) { loadingOverlay.forceActiveFocus(); return }
         if (currentView === "libraries") {
             libraryList.forceActiveFocus()
         } else if (currentView === "content") {
@@ -585,6 +719,7 @@ FocusScope {
             mem["show"] = showGrid.currentIndex
             watchScreen._focusMemory = mem
             watchScreen.selectedShowRatingKey = ratingKey
+            watchScreen._showDetailOrigin = "show"
             watchScreen.currentView = "detail"
         }
 
@@ -607,12 +742,25 @@ FocusScope {
         showRatingKey: watchScreen.selectedShowRatingKey
 
         onBack: {
-            var savedIdx = watchScreen._focusMemory["show"]
-            watchScreen.currentView = "content"
-            if (savedIdx !== undefined) {
-                if (watchScreen._viewMode === "list") showList.currentIndex = savedIdx
-                else showGrid.currentIndex = savedIdx
+            var origin = watchScreen._showDetailOrigin
+            if (origin === "mylist") {
+                watchScreen.selectedLibraryType = "mylist"
+                watchScreen.currentView = "content"
+                var myIdx = watchScreen._focusMemory["mylist"]
+                if (myIdx !== undefined) {
+                    if (watchScreen._viewMode === "list") myListListView.currentIndex = myIdx
+                    else myListGridView.currentIndex = myIdx
+                }
+            } else {
+                // "show" or any other origin — restore show grid/list
+                watchScreen.currentView = "content"
+                var showIdx = watchScreen._focusMemory["show"]
+                if (showIdx !== undefined) {
+                    if (watchScreen._viewMode === "list") showList.currentIndex = showIdx
+                    else showGrid.currentIndex = showIdx
+                }
             }
+            watchScreen._showDetailOrigin = ""
         }
 
         onPlayEpisode: (ratingKey) => {
@@ -688,6 +836,7 @@ FocusScope {
             mem["show"] = showList.currentIndex
             watchScreen._focusMemory = mem
             watchScreen.selectedShowRatingKey = ratingKey
+            watchScreen._showDetailOrigin = "show"
             watchScreen.currentView = "detail"
         }
 
@@ -728,7 +877,11 @@ FocusScope {
         onItemSelected: (ratingKey) => {
             var itemType = plex.getMyListItemType(ratingKey)
             if (itemType === "show") {
+                var mem = watchScreen._focusMemory
+                mem["mylist"] = myListGridView.currentIndex
+                watchScreen._focusMemory = mem
                 watchScreen.selectedShowRatingKey = ratingKey
+                watchScreen._showDetailOrigin = "mylist"
                 watchScreen.selectedLibraryType = "show"
                 watchScreen.currentView = "detail"
             } else {
@@ -755,7 +908,11 @@ FocusScope {
         onItemSelected: (ratingKey) => {
             var itemType = plex.getMyListItemType(ratingKey)
             if (itemType === "show") {
+                var mem = watchScreen._focusMemory
+                mem["mylist"] = myListListView.currentIndex
+                watchScreen._focusMemory = mem
                 watchScreen.selectedShowRatingKey = ratingKey
+                watchScreen._showDetailOrigin = "mylist"
                 watchScreen.selectedLibraryType = "show"
                 watchScreen.currentView = "detail"
             } else {
@@ -780,6 +937,7 @@ FocusScope {
             watchScreen._isLoadingContent = true
             watchScreen._loadingOverlayVisible = true
             loadingOverlayTimer.restart()
+            loadingTimeoutTimer.restart()
         }
     }
 
@@ -843,6 +1001,9 @@ FocusScope {
                 resumeDialog._focusedButton = resumeDialog._focusedButton === 0 ? 1 : 0
             } else if (keys.isAccept(event)) {
                 event.accepted = true
+                watchScreen._resumeDialogVisible = false
+                // Keep _loadingOverlayVisible = true — the backdrop transitions
+                // seamlessly into the loading overlay while MPV buffers.
                 if (resumeDialog._focusedButton === 0) {
                     watchScreen._launchMpv(watchScreen._resumeRatingKey, watchScreen._resumeViewOffset)
                 } else {
@@ -851,6 +1012,7 @@ FocusScope {
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 watchScreen._resumeDialogVisible = false
+                watchScreen._loadingOverlayVisible = false
                 // Restore previously focused index from per-section memory
                 // (set suppress flag to prevent onActiveFocusChanged reset for ondeck/mylist)
                 if (watchScreen.currentView === "content") {
@@ -954,39 +1116,74 @@ FocusScope {
     }
 
     // ── MPV playback handlers ─────────────────────────────────────────────────
-    Connections {
-        target: plex
-        function onMpvPlaybackReady() { watchScreen._clearLoading() }
-        function onMpvStarted() { /* keep for _mpvRunning flag in HomeScreen */ }
-        function onMpvFinished() { watchScreen._clearLoading() }
-    }
+    // ── Error banner ──────────────────────────────────────────────────────────
+    Rectangle {
+        id: errorBanner
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.vpx(44)
+        color: watchScreen._errorPersistent ? Theme.colorAccentNegative || "#8B1A1A"
+                                            : Qt.darker(Theme.colorSecondary, 1.4)
+        visible: watchScreen._errorMessage !== ""
+        z: 160
 
-    // ── Stream info ready handler — async response from fetchStreamInfo ──────
-    Connections {
-        target: plex
-        function onStreamInfoReady(ratingKey, url, viewOffsetMs) {
-            if (!watchScreen._isLoadingContent) return  // cancelled or stale
-            if (!url) {
-                watchScreen._clearLoading()
-                plex.launchContent(ratingKey)
-                return
+        Row {
+            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            spacing: root.vpx(12)
+
+            Text {
+                text: watchScreen._errorPersistent ? "⚠" : "ℹ"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                anchors.verticalCenter: parent.verticalCenter
             }
-            if (viewOffsetMs > 0) {
-                watchScreen._clearLoading()
-                watchScreen._showResumeDialog(ratingKey, viewOffsetMs)
-            } else {
-                watchScreen._launchMpv(ratingKey, 0)
-                // _isLoadingContent / overlay cleared by onMpvPlaybackReady
+
+            Text {
+                text: watchScreen._errorMessage
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                visible: watchScreen._errorPersistent
+                text: "  [Settings →]"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        // Dismiss on any key press for persistent errors
+        Keys.onPressed: (event) => {
+            if (watchScreen._errorPersistent) {
+                watchScreen._errorMessage = ""
+                event.accepted = true
             }
         }
     }
 
     // ── Loading overlay ───────────────────────────────────────────────────────
     Rectangle {
+        id: loadingOverlay
         anchors.fill: parent
         color: Theme.colorOverlay
         visible: watchScreen._loadingOverlayVisible
         z: 150
+
+        onVisibleChanged: {
+            if (visible) forceActiveFocus()
+            // Focus restoration on hide is handled by focusRestoreTimer in _clearLoading()
+        }
+
+        Keys.onPressed: (event) => {
+            if (keys.isCancel(event)) {
+                event.accepted = true
+                watchScreen._clearLoading()
+            }
+        }
 
         Column {
             anchors.centerIn: parent
@@ -998,6 +1195,17 @@ FocusScope {
                 color: Theme.colorOverlayText
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: keys.useGamepadLabels
+                    ? "[" + keys.cancelLabel + "] Cancel"
+                    : "[Esc] Cancel"
+                color: Theme.colorOverlayText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                opacity: 0.6
             }
         }
     }

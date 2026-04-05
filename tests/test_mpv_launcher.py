@@ -217,19 +217,30 @@ class TestLibMpvPlayerLaunch:
 
 
 class TestLibMpvPlayerKill:
-    def test_kill_calls_stop(self) -> None:
-        """kill() calls _player.stop() when player is initialised."""
+    def test_kill_sets_cancel_flag_and_dispatches_stop(self) -> None:
+        """kill() sets _cancel_requested and dispatches player.stop() off-thread."""
         from backend.mpv_launcher import LibMpvPlayer
 
         mock_instance = _make_mock_mpv_instance()
+        started_targets: list = []
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None):
+                started_targets.append(target)
+            def start(self):
+                # Actually call the target so stop() is invoked
+                started_targets[-1]()
 
         with patch("backend.mpv_launcher.mpv") as mock_mpv_module, \
-             patch("backend.mpv_launcher.threading"):
+             patch("backend.mpv_launcher.threading") as mock_threading:
+            mock_threading.Thread.side_effect = FakeThread
+            mock_threading.Event.return_value = __import__("threading").Event()
             mock_mpv_module.MPV.return_value = mock_instance
             player = LibMpvPlayer()
             player.set_wid(123)
             player.kill()
 
+        assert player._cancel_requested.is_set()
         mock_instance.stop.assert_called_once()
 
     def test_kill_noop_when_no_player(self) -> None:

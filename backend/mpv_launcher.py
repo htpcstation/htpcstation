@@ -58,6 +58,7 @@ class LibMpvPlayer(QObject):
         super().__init__(parent)
         self._player: Optional[mpv.MPV] = None
         self._is_live_tv: bool = False
+        self._cancel_requested = threading.Event()
 
     # ------------------------------------------------------------------
     # Public API
@@ -158,6 +159,11 @@ class LibMpvPlayer(QObject):
         # pause=yes default; force it off before loading the new file.
         self._player.pause = False
 
+        self._cancel_requested.clear()
+        # Suppress video output during buffering so a cancel during load never
+        # shows a flash. Video is re-enabled in _wait_and_signal once we confirm
+        # the user has not cancelled.
+        self._player["vid"] = "no"
         self._player.play(url)
 
         # Wait for playback to start on a daemon thread, then signal main thread
@@ -165,7 +171,23 @@ class LibMpvPlayer(QObject):
             try:
                 self._player.wait_until_playing(timeout=30)
             except Exception:  # noqa: BLE001
-                return  # stopped/quit before playing — do not emit started signals
+                # Timed out or stopped before first frame — clear the loading overlay.
+                self._player["vid"] = "auto"
+                if self.is_running():
+                    QMetaObject.invokeMethod(
+                        self,
+                        "_emit_finished",
+                        Qt.ConnectionType.QueuedConnection,
+                    )
+                return
+            # If cancel was requested while we were waiting, stop without
+            # revealing video — the player will fire end_file which emits
+            # processFinished to clean up the loading state.
+            if self._cancel_requested.is_set():
+                self._player.stop()
+                return
+            # Re-enable video now that we know the user wants to watch.
+            self._player["vid"] = "auto"
             QMetaObject.invokeMethod(
                 self,
                 "_on_playback_started",
@@ -213,13 +235,20 @@ class LibMpvPlayer(QObject):
         # Ensure playback starts in play state.
         self._player.pause = False
 
+        self._cancel_requested.clear()
+        self._player["vid"] = "no"
         self._player.play(url)
 
         def _wait_and_signal() -> None:
             try:
                 self._player.wait_until_playing(timeout=30)
             except Exception:  # noqa: BLE001
+                self._player["vid"] = "auto"
                 return  # stopped before playing — do not emit started signals
+            if self._cancel_requested.is_set():
+                self._player.stop()
+                return
+            self._player["vid"] = "auto"
             QMetaObject.invokeMethod(
                 self,
                 "_on_playback_started",
@@ -235,11 +264,19 @@ class LibMpvPlayer(QObject):
         t.start()
 
     def kill(self) -> None:
-        """Stop playback."""
+        """Stop playback.
+
+        Sets the cancel flag immediately (so _wait_and_signal won't emit
+        playback-started) then dispatches the actual stop off the main thread
+        to avoid blocking Qt while MPV processes the command.
+        """
         if self._player is None:
             return
         logger.info("LibMpvPlayer: stopping playback")
-        self._player.stop()
+        self._cancel_requested.set()
+        player = self._player
+        t = threading.Thread(target=player.stop, daemon=True)
+        t.start()
 
     def observe_time_pos(self, callback: Callable[[float], None]) -> None:
         """Register a callback for time-pos changes. Called from mpv event thread."""

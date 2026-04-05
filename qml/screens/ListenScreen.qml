@@ -1309,12 +1309,15 @@ FocusScope {
                 // Spacer
                 Item { width: 1; height: root.vpx(8) }
 
-                // ── Progress bar (focusable — Left/Right seek ±10s, LB/RB ±30s) ──
-                FocusScope {
+                // ── Progress bar — keyboard seek ±10s/±30s, mouse click/drag ──
+                Item {
                     id: progressBar
                     width: parent.width
                     height: root.vpx(20)   // taller hit area; bar drawn inside
 
+                    // Must be explicitly focusable — plain Item does not receive
+                    // key events unless focus: true is set directly on it.
+                    focus: true
                     KeyNavigation.up: btnPlayPause
 
                     Keys.onPressed: (event) => {
@@ -1335,6 +1338,7 @@ FocusScope {
 
                     // Bar track
                     Rectangle {
+                        id: barTrack
                         anchors.verticalCenter: parent.verticalCenter
                         width: parent.width
                         height: progressBar.activeFocus ? root.vpx(8) : root.vpx(6)
@@ -1353,9 +1357,10 @@ FocusScope {
                             radius: parent.radius
                         }
 
-                        // Thumb — visible only when focused
+                        // Thumb — visible when focused or hovered
                         Rectangle {
-                            visible: progressBar.activeFocus && homeScreen.musicDuration > 0
+                            visible: (progressBar.activeFocus || seekArea.containsMouse)
+                                     && homeScreen.musicDuration > 0
                             x: homeScreen.musicDuration > 0
                                 ? parent.width * (homeScreen.musicPosition / homeScreen.musicDuration) - width / 2
                                 : 0
@@ -1364,6 +1369,28 @@ FocusScope {
                             height: root.vpx(14)
                             radius: width / 2
                             color: Theme.colorPrimary
+                        }
+                    }
+
+                    // Mouse drag — covers the full hit area (not just the thin bar)
+                    MouseArea {
+                        id: seekArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+
+                        function seekToMouse(mouseX) {
+                            if (homeScreen.musicDuration <= 0) return
+                            var ratio = Math.max(0, Math.min(1, mouseX / width))
+                            homeScreen._seekTo(ratio * homeScreen.musicDuration)
+                        }
+
+                        onPressed: (mouse) => {
+                            progressBar.forceActiveFocus()
+                            seekToMouse(mouse.x)
+                        }
+                        onPositionChanged: (mouse) => {
+                            if (pressed) seekToMouse(mouse.x)
                         }
                     }
                 }

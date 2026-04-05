@@ -1170,7 +1170,7 @@ class PlexLibrary(QObject):
         def _worker():
             url, _ = client.get_stream_url(rating_key)
             if not url:
-                self._mpvLaunchReady.emit("", "", 0, 0, 0, 0, 0, 0)
+                self._mpvLaunchReady.emit("", "", 0, 0, 0)
                 return
 
             # Replace long-lived token with a short-lived transient token
@@ -1233,6 +1233,11 @@ class PlexLibrary(QObject):
     def playWithMpvFromStart(self, rating_key: str) -> None:
         """Launch MPV from the beginning (no resume). Convenience slot for QML."""
         self.playWithMpv(rating_key, 0)
+
+    @Slot()
+    def stopMpv(self) -> None:
+        """Stop MPV playback immediately. Safe to call when nothing is playing."""
+        self._mpv_launcher.kill()
 
     @Slot(str)
     def markPlayed(self, rating_key: str) -> None:
@@ -2061,9 +2066,12 @@ class PlexLibrary(QObject):
     def _save_my_list(self, items: list[dict]) -> None:
         """Persist My List items to the JSON file."""
         path = CONFIG_DIR / "plex_mylist.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w") as f:
-            json.dump(items, f, indent=2)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(items, f, indent=2)
+        except OSError as exc:
+            logger.warning("_save_my_list: could not write %s: %s", path, exc)
 
     def _rebuild_my_list_model(self, items: list[dict]) -> None:
         """Convert the JSON list to the PlexOnDeckModel item shape and update the model."""
@@ -2083,7 +2091,7 @@ class PlexLibrary(QObject):
 
     def _artists_cache_path(self) -> Path:
         """Return the path to the artist list cache file, scoped by section key."""
-        cache_dir = Path.home() / ".config" / "htpcstation" / "poster_cache"
+        cache_dir = CONFIG_DIR / "poster_cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
         section_key = self._current_section_key or "default"
         return cache_dir / f"artists_cache_{section_key}.json"

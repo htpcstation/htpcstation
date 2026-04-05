@@ -359,7 +359,9 @@ class Config:
 
     def set_plex_player(self, player: str) -> None:
         """Set the Plex player and persist the config."""
-        assert player in ("mpv", "browser")
+        if player not in ("mpv", "browser"):
+            logger.warning("set_plex_player: invalid value %r — ignored", player)
+            return
         self._plex_player = player
         self.save()
 
@@ -606,7 +608,11 @@ class Config:
 
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
-        ensure_config_dir()
+        try:
+            ensure_config_dir()
+        except OSError as exc:
+            logger.warning("Config.save: could not create config dir %s: %s", CONFIG_DIR, exc)
+            return
         data: dict = {
             "rom_directory": str(self.rom_directory) if self.rom_directory else "",
             "retroarch": {
@@ -663,7 +669,10 @@ class Config:
                 "show_listen": self._show_listen_tab,
             },
         }
-        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        try:
+            CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Config.save: could not write %s: %s", CONFIG_FILE, exc)
 
     # ------------------------------------------------------------------
     # Internal helpers

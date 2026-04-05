@@ -4,29 +4,39 @@ Generated from a full codebase audit. Grouped into batches by priority.
 
 ---
 
-## Batch 1 — Crashes and stuck UI (fix first)
+## Batch 1 — Crashes and stuck UI ✅ Done
 
-| ID | File | Line(s) | Issue |
-|----|------|---------|-------|
-| C1 | `plex_library.py` | 1173 | `_mpvLaunchReady.emit()` passes 8 args to 5-arg signal — crashes on no-stream-URL path |
-| C3 | `config.py` | 362 | `assert` in `set_plex_player` removed by `-O` — invalid value silently persists |
-| C4 | `plex_library.py` | 2063–2066 | `_save_my_list` has no `try/except` — unhandled `OSError` on main thread |
-| M1 | `mpv_launcher.py` | 163–178 | `wait_until_playing` timeout leaves loading overlay stuck forever — emit `processFinished` on timeout |
-| M3 | `HomeScreen.qml` | 125–129 | `EndOfMedia` fires on failed load — bad URL auto-advances silently through queue |
-| H6 | `plex_library.py` | 2086 | `_artists_cache_path` hardcodes `~/.config/htpcstation` instead of `CONFIG_DIR` |
-| M9 | `config.py` | 666 | `save()` has no `OSError` handling — crash on read-only filesystem |
+| ID | File | Issue |
+|----|------|-------|
+| C1 | `plex_library.py` | `_mpvLaunchReady.emit()` fixed: 8 args → 5 |
+| C3 | `config.py` | `assert` → guard + warning in `set_plex_player` |
+| C4 | `plex_library.py` | `_save_my_list` wrapped in `try/except OSError` |
+| M1 | `mpv_launcher.py` | timeout path emits `_emit_finished` so overlay clears |
+| M3 | `HomeScreen.qml` | `InvalidMedia` handled separately — no silent auto-advance |
+| H6 | `plex_library.py` | `_artists_cache_path` uses `CONFIG_DIR` |
+| M9 | `config.py` | `config.save()` wrapped in `try/except OSError` |
 
 ---
 
-## Batch 2 — Visible UX bugs
+## Batch 2 — Visible UX bugs ✅ Done
 
-| ID | File | Line(s) | Issue |
-|----|------|---------|-------|
-| H7 | QML (none) | — | `plex.plexError` signal never connected in QML — auth errors silent to user |
-| H8 | `WatchScreen.qml` | 609–616, 730–733 | B from show detail (entered via My List) drops user into empty show grid |
-| M7 | `ListenScreen.qml` | 1318 | Progress bar `KeyNavigation.down` dead end |
-| M5 | `ListenScreen.qml` | 1539 | `recentAlbumsList` missing Up-at-top → back escape |
-| H4 | `WatchScreen.qml` | 205–226, 957–982 | `onMpvPlaybackReady`/`onMpvFinished` connected twice — fragile double-call |
+| ID | File | Issue |
+|----|------|-------|
+| H7 | `WatchScreen.qml` | `plex.plexError` wired to error banner (auto-dismiss 5s; auth = persistent) |
+| H8 | `WatchScreen.qml` | `_showDetailOrigin` tracks entry point; B from show detail returns to correct view |
+| M7 | — | Dropped — no loop-back is correct UX |
+| M5 | — | Dropped — no Up-escape is correct UX for Listen submenus |
+| H4 | `WatchScreen.qml` | Three `target: plex` Connections blocks merged into one |
+
+**Additional fixes in this batch:**
+- Loading overlay: 20s hard timeout, B to cancel, `_mpvLaunched` / `_cancelledDuringLoad` flags prevent video playing after cancel
+- `vid = "no"` during buffering prevents flash on cancel
+- `kill()` non-blocking (dispatches `player.stop()` off-thread)
+- `focusRestoreTimer` + `_routeFocus()` guards prevent focus loss after overlay hides
+- Resume dialog: overlay stays as backdrop; `loadingOverlayTimer` skips hide while dialog visible
+- My List → show detail → B: returns to My List with saved focus index
+- Alt+F4 during MPV (GNOME/Wayland): `_show_window_after_mpv` hides + recreates Qt surface after 150ms
+- Seek bar: `MediaPlayer.position =` (not `.seek()`); `Item` with `focus: true` (not `FocusScope`); mouse drag via `MouseArea`
 
 ---
 
