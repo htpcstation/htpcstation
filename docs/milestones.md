@@ -41,15 +41,24 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 
 ---
 
-## M6 — RetroArch hotkey configuration (V1) ✅ Done (CP30)
+## M6 — RetroArch hotkey configuration (V1) ✅ Done (CP30) — V2 ✅ Done (CP32)
 
-- `backend/retroarch_config.py`: `EVDEV_TO_SDL` table (8BitDo Micro D-input), `read_cfg`/`write_cfg` (flat INI, preserves existing keys), `build_hotkey_cfg` (10 hotkeys + `input_enable_hotkey_btn`, None→"nul")
-- `RetroarchHotkeysScreen.qml`: modifier row + 10 read-only hotkey rows + Apply button. Accessible from Settings → RetroArch section.
-- `ModifierCaptureDialog.qml`: raw mode capture (evdev `rawInput` signal), 10s timeout, all exit paths stop raw mode. Home button (BTN_MODE/316) confirmed working on 8BitDo Micro D-input.
-- Hotkey mapping derived from controller mapping on first run; stored as explicit dict in config for V2 per-row overrides without schema change.
-- `hotkey_modifier_evdev`, `hotkey_mapping`, `retroarch_cfg_path` persisted under `retroarch` section in config.json.
+**V1 (CP30):**
+- `backend/retroarch_config.py`: `read_cfg`/`write_cfg`, `build_hotkey_cfg`
+- `RetroarchHotkeysScreen.qml`: modifier row + read-only hotkey rows + Apply button
+- `ModifierCaptureDialog.qml`: raw mode capture, 10s timeout
 
-**V2 scope (deferred):** per-row hotkey overrides, rewind settings, per-system cfg overrides.
+**V2 (CP32):**
+- All 12 hotkey rows interactive: tap to assign, hold 3s to clear (uses release events — raw mode now emits `value=0`)
+- 12 hotkeys: Save/Load State, Fast Forward (Toggle/Hold), Rewind, Open Menu, Screenshot, Show FPS, Next/Prev Save Slot, Pause Toggle, Exit Emulator
+- `HOTKEY_CFG_KEYS` triple keys per action (`_btn`/`_axis`/`_hat`); `build_hotkey_cfg` writes correct key type from SDL record
+- Rewind settings: enable/disable, buffer size (20–500 MB), granularity (1–32 frames) — cycle rows in screen, written to retroarch.cfg on Apply
+- Duplicate button prevention across modifier and all hotkey rows
+- Face button labels honour standard/alternate layout with cardinal positions (e.g. "A (East)", "X (North)")
+- `hotkey_modifier_sdl`, `hotkey_modifier_evdev`, `hotkey_mapping` (SDL record dicts), `rewind_*` persisted in config.json
+- Toast warning if controller mapping wizard hasn't been run before hotkey assignment
+
+**V3 scope (deferred):** per-system cfg overrides (shader, integer scaling, etc.).
 
 ---
 
@@ -83,19 +92,18 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 
 ---
 
-## M8 — Dual-record input mapping (evdev + SDL)
+## M8 — Dual-record input mapping (evdev + SDL) ✅ Done (CP32) — M8-A/B/C/D
 
 **What:** Extend the controller mapping system to record both evdev and SDL representations of every input simultaneously. Each consumer reads the half it needs — evdev for HTPC Station Qt key injection and in-process MPV, SDL for RetroArch config and the browser gamepad extension. This makes hotkey assignment and controller mapping work correctly for any device in the SDL GameControllerDB — XInput, Switch Pro Controller, DualSense, etc.
 
-**Why now:** The current evdev→SDL translation is hardcoded for the 8BitDo Micro D-input via `EVDEV_TO_SDL`. D-pad and trigger hotkey assignment are blocked on this. The controller mapping wizard has the same limitation. The fix is to record SDL indices at capture time (when the device is connected and queryable) rather than translating at apply time via a static table.
+**Architecture (as shipped):**
 
-**Architecture:**
-
-Each mapping entry changes from a single evdev record to a dual record:
+Each mapping entry stores a dual record:
 ```json
 {
   "evdev": {"type": "axis", "code": 17, "value": -1},
-  "sdl":   {"type": "hat",  "hat": 0,   "dir": "up"}
+  "sdl":   {"type": "hat",  "sdl_hat": 0, "dir": "up"},
+  "also":  []
 }
 ```
 
@@ -108,33 +116,16 @@ Consumer routing:
 | `build_web_gamepad_mapping()` → browser extension | `sdl` half | Web Gamepad API uses SDL indices |
 | Hotkey modifier (`input_enable_hotkey_btn`) | `sdl` half only | RetroArch concept; HTPC launcher never uses it |
 
-**Scope:**
+**What shipped (M8-A through M8-D):**
 
-- **M8-A: SDL resolver** — `backend/sdl_resolver.py`. ctypes wrapper that locates and loads the SDL library at runtime (see SDL library caveats below). Given a connected evdev device, opens the matching SDL joystick (matched by name/GUID), enumerates its buttons/axes/hats, and resolves an evdev event `(type, code, value)` to an SDL record `{"type": "button"|"axis"|"hat", ...}`. The GameControllerDB is compiled into the SDL library — no local cache or network fetch needed. Lifecycle: open on `GamepadManager.startRawMode()`, close on `stopRawMode()`. Graceful fallback (returns `None`) if SDL unavailable, no device connected, or device not in SDL database.
+- **M8-A (CP32):** `backend/sdl_resolver.py` — ctypes wrapper, probes `libSDL2-2.0.so.0` → `libSDL2-2.0.so` → `libSDL2.so` → `libSDL3.so.0` → `libSDL3.so` at import. `SdlResolver.open()` opens the matching SDL joystick by name, enumerates axes/buttons/hats via `SDL_GameControllerGetBindFor*` API, builds internal lookup tables. `resolve(evtype, code, value)` returns SDL record dict. `seed_from_controller_mapping()` populates a primary lookup from the saved mapping (source of truth). Lifecycle: `open()` on `startRawMode()`, `close()` on `stopRawMode()`. Module-level singleton `resolver`.
+- **M8-B (CP32):** Dual-record controller mapping. `DEFAULT_MAPPING` updated to `{"evdev": {...}, "sdl": None}` format. `load_mapping()` migrates old single-record format on load. `saveControllerMapping()` resolves SDL records at save time (before `stopRawMode()`). Co-firing `also` array records simultaneous events from dual-reporting devices (D-input triggers fire axis + button simultaneously). `build_evdev_lookup()` reads only the `evdev` half. `build_web_gamepad_mapping()` reads only the `sdl` half.
+- **M8-C (CP32):** Dual-record hotkey assignment. `HOTKEY_CFG_KEYS` has triple keys per action (`_btn`/`_axis`/`_hat`). `build_hotkey_cfg()` writes the correct key type from the SDL record type. `setHotkeyModifier()` and `setHotkeyActionByEvdev/ByAxis()` resolve SDL records via `SdlResolver`. Duplicate prevention via `_store_hotkey_sdl()` eviction. Face button labels honour standard/alternate layout with cardinal positions (e.g. "A (East)", "X (North)").
+- **M8-D (CP32):** Controller mapping wizard improvements. Start+Select combo cancel. `getControllerActionEvdevCodes()` slot. Cancel hint adapts to gamepad vs keyboard input source (`keys.useGamepadLabels`). Hold-to-skip: stores pending event on press, records on release if timer still running; fires skip if held 3s. **Known issue (fix pending):** for dual-reporting inputs (D-input triggers fire axis event first, then button event), the button event hits the `else` branch and calls `_recordInput` immediately instead of waiting for release. Fix: button events arriving while `_holdSkipCode !== -1` should be ignored.
 
-**Effort:** Large (7–9 tasks).
+**Existing saved mappings** (evdev-only format) are migrated transparently on load.
 
-**Caveats:**
-
-- **SDL library portability — must work on any distro.** The SDL library name and location vary:
-  - Fedora 43: `sdl2-compat` (SDL2 API shim over SDL3) at `/usr/lib64/libSDL2-2.0.so.0`
-  - Ubuntu/Debian: real `libSDL2-2.0.so.0` from `libsdl2-2.0-0` package
-  - Arch: SDL3 natively (`libSDL3.so.0`); SDL2 available separately
-  - The resolver must probe a candidate list in order: `libSDL2-2.0.so.0`, `libSDL2-2.0.so`, `libSDL2.so`, `libSDL3.so.0`, `libSDL3.so`. Load the first one that works via `ctypes.CDLL`. If none found, log a warning and operate in evdev-only mode (SDL half = `null` for all inputs).
-  - `sdl2-compat` on Fedora is a drop-in SDL2 API replacement — function signatures are identical. Smoke-test during M8-A to confirm no edge cases.
-  - The GameControllerDB is compiled into whichever SDL library is loaded — no distro ships it as a separate file. No local cache or network fetch needed on any distro.
-
-- **SDL init:** Initialise with `SDL_INIT_JOYSTICK` only. PySide6 does not use SDL on Linux — no conflict. Call `SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")` so SDL receives events while the Qt window has focus.
-
-- **SDL joystick matching:** Prefer GUID match against the connected evdev device; fall back to name match; fall back to first joystick if only one is connected.
-
-- **Fallback when SDL can't resolve:** Store `"sdl": null`. Consumers that need SDL write `nul` to retroarch.cfg and show `"Button <N>"` label. The evdev half is always recorded regardless.
-
-- **Existing saved mappings** (evdev-only format) are migrated on load: wrap the existing record as the `evdev` half, set `sdl` to `null`. No data loss.
-
-- Per-system cfg overrides remain deferred until after M8-C.
-
-**Unblocks:** D-pad and trigger hotkey assignment. XInput support. Switch Pro Controller support.
+**Unblocked:** D-pad and trigger hotkey assignment. XInput support (future). Switch Pro Controller support (future).
 
 ---
 
@@ -180,5 +171,5 @@ Consumer routing:
 | UI Refresh 4b/4c — token replacement + theme switcher | High blast radius; do after tab restructure is stable |
 | Plex search | New navigation flow |
 | Moonlight rich metadata | Deferred from original roadmap |
-| XInput controller support | Blocked on M8 |
-| Switch Pro Controller support | Blocked on M8 |
+| XInput controller support | M8 done — needs real-device test + any per-device quirk fixes |
+| Switch Pro Controller support | M8 done — needs real-device test + any per-device quirk fixes |

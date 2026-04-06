@@ -19,8 +19,17 @@ htpcstation/
     browser_launcher.py                # Brave kiosk launcher, dedicated user-data-dir, extension deploy
     config.py                          # JSON config, ~130 system defaults (all Knulli/Batocera folders),
                                        # all setters auto-save
-    controller_mapping.py              # Controller mapping config: load/save, default mapping, evdev lookup
-    gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode
+    controller_mapping.py              # Controller mapping config: load/save, dual-record format,
+                                       # build_evdev_lookup(), build_web_gamepad_mapping(),
+                                       # generate_mapping_js()
+    gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode,
+                                       # startRawMode/stopRawMode (opens/closes SdlResolver),
+                                       # getDeviceCapabilities(), setMpvActive()
+    sdl_resolver.py                    # SdlResolver: ctypes SDL wrapper, probes libSDL2/libSDL3 at
+                                       # import, opens SDL joystick on startRawMode, resolves evdev
+                                       # events to SDL records via GameControllerDB (compiled into SDL).
+                                       # seed_from_controller_mapping() builds primary lookup from saved
+                                       # mapping. Module-level singleton: resolver.
     gamelist.py                        # gamelist.xml parser, write_game_stats()
     keys.py                            # Semantic key abstraction, input source tracking, button layout
     launcher.py                        # QProcess emulator launcher, async signal-based start
@@ -53,8 +62,12 @@ htpcstation/
     plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode, PlexArtist,
                                        # PlexAlbum, PlexTrack dataclasses
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
+    retroarch_config.py                # read_cfg/write_cfg, HOTKEY_CFG_KEYS (triple keys per action:
+                                       # _btn/_axis/_hat), build_hotkey_cfg() writes correct key type
+                                       # from SDL record type (button/axis/hat)
     settings_manager.py                # SettingsManager QObject: wraps Config for QML, OAuth,
-                                       # plexPlayer toggle (mpv/browser)
+                                        # plexPlayer toggle (mpv/browser), RetroArch hotkey slots,
+                                        # controller mapping slots, SDL record label resolution
     steam_config.py                    # Shared Steam directory helper (~/.config/htpcstation/steam/)
     steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played,
                                        # metadata fetch, favorites. GOG-ready source list model.
@@ -122,7 +135,13 @@ htpcstation/
       MpvSubtitleOverlay.qml           # Always-on-top Window for subtitle track selection during MPV
       MpvSkipIntroOverlay.qml          # Always-on-top Window for skip intro button (bottom-right)
       ListenScreen.qml                 # Plex Music: menu, artists, albums, tracks, now playing
-      ControllerMappingDialog.qml
+      ControllerMappingDialog.qml       # Full-screen wizard: 14 inputs, raw mode, co-firing collection,
+                                        # hold-to-skip (skippable actions), Start+Select cancel,
+                                        # auto-save on completion
+      ModifierCaptureDialog.qml        # Modal overlay: capture one button/axis for hotkey modifier or
+                                        # hotkey action; tap to assign, hold 3s to clear; 10s timeout
+      RetroarchHotkeysScreen.qml       # Modifier row + 12 interactive hotkey rows + rewind settings +
+                                        # Apply button; warns if mapping wizard not yet run
       SystemCoresScreen.qml            # Per-system RetroArch core editor
       SettingsScreen.qml               # 7-section settings menu, Video Player toggle (MPV/Browser)
   tests/
@@ -130,6 +149,9 @@ htpcstation/
     test_collections.py                # 22 tests
     test_controller_mapping.py         # 38 tests
     test_auto_mapping.py               # 31 tests
+    test_sdl_resolver.py               # 688 tests (SdlResolver, seed_from_controller_mapping, resolve)
+    test_retroarch_hotkeys.py          # ~120 tests (RetroarchHotkeysScreen backend slots)
+    test_retroarch_config.py           # ~60 tests (read_cfg/write_cfg/build_hotkey_cfg)
     test_emulator_launch.py            # 24 tests
     test_filter_sort.py                # 12 tests
     test_gamelist_parser_fixes.py      # 7 tests
@@ -226,9 +248,50 @@ htpcstation/
 
 ### Browser Extension Architecture
 - No ES modules — files concatenated via manifest `js` array: `generated_mapping.js` → `mappings/*.js` → `content.js`
-- `generated_mapping.js` written at deploy time from `controller_mapping.json`, translating evdev codes to Web Gamepad API indices
+- `generated_mapping.js` written at deploy time from `controller_mapping.json` via `generate_mapping_js()`, which reads the **SDL half** of each dual-record entry and translates to Web Gamepad API button/axis indices. Falls back to a comment-only stub if no SDL data recorded yet.
 - Deployed to `~/.var/app/com.brave.Browser/config/htpcstation-extension/` before each launch
 - Flatpak override `--filesystem=/run/udev:ro` applied automatically for gamepad access
+
+### Gamepad / Controller Mapping Architecture
+
+**Dual-record format** (since M8-B, CP32). Every entry in `controller_mapping.json` has:
+```json
+{
+  "evdev": {"type": "button"|"axis", "code": <int>, "value": <int>},
+  "sdl":   {"type": "button"|"axis"|"hat", ...} | null,
+  "also":  [{"evdev": {...}, "sdl": {...}}]
+}
+```
+- `evdev` half — used by `gamepad.py` (`build_evdev_lookup()`) for Qt key injection and by `LibMpvPlayer` (same path).
+- `sdl` half — used by `build_hotkey_cfg()` for `retroarch.cfg` and by `build_web_gamepad_mapping()` for the browser extension.
+- `also` array — co-firing events from dual-reporting devices (D-input triggers emit both an axis event and a button event for the same physical press). Both are stored; `seed_from_controller_mapping()` registers all of them in the SDL lookup.
+- Old single-record format (pre-M8-B) is migrated transparently by `load_mapping()`: wraps existing record as `evdev` half, sets `sdl` to `null`.
+
+**SDL resolution lifecycle:**
+1. `GamepadManager.startRawMode()` → calls `SdlResolver.open(device_name, button_codes, axis_codes)`, then `seed_from_controller_mapping(load_mapping())`.
+2. Raw mode active → `rawInput` signal emits `(evtype, code, value)` to QML dialogs.
+3. QML captures input → calls `settings.saveControllerMapping(recordedList)` or `settings.setHotkeyModifier/setHotkeyActionByEvdev/ByAxis()` — all call `resolver.resolve()` while resolver is still open.
+4. `GamepadManager.stopRawMode()` → calls `SdlResolver.close()`.
+5. **Critical ordering:** emit `buttonCaptured`/`axisCaptured` signals (which trigger `settings` slots) **before** calling `stopRawMode()`. `ModifierCaptureDialog` and `ControllerMappingDialog` both follow this order.
+
+**SdlResolver.resolve() priority:**
+1. `_evdev_event_to_sdl` — seeded from saved controller mapping via `seed_from_controller_mapping()`. Covers all inputs the user physically pressed during the mapping wizard with correct labels.
+2. `_evdev_axis_to_sdl_record` — built from `SDL_GameControllerGetBindForAxis()` heuristic during `open()`. Fallback for inputs not in the mapping (e.g. Home/Guide button).
+3. `_evdev_button_to_sdl` — sorted-position fallback for buttons (EV_KEY codes → SDL button indices by sort order).
+
+**D-input trigger detection** (critical gotcha): D-input devices report triggers as SDL joystick **buttons** (not axes). `SdlResolver.open()` detects this: GC API axis binds that map to joystick buttons are identified by finding which joystick axis indices are **not** bound to any GC logical axis. Those unbound joystick axis indices correspond to evdev axis codes that SDL treats as buttons. The resolver stores a `{"type": "button", ...}` record for those evdev axis codes so `build_hotkey_cfg()` writes `input_*_btn` (not `input_*_axis`) for RetroArch.
+
+**Hotkey modifier** is always written as `input_enable_hotkey_btn` — axis/hat modifiers are not supported by RetroArch. `build_hotkey_cfg()` writes `nul` for axis/hat keys of the modifier regardless of the SDL record type.
+
+**Duplicate prevention:** `_store_hotkey_sdl()` evicts any other hotkey action or the modifier that already uses the same SDL record before assigning the new one. Prevents RetroArch receiving the same button for two functions.
+
+**Face button label layout mapping:**
+- SDL always uses Xbox button names internally: A=East, B=South, X=West, Y=North.
+- Standard layout (Nintendo-style): A=East, B=South, **X=North, Y=West** — SDL X and Y are swapped vs display labels.
+- Alternate layout (Xbox-style): A=South, B=East, X=West, Y=North — SDL names match display labels except A↔B swap.
+- `_FACE_LABELS_STANDARD` / `_FACE_LABELS_ALTERNATE` maps in `settings_manager.py` translate SDL label → display label + cardinal position (e.g. "A (East)").
+
+**Hold-to-skip in mapping wizard** (`ControllerMappingDialog.qml`): skippable actions (triggers, shoulders) show a 3s hold timer. Button tap → records on release. Button hold 3s → skips. Known issue: dual-reporting inputs (D-input triggers) fire an axis event first (starts timer, sets `_holdSkipCode`), then a button event hits the `else` branch and calls `_recordInput` immediately. Fix needed: ignore button press events when `_holdSkipCode !== -1`.
 
 ### Config File Structure
 
@@ -244,7 +307,16 @@ htpcstation/
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
   "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid" },
-  "tabs": { "show_retro_games": true, "show_pc_games": true, "show_moonlight": true, "show_watch": true, "show_listen": true }
+  "tabs": { "show_retro_games": true, "show_pc_games": true, "show_moonlight": true, "show_watch": true, "show_listen": true },
+  "hotkey_modifier_evdev": 316,
+  "hotkey_modifier_sdl": {"type": "button", "sdl_button": 5, "label": "Guide"},
+  "hotkey_mapping": {
+    "save_state": {"type": "button", "sdl_button": 2, "label": "X"},
+    "exit_emulator": {"type": "hat", "sdl_hat": 0, "dir": "down"}
+  },
+  "rewind_enable": false,
+  "rewind_buffer_size": 100,
+  "rewind_granularity": 8
 }
 ```
 
@@ -327,6 +399,13 @@ htpcstation/
 - **Auto-repeat timers leak into raw mode** — `startRawMode()` must call `_release_all_keys()`.
 - **Mapping dialog can't use Accept/Cancel** — Auto-save on completion; no confirmation button.
 - **D-input D-pad as ABS_X/ABS_Y** — Normalize 0-255 range to -1/0/1 using axis range.
+- **D-input triggers are SDL buttons, not SDL axes** — `SdlResolver.open()` detects this via the GameController API: any GC logical axis whose bind type is `BINDTYPE_BUTTON` is a trigger mapped as a joystick button. The resolver stores a button SDL record for those evdev axis codes. `build_hotkey_cfg()` must write `_btn`, not `_axis`. If you see `nul` for a trigger hotkey in retroarch.cfg, the trigger was not detected as a button during resolver open.
+- **SDL library probing order matters** — `libSDL2-2.0.so.0` is probed first. On Fedora 43 this is `sdl2-compat` (SDL2 shim over SDL3) — function signatures are identical to real SDL2. Do not probe SDL3 before SDL2 or you may get a different GameControllerDB version than RetroArch uses.
+- **`seed_from_controller_mapping()` must be called after `open()`** — It builds the primary lookup from the saved mapping (source of truth for all inputs the user actually pressed). The GC API heuristics in `open()` are fallback only. If called before `open()`, `_evdev_hat_to_sdl` is empty and hat axis entries in the mapping will not be skipped correctly.
+- **`resolve()` returns `None` when joystick is not open** — Always call `open()` before calling `resolve()`. The `ModifierCaptureDialog` and `ControllerMappingDialog` both emit signals before calling `stopRawMode()` specifically to ensure the resolver is still open when `settings` slots call `resolve()`.
+- **Emit capture signals before `stopRawMode()`** — `stopRawMode()` calls `SdlResolver.close()`, which clears all lookup tables. Any `settings.setHotkeyActionByEvdev/ByAxis()` call that needs to resolve an SDL record must happen before `stopRawMode()`.
+- **Hold-to-skip dual-reporting bug** — In `ControllerMappingDialog`, dual-reporting inputs (D-input triggers) fire an axis event followed by a button event for the same physical press. The axis event starts the hold timer (`_holdSkipCode = axisCode`). The button event (different code) then hits the `else` branch and calls `_recordInput` immediately. Fix: ignore button press events when `_holdSkipCode !== -1`.
+- **`rawInput` emits value=0 for releases** — Raw mode was extended in M6-V2 to emit both press (`value=1`) and release (`value=0`) events for buttons so `ModifierCaptureDialog` can detect tap-vs-hold. The `_handle_button` guard is `if value in (0, 1)` — auto-repeat (`value=2`) is explicitly excluded.
 
 ### Other
 - **Bundled emoji font** — Qt doesn't reliably use NotoEmoji as fallback. Use text equivalents (❤️→♥, 🎵→♫).

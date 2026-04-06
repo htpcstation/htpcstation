@@ -39,3 +39,4 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 | 29 | M4: RetroArch core selector — cycle through installed cores, remove TextInput from SystemCoresScreen | `m4-retroarch-core-selector/` (001) |
 | 30 | M6: RetroArch hotkey configuration V1 — modifier capture dialog, hotkey mapping, apply to retroarch.cfg | `m6-retroarch-hotkeys/` (001–003) |
 | 31 | Fix: modifier capture dialog focus not restored after first use (FocusScope needs focused child) | — |
+| 32 | M6→V2: all 12 hotkey rows interactive (tap to assign, hold 3s to clear), rewind settings, duplicate prevention, face button cardinal labels. M8-A/B/C/D: `sdl_resolver.py` ctypes SDL wrapper, dual-record controller mapping (evdev+SDL), dual-record hotkey assignment, mapping wizard Start+Select cancel + hold-to-skip (WIP) | `retroarch-config-v2/` (001–007), `m8-sdl-input/` (008-A–008-D) |
