@@ -1,20 +1,19 @@
 """Tests for Task 003 — Browser Extension Auto-Generated Mapping.
 
 Covers:
-  - build_web_gamepad_mapping: returns None when _device is missing
-  - build_web_gamepad_mapping: maps EV_KEY buttons to correct Web API indices
-  - build_web_gamepad_mapping: maps hat axes to buttons after regular buttons
-  - build_web_gamepad_mapping: maps trigger axes to Web API axis indices
+  - build_web_gamepad_mapping: returns None when no SDL halves present
+  - build_web_gamepad_mapping: maps SDL button entries to correct Web API indices
+  - build_web_gamepad_mapping: maps SDL hat entries to synthetic button indices
+  - build_web_gamepad_mapping: maps SDL axis entries to Web API axis indices
   - build_web_gamepad_mapping: dpadButtons contains hat-derived button indices
-  - build_web_gamepad_mapping: handles missing _device.buttons or _device.axes
-  - generate_mapping_js: returns comment stub when no _device
+  - generate_mapping_js: returns comment stub when no SDL data
   - generate_mapping_js: produces valid JS assignment with correct structure
   - GamepadManager.getDeviceCapabilities: returns empty dict when no device
   - GamepadManager.getDeviceCapabilities: returns sorted buttons and axes
   - _deploy_extension: writes generated_mapping.js to deployed dir
-  - _deploy_extension: generated_mapping.js contains JS assignment when mapping has _device
-  - _deploy_extension: generated_mapping.js contains stub when no _device
-  - saveControllerMapping: includes _device from getDeviceCapabilities
+  - _deploy_extension: generated_mapping.js contains JS assignment when mapping has SDL data
+  - _deploy_extension: generated_mapping.js contains stub when no SDL data
+  - saveControllerMapping: stores dual-record format (no _device key)
   - saveControllerMapping: skips _device when gamepad_manager is None
   - content.js: fallback to defaults when __htpcGeneratedMapping is absent
 """
@@ -31,8 +30,6 @@ from backend.controller_mapping import (
     build_web_gamepad_mapping,
     generate_mapping_js,
     get_default_mapping,
-    _ABS_HAT0X,
-    _ABS_HAT0Y,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,7 +48,7 @@ def _make_device_caps(
     axes: list[int] | None = None,
     name: str = "Test Gamepad",
 ) -> dict:
-    """Build a _device capabilities dict."""
+    """Build a device capabilities dict (for getDeviceCapabilities tests)."""
     return {
         "buttons": buttons if buttons is not None else [304, 305, 307, 308, 310, 311, 314, 315],
         "axes": axes if axes is not None else [0, 1, 3, 4, 16, 17],
@@ -59,11 +56,30 @@ def _make_device_caps(
     }
 
 
-def _make_mapping_with_device(device_caps: dict | None = None) -> dict:
-    """Return a default mapping with optional _device block."""
+def _make_mapping_with_sdl(
+    buttons: dict[str, int] | None = None,
+    hats: dict[str, tuple[int, str]] | None = None,
+    axes: dict[str, tuple[int, int]] | None = None,
+) -> dict:
+    """Return a mapping with SDL halves populated.
+
+    buttons: {action_name: sdl_button_index}
+    hats: {action_name: (sdl_hat_index, direction)}
+    axes: {action_name: (sdl_axis_index, direction)}
+    """
     m = get_default_mapping()
-    if device_caps is not None:
-        m["_device"] = device_caps
+    if buttons:
+        for action, sdl_btn in buttons.items():
+            if action in m:
+                m[action]["sdl"] = {"type": "button", "sdl_button": sdl_btn}
+    if hats:
+        for action, (hat_idx, direction) in hats.items():
+            if action in m:
+                m[action]["sdl"] = {"type": "hat", "sdl_hat": hat_idx, "dir": direction}
+    if axes:
+        for action, (axis_idx, direction) in axes.items():
+            if action in m:
+                m[action]["sdl"] = {"type": "axis", "sdl_axis": axis_idx, "dir": direction}
     return m
 
 
@@ -73,116 +89,90 @@ def _make_mapping_with_device(device_caps: dict | None = None) -> dict:
 
 
 class TestBuildWebGamepadMapping:
-    def test_returns_none_when_no_device(self) -> None:
-        """Returns None when _device key is absent."""
+    def test_returns_none_when_no_sdl_data(self) -> None:
+        """Returns None when no entry has a non-null SDL half."""
         mapping = get_default_mapping()
         assert build_web_gamepad_mapping(mapping) is None
 
-    def test_returns_none_when_device_is_not_dict(self) -> None:
-        """Returns None when _device is not a dict."""
+    def test_returns_none_when_all_sdl_halves_null(self) -> None:
+        """Returns None when all SDL halves are explicitly null."""
         mapping = get_default_mapping()
-        mapping["_device"] = "not a dict"  # type: ignore[assignment]
+        # All DEFAULT_MAPPING entries have sdl=None
+        assert all(entry.get("sdl") is None for entry in mapping.values())
         assert build_web_gamepad_mapping(mapping) is None
 
-    def test_returns_none_when_device_missing_buttons(self) -> None:
-        """Returns None when _device has no buttons list."""
-        mapping = get_default_mapping()
-        mapping["_device"] = {"axes": [0, 1, 16, 17], "name": "X"}
-        assert build_web_gamepad_mapping(mapping) is None
-
-    def test_returns_none_when_device_missing_axes(self) -> None:
-        """Returns None when _device has no axes list."""
-        mapping = get_default_mapping()
-        mapping["_device"] = {"buttons": [304, 305], "name": "X"}
-        assert build_web_gamepad_mapping(mapping) is None
-
-    def test_button_type_maps_to_sorted_position(self) -> None:
-        """EV_KEY button codes map to their sorted position in _device.buttons."""
-        # buttons: [304, 305, 307, 308, 310, 311, 314, 315]
-        # sorted:   0    1    2    3    4    5    6    7
-        # accept → BTN_EAST (305) → index 1
-        # cancel → BTN_SOUTH (304) → index 0
-        caps = _make_device_caps(
-            buttons=[304, 305, 307, 308, 310, 311, 314, 315],
-            axes=[0, 1, 3, 4, 16, 17],
+    def test_button_type_maps_to_sdl_button_index(self) -> None:
+        """SDL button entries map to the sdl_button index in the web mapping."""
+        mapping = _make_mapping_with_sdl(
+            buttons={"accept": 1, "cancel": 0, "left_shoulder": 4, "right_shoulder": 5,
+                     "select": 6, "start": 7},
         )
-        mapping = _make_mapping_with_device(caps)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
         buttons = result["buttons"]
-        assert buttons[0] == "cancel"    # BTN_SOUTH=304 → index 0
-        assert buttons[1] == "accept"    # BTN_EAST=305 → index 1
-        assert buttons[4] == "leftBumper"      # BTN_TL=310 → index 4
-        assert buttons[5] == "rightBumper"     # BTN_TR=311 → index 5
-        assert buttons[6] == "select"    # BTN_SELECT=314 → index 6
-        assert buttons[7] == "start"     # BTN_START=315 → index 7
+        assert buttons[0] == "cancel"
+        assert buttons[1] == "accept"
+        assert buttons[4] == "leftBumper"
+        assert buttons[5] == "rightBumper"
+        assert buttons[6] == "select"
+        assert buttons[7] == "start"
 
-    def test_hat_axes_map_to_buttons_after_regular_buttons(self) -> None:
-        """Hat axes (ABS_HAT0X/Y) become buttons starting at len(regular_buttons)."""
-        # 8 regular buttons → hat buttons start at index 8
-        caps = _make_device_caps(
-            buttons=[304, 305, 307, 308, 310, 311, 314, 315],
-            axes=[0, 1, 3, 4, 16, 17],  # 16=ABS_HAT0X, 17=ABS_HAT0Y
+    def test_hat_entries_map_to_synthetic_indices(self) -> None:
+        """SDL hat entries map to synthetic high button indices (1000+)."""
+        mapping = _make_mapping_with_sdl(
+            hats={
+                "dpad_up": (0, "up"),
+                "dpad_down": (0, "down"),
+                "dpad_left": (0, "left"),
+                "dpad_right": (0, "right"),
+            },
         )
-        mapping = _make_mapping_with_device(caps)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
         buttons = result["buttons"]
-        # ABS_HAT0Y=-1 → up → offset 0 → index 8
-        assert buttons[8] == "up"
-        # ABS_HAT0Y=+1 → down → offset 1 → index 9
-        assert buttons[9] == "down"
-        # ABS_HAT0X=-1 → left → offset 2 → index 10
-        assert buttons[10] == "left"
-        # ABS_HAT0X=+1 → right → offset 3 → index 11
-        assert buttons[11] == "right"
+        assert buttons[1000] == "up"
+        assert buttons[1001] == "down"
+        assert buttons[1002] == "left"
+        assert buttons[1003] == "right"
 
     def test_dpad_buttons_contains_hat_derived_indices(self) -> None:
         """dpadButtons dict contains all hat-derived button indices."""
-        caps = _make_device_caps(
-            buttons=[304, 305, 307, 308, 310, 311, 314, 315],
-            axes=[0, 1, 3, 4, 16, 17],
+        mapping = _make_mapping_with_sdl(
+            hats={
+                "dpad_up": (0, "up"),
+                "dpad_down": (0, "down"),
+                "dpad_left": (0, "left"),
+                "dpad_right": (0, "right"),
+            },
         )
-        mapping = _make_mapping_with_device(caps)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
         dpad = result["dpadButtons"]
-        # All four hat-derived buttons should be in dpadButtons
-        assert dpad.get(8) is True   # up
-        assert dpad.get(9) is True   # down
-        assert dpad.get(10) is True  # left
-        assert dpad.get(11) is True  # right
+        assert dpad.get(1000) is True   # up
+        assert dpad.get(1001) is True   # down
+        assert dpad.get(1002) is True   # left
+        assert dpad.get(1003) is True   # right
 
-    def test_trigger_axes_map_to_regular_axis_indices(self) -> None:
-        """Trigger axes (non-hat EV_ABS) map to their sorted position in regular axes."""
-        # axes: [0, 1, 3, 4, 16, 17]
-        # regular (non-hat): [0, 1, 3, 4] → indices 0, 1, 2, 3
-        # ABS_Z=2 is NOT in this device's axes list, so left_trigger won't map
-        # Let's use a device that has ABS_Z (2) and ABS_RZ (5)
-        caps = _make_device_caps(
-            buttons=[304, 305, 307, 308, 310, 311, 314, 315],
-            axes=[0, 1, 2, 5, 16, 17],  # 2=ABS_Z, 5=ABS_RZ
+    def test_trigger_axes_map_to_sdl_axis_indices(self) -> None:
+        """SDL axis entries map to the sdl_axis index in the web mapping."""
+        mapping = _make_mapping_with_sdl(
+            axes={"left_trigger": (2, 1), "right_trigger": (5, 1)},
         )
-        mapping = _make_mapping_with_device(caps)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
         axes = result["axes"]
-        # regular axes: [0, 1, 2, 5] → indices 0, 1, 2, 3
-        # left_trigger → ABS_Z=2, value=1 (positive) → axis index 2, pos slot
-        # right_trigger → ABS_RZ=5, value=1 (positive) → axis index 3, pos slot
         assert 2 in axes
-        assert axes[2][1] == "leftTrigger"    # positive direction
-        assert 3 in axes
-        assert axes[3][1] == "rightTrigger"  # positive direction
+        assert axes[2][1] == "leftTrigger"
+        assert 5 in axes
+        assert axes[5][1] == "rightTrigger"
 
     def test_result_has_required_keys(self) -> None:
         """Result dict always has buttons, axes, and dpadButtons keys."""
-        caps = _make_device_caps()
-        mapping = _make_mapping_with_device(caps)
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1})
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
@@ -190,60 +180,48 @@ class TestBuildWebGamepadMapping:
         assert "axes" in result
         assert "dpadButtons" in result
 
-    def test_unknown_button_code_not_in_device_is_skipped(self) -> None:
-        """Button entries with codes not in _device.buttons are silently skipped."""
-        caps = _make_device_caps(buttons=[304], axes=[16, 17])
-        mapping = get_default_mapping()
-        mapping["_device"] = caps
-        # accept uses BTN_EAST=305, which is NOT in the device buttons list
+    def test_entries_with_null_sdl_are_skipped(self) -> None:
+        """Entries with sdl=None are silently skipped."""
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1})
+        # cancel has sdl=None (not set in _make_mapping_with_sdl)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
-        # BTN_EAST=305 is not in [304], so accept should not appear in buttons
-        assert "accept" not in result["buttons"].values()
+        # cancel should not appear in buttons (its sdl is None)
+        assert "cancel" not in result["buttons"].values()
 
     def test_metadata_keys_are_skipped(self) -> None:
-        """Keys starting with _ (like _device) are not treated as actions."""
-        caps = _make_device_caps()
-        mapping = _make_mapping_with_device(caps)
+        """Keys starting with _ are not treated as actions."""
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1})
+        mapping["_device"] = {"buttons": [304, 305], "axes": [0, 1]}
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
         # _device should not appear as an action in the output
         assert "_device" not in result["buttons"].values()
 
-    def test_hat_axes_not_in_device_axes_are_skipped(self) -> None:
-        """Hat axis entries are skipped if the device doesn't report those axes."""
-        # Device has no hat axes (no 16 or 17 in axes list)
-        caps = _make_device_caps(
-            buttons=[304, 305, 307, 308, 310, 311, 314, 315],
-            axes=[0, 1, 2, 5],  # no hat axes
-        )
-        mapping = _make_mapping_with_device(caps)
+    def test_hat_axes_not_in_sdl_data_are_skipped(self) -> None:
+        """D-pad actions without SDL hat data are skipped."""
+        # Only set SDL data for buttons, not for dpad (which uses hats)
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1, "cancel": 0})
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
-        # D-pad actions should not appear in buttons (no hat axes on device)
-        assert "dpad_up" not in result["buttons"].values()
-        assert "dpad_down" not in result["buttons"].values()
-        assert "dpad_left" not in result["buttons"].values()
-        assert "dpad_right" not in result["buttons"].values()
+        # D-pad actions should not appear in buttons (no SDL hat data)
+        assert "up" not in result["buttons"].values()
+        assert "down" not in result["buttons"].values()
+        assert "left" not in result["buttons"].values()
+        assert "right" not in result["buttons"].values()
 
-    def test_buttons_sorted_order_determines_index(self) -> None:
-        """Button indices are based on sorted order, not insertion order."""
-        # Provide buttons in reverse order — sorted should still give correct indices
-        caps = _make_device_caps(
-            buttons=[315, 314, 311, 310, 308, 307, 305, 304],  # reversed
-            axes=[16, 17],
+    def test_buttons_sdl_index_determines_position(self) -> None:
+        """SDL button index directly determines the web gamepad button position."""
+        mapping = _make_mapping_with_sdl(
+            buttons={"cancel": 0, "accept": 1},
         )
-        mapping = _make_mapping_with_device(caps)
         result = build_web_gamepad_mapping(mapping)
 
         assert result is not None
-        # After sorting: [304, 305, 307, 308, 310, 311, 314, 315]
-        # cancel → BTN_SOUTH=304 → index 0
         assert result["buttons"][0] == "cancel"
-        # accept → BTN_EAST=305 → index 1
         assert result["buttons"][1] == "accept"
 
 
@@ -253,8 +231,8 @@ class TestBuildWebGamepadMapping:
 
 
 class TestGenerateMappingJs:
-    def test_returns_comment_stub_when_no_device(self) -> None:
-        """Returns a comment-only stub when _device is absent."""
+    def test_returns_comment_stub_when_no_sdl_data(self) -> None:
+        """Returns a comment-only stub when no SDL halves are present."""
         mapping = get_default_mapping()
         js = generate_mapping_js(mapping)
 
@@ -263,8 +241,7 @@ class TestGenerateMappingJs:
 
     def test_produces_js_assignment(self) -> None:
         """Produces a window.__htpcGeneratedMapping = {...}; assignment."""
-        caps = _make_device_caps()
-        mapping = _make_mapping_with_device(caps)
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1, "cancel": 0})
         js = generate_mapping_js(mapping)
 
         assert js.startswith("window.__htpcGeneratedMapping = ")
@@ -272,8 +249,7 @@ class TestGenerateMappingJs:
 
     def test_js_contains_valid_json_payload(self) -> None:
         """The JS assignment contains a valid JSON object."""
-        caps = _make_device_caps()
-        mapping = _make_mapping_with_device(caps)
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1, "cancel": 0})
         js = generate_mapping_js(mapping)
 
         # Extract the JSON part between the first = and the trailing ;
@@ -289,8 +265,7 @@ class TestGenerateMappingJs:
 
     def test_js_buttons_keys_are_strings(self) -> None:
         """JSON object keys are always strings (JS object keys)."""
-        caps = _make_device_caps()
-        mapping = _make_mapping_with_device(caps)
+        mapping = _make_mapping_with_sdl(buttons={"accept": 1, "cancel": 0})
         js = generate_mapping_js(mapping)
 
         prefix = "window.__htpcGeneratedMapping = "
@@ -421,18 +396,17 @@ class TestDeployExtensionGeneratesMappingJs:
         assert result == dst
         assert (dst / "generated_mapping.js").exists()
 
-    def test_deploy_generates_js_assignment_when_device_present(
+    def test_deploy_generates_js_assignment_when_sdl_data_present(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """When mapping has _device, generated_mapping.js contains a JS assignment."""
+        """When mapping has SDL data, generated_mapping.js contains a JS assignment."""
         from backend.browser_launcher import BrowserLauncher
 
-        # Patch load_mapping to return a mapping with _device
-        caps = _make_device_caps()
-        mapping_with_device = _make_mapping_with_device(caps)
+        # Patch load_mapping to return a mapping with SDL halves
+        mapping_with_sdl = _make_mapping_with_sdl(buttons={"accept": 1, "cancel": 0})
         monkeypatch.setattr(
             "backend.browser_launcher.load_mapping",
-            lambda: mapping_with_device,
+            lambda: mapping_with_sdl,
         )
 
         launcher = BrowserLauncher()
@@ -449,13 +423,13 @@ class TestDeployExtensionGeneratesMappingJs:
         js_content = (dst / "generated_mapping.js").read_text(encoding="utf-8")
         assert "window.__htpcGeneratedMapping" in js_content
 
-    def test_deploy_generates_stub_when_no_device(
+    def test_deploy_generates_stub_when_no_sdl_data(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """When mapping has no _device, generated_mapping.js is a comment stub."""
+        """When mapping has no SDL data, generated_mapping.js is a comment stub."""
         from backend.browser_launcher import BrowserLauncher
 
-        # Patch load_mapping to return a mapping without _device
+        # Patch load_mapping to return a mapping without SDL halves (all null)
         monkeypatch.setattr(
             "backend.browser_launcher.load_mapping",
             lambda: get_default_mapping(),
@@ -504,7 +478,7 @@ class TestDeployExtensionGeneratesMappingJs:
 
 
 # ---------------------------------------------------------------------------
-# SettingsManager.saveControllerMapping — includes _device
+# SettingsManager.saveControllerMapping — dual-record format, no _device
 # ---------------------------------------------------------------------------
 
 
@@ -530,7 +504,7 @@ class TestSaveControllerMappingIncludesDevice:
     def test_saves_device_capabilities_when_gamepad_connected(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """saveControllerMapping includes _device from getDeviceCapabilities."""
+        """saveControllerMapping stores dual-record format (no _device key)."""
         caps = _make_device_caps()
         mock_gm = MagicMock()
         mock_gm.getDeviceCapabilities.return_value = caps
@@ -546,12 +520,15 @@ class TestSaveControllerMappingIncludesDevice:
         entries = [
             {"name": "accept", "type": "button", "code": 305, "value": 1},
         ]
-        manager.saveControllerMapping(entries)
+        with patch("backend.sdl_resolver.resolver.resolve", return_value={"type": "button", "sdl_button": 1}):
+            manager.saveControllerMapping(entries)
 
         saved = json.loads(mapping_file.read_text(encoding="utf-8"))
-        assert "_device" in saved
-        assert saved["_device"]["buttons"] == caps["buttons"]
-        assert saved["_device"]["axes"] == caps["axes"]
+        # _device is no longer stored — SDL resolution is done at capture time
+        assert "_device" not in saved
+        # Dual-record format is stored
+        assert "evdev" in saved["accept"]
+        assert "sdl" in saved["accept"]
 
     def test_skips_device_when_gamepad_manager_is_none(
         self, tmp_path: Path, monkeypatch
@@ -568,7 +545,8 @@ class TestSaveControllerMappingIncludesDevice:
         entries = [
             {"name": "accept", "type": "button", "code": 305, "value": 1},
         ]
-        manager.saveControllerMapping(entries)
+        with patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.saveControllerMapping(entries)
 
         saved = json.loads(mapping_file.read_text(encoding="utf-8"))
         assert "_device" not in saved
@@ -576,7 +554,7 @@ class TestSaveControllerMappingIncludesDevice:
     def test_skips_device_when_capabilities_empty(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """saveControllerMapping skips _device when getDeviceCapabilities returns {}."""
+        """saveControllerMapping never stores _device (SDL resolution is at capture time)."""
         mock_gm = MagicMock()
         mock_gm.getDeviceCapabilities.return_value = {}
 
@@ -591,22 +569,23 @@ class TestSaveControllerMappingIncludesDevice:
         entries = [
             {"name": "accept", "type": "button", "code": 305, "value": 1},
         ]
-        manager.saveControllerMapping(entries)
+        with patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.saveControllerMapping(entries)
 
         saved = json.loads(mapping_file.read_text(encoding="utf-8"))
         assert "_device" not in saved
 
 
 # ---------------------------------------------------------------------------
-# load_mapping — preserves _device key
+# load_mapping — drops _device key (legacy)
 # ---------------------------------------------------------------------------
 
 
 class TestLoadMappingPreservesDevice:
-    def test_load_mapping_preserves_device_key(
+    def test_load_mapping_drops_legacy_device_key(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """load_mapping preserves the _device block from the saved file."""
+        """load_mapping silently drops the legacy _device key."""
         from backend.controller_mapping import load_mapping, save_mapping
 
         mapping_file = tmp_path / "controller_mapping.json"
@@ -617,13 +596,12 @@ class TestLoadMappingPreservesDevice:
 
         caps = _make_device_caps()
         mapping = get_default_mapping()
-        mapping["_device"] = caps
+        mapping["_device"] = caps  # type: ignore[assignment]
         save_mapping(mapping)
 
         loaded = load_mapping()
-        assert "_device" in loaded
-        assert loaded["_device"]["buttons"] == caps["buttons"]
-        assert loaded["_device"]["name"] == caps["name"]
+        # _device is now silently dropped on load
+        assert "_device" not in loaded
 
     def test_load_mapping_without_device_key_returns_no_device(
         self, tmp_path: Path, monkeypatch

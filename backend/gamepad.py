@@ -152,7 +152,7 @@ class _DeviceHandler(QObject):
     def _handle_button(self, code: int, value: int) -> None:
         """value: 1 = press, 0 = release, 2 = kernel auto-repeat (ignored)."""
         if self._manager._raw_mode:
-            if value == 1:
+            if value in (0, 1):   # emit press AND release; skip auto-repeat (value=2)
                 self._manager.rawInput.emit("button", code, value)
             return
 
@@ -533,6 +533,21 @@ class GamepadManager(QObject):
             handler._release_all_keys()
         self._raw_mode = True
 
+        # Open SDL resolver for the first connected device
+        if self._handlers:
+            handler = next(iter(self._handlers.values()))
+            device_name = getattr(handler._device, "name", "")
+            caps = self.getDeviceCapabilities()
+            button_codes = caps.get("buttons", [])
+            axis_codes = caps.get("axes", [])
+            from backend.sdl_resolver import resolver as _sdl_resolver
+            from backend.controller_mapping import load_mapping
+            _sdl_resolver.open(device_name, button_codes, axis_codes)
+            # Seed axis→SDL records from the saved controller mapping.
+            # This gives correct SDL records for triggers/sticks that the
+            # GameController API heuristic may not resolve correctly.
+            _sdl_resolver.seed_from_controller_mapping(load_mapping())
+
     @Slot()
     def stopRawMode(self) -> None:
         """Exit raw mode, resume normal key injection.
@@ -545,6 +560,9 @@ class GamepadManager(QObject):
         # appear as "already pressed" and suppress their next real press.
         for handler in self._handlers.values():
             handler._release_all_keys()
+
+        from backend.sdl_resolver import resolver as _sdl_resolver
+        _sdl_resolver.close()
 
     @Slot()
     def reloadMapping(self) -> None:

@@ -3,10 +3,13 @@
 Covers:
   - load_mapping returns defaults when no file exists
   - load_mapping reads from file correctly
+  - load_mapping migrates old single-record format to dual-record
+  - load_mapping silently drops legacy _device key
   - save_mapping writes and can be read back
   - build_evdev_lookup produces correct entries for default mapping
   - build_evdev_lookup handles button-type D-pad (non-axis D-pad)
   - get_default_mapping returns a copy (not the same object)
+  - build_web_gamepad_mapping reads SDL halves
   - GamepadManager raw mode: startRawMode causes events to emit rawInput
   - GamepadManager.reloadMapping updates the lookup table
   - _DeviceHandler with unified lookup (mock evdev device)
@@ -26,6 +29,7 @@ from backend.controller_mapping import (
     DEFAULT_MAPPING,
     ACTIONS,
     build_evdev_lookup,
+    build_web_gamepad_mapping,
     get_default_mapping,
     get_mapping_path,
     load_mapping,
@@ -69,8 +73,8 @@ class TestGetDefaultMapping:
     def test_modifying_copy_does_not_affect_default(self) -> None:
         """Mutating the returned copy does not change DEFAULT_MAPPING."""
         result = get_default_mapping()
-        result["dpad_up"]["code"] = 9999
-        assert DEFAULT_MAPPING["dpad_up"]["code"] != 9999
+        result["dpad_up"]["evdev"]["code"] = 9999
+        assert DEFAULT_MAPPING["dpad_up"]["evdev"]["code"] != 9999
 
     def test_all_14_actions_present(self) -> None:
         """Default mapping contains all 14 semantic actions."""
@@ -94,7 +98,7 @@ class TestLoadMapping:
         """load_mapping reads and returns the mapping from a valid JSON file."""
         mapping_file = tmp_path / "controller_mapping.json"
         custom_mapping = get_default_mapping()
-        custom_mapping["accept"]["code"] = 999
+        custom_mapping["accept"]["evdev"]["code"] = 999
         mapping_file.write_text(json.dumps(custom_mapping), encoding="utf-8")
 
         monkeypatch.setattr(
@@ -102,7 +106,7 @@ class TestLoadMapping:
             lambda: mapping_file,
         )
         result = load_mapping()
-        assert result["accept"]["code"] == 999
+        assert result["accept"]["evdev"]["code"] == 999
 
     def test_falls_back_to_defaults_on_corrupt_file(self, tmp_path: Path, monkeypatch) -> None:
         """load_mapping falls back to defaults when the file is corrupt JSON."""
@@ -133,7 +137,8 @@ class TestLoadMapping:
     ) -> None:
         """load_mapping skips entries with invalid structure, using defaults for those."""
         mapping_file = tmp_path / "controller_mapping.json"
-        partial = {"accept": {"type": "button", "code": 999, "value": 1}}
+        # New dual-record format
+        partial = {"accept": {"evdev": {"type": "button", "code": 999, "value": 1}, "sdl": None}}
         mapping_file.write_text(json.dumps(partial), encoding="utf-8")
 
         monkeypatch.setattr(
@@ -142,9 +147,110 @@ class TestLoadMapping:
         )
         result = load_mapping()
         # accept was overridden
-        assert result["accept"]["code"] == 999
+        assert result["accept"]["evdev"]["code"] == 999
         # dpad_up was not in file, so it uses the default
         assert result["dpad_up"] == DEFAULT_MAPPING["dpad_up"]
+
+    def test_migration_old_single_record_format(self, tmp_path: Path, monkeypatch) -> None:
+        """load_mapping migrates old single-record entries to dual-record with sdl=None."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        # Old format: no "evdev" key, just type/code/value at top level
+        old_format = {"accept": {"type": "button", "code": 305, "value": 1}}
+        mapping_file.write_text(json.dumps(old_format), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "backend.controller_mapping.get_mapping_path",
+            lambda: mapping_file,
+        )
+        result = load_mapping()
+        # Should be migrated to dual-record format
+        assert "evdev" in result["accept"]
+        assert result["accept"]["evdev"]["code"] == 305
+        assert result["accept"]["sdl"] is None
+
+    def test_device_key_silently_dropped(self, tmp_path: Path, monkeypatch) -> None:
+        """load_mapping silently drops the legacy _device key."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        data = {
+            "_device": {"buttons": [304, 305], "axes": [0, 1], "name": "Test"},
+            "accept": {"evdev": {"type": "button", "code": 305, "value": 1}, "sdl": None},
+        }
+        mapping_file.write_text(json.dumps(data), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "backend.controller_mapping.get_mapping_path",
+            lambda: mapping_file,
+        )
+        result = load_mapping()
+        # _device should not appear in the result
+        assert "_device" not in result
+        # accept should be loaded correctly
+        assert result["accept"]["evdev"]["code"] == 305
+
+    def test_also_field_preserved_through_round_trip(self, tmp_path: Path, monkeypatch) -> None:
+        """load_mapping preserves the 'also' field from a saved entry."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        data = {
+            "left_trigger": {
+                "evdev": {"type": "button", "code": 312, "value": 1},
+                "sdl": {"type": "button", "sdl_button": 8, "label": "LT"},
+                "also": [
+                    {"evdev": {"type": "axis", "code": 9, "value": 1},
+                     "sdl": {"type": "axis", "sdl_axis": 4, "dir": 1}},
+                ],
+            },
+        }
+        mapping_file.write_text(json.dumps(data), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "backend.controller_mapping.get_mapping_path",
+            lambda: mapping_file,
+        )
+        result = load_mapping()
+        assert "also" in result["left_trigger"]
+        also = result["left_trigger"]["also"]
+        assert len(also) == 1
+        assert also[0]["evdev"]["type"] == "axis"
+        assert also[0]["evdev"]["code"] == 9
+        assert also[0]["sdl"]["sdl_axis"] == 4
+
+    def test_also_field_defaults_to_empty_list_when_absent(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """load_mapping sets also=[] when the field is absent from the file."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        data = {
+            "accept": {"evdev": {"type": "button", "code": 305, "value": 1}, "sdl": None},
+        }
+        mapping_file.write_text(json.dumps(data), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "backend.controller_mapping.get_mapping_path",
+            lambda: mapping_file,
+        )
+        result = load_mapping()
+        assert result["accept"]["also"] == []
+
+    def test_also_field_null_treated_as_empty_list(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """load_mapping treats also=null as an empty list."""
+        mapping_file = tmp_path / "controller_mapping.json"
+        data = {
+            "accept": {
+                "evdev": {"type": "button", "code": 305, "value": 1},
+                "sdl": None,
+                "also": None,
+            },
+        }
+        mapping_file.write_text(json.dumps(data), encoding="utf-8")
+
+        monkeypatch.setattr(
+            "backend.controller_mapping.get_mapping_path",
+            lambda: mapping_file,
+        )
+        result = load_mapping()
+        assert result["accept"]["also"] == []
 
 
 class TestSaveMapping:
@@ -157,12 +263,12 @@ class TestSaveMapping:
         )
 
         custom = get_default_mapping()
-        custom["cancel"]["code"] = 777
+        custom["cancel"]["evdev"]["code"] = 777
         save_mapping(custom)
 
         assert mapping_file.exists()
         result = load_mapping()
-        assert result["cancel"]["code"] == 777
+        assert result["cancel"]["evdev"]["code"] == 777
 
     def test_creates_parent_directories(self, tmp_path: Path, monkeypatch) -> None:
         """save_mapping creates parent directories if they don't exist."""
@@ -201,6 +307,9 @@ class TestBuildEvdevLookup:
         assert (ecodes.EV_KEY, ecodes.BTN_SOUTH, 1) in lookup
         assert lookup[(ecodes.EV_KEY, ecodes.BTN_SOUTH, 1)] == Qt.Key.Key_Escape
 
+        # Verify dual-record structure: DEFAULT_MAPPING entries have evdev half
+        assert DEFAULT_MAPPING["accept"]["evdev"]["type"] == "button"
+
     def test_default_mapping_dpad_axis_entries(self) -> None:
         """build_evdev_lookup maps D-pad axis entries to (EV_ABS, code, sign) → Qt.Key."""
         lookup = build_evdev_lookup(DEFAULT_MAPPING)
@@ -221,6 +330,9 @@ class TestBuildEvdevLookup:
         assert (ecodes.EV_ABS, ecodes.ABS_HAT0X, 1) in lookup
         assert lookup[(ecodes.EV_ABS, ecodes.ABS_HAT0X, 1)] == Qt.Key.Key_Right
 
+        # Verify dual-record structure: DEFAULT_MAPPING entries have evdev half
+        assert DEFAULT_MAPPING["dpad_up"]["evdev"]["type"] == "axis"
+
     def test_default_mapping_trigger_entries(self) -> None:
         """build_evdev_lookup maps trigger axis entries to (EV_ABS, code, 1) → Qt.Key."""
         lookup = build_evdev_lookup(DEFAULT_MAPPING)
@@ -233,12 +345,15 @@ class TestBuildEvdevLookup:
         assert (ecodes.EV_ABS, ecodes.ABS_RZ, 1) in lookup
         assert lookup[(ecodes.EV_ABS, ecodes.ABS_RZ, 1)] == Qt.Key.Key_End
 
+        # Verify dual-record structure: DEFAULT_MAPPING entries have evdev half
+        assert DEFAULT_MAPPING["left_trigger"]["evdev"]["type"] == "axis"
+
     def test_button_type_dpad_mapping(self) -> None:
         """build_evdev_lookup handles D-pad mapped to buttons (not axes)."""
         # Some controllers report D-pad as buttons
         custom_mapping = get_default_mapping()
-        custom_mapping["dpad_up"] = {"type": "button", "code": 544, "value": 1}
-        custom_mapping["dpad_down"] = {"type": "button", "code": 545, "value": 1}
+        custom_mapping["dpad_up"] = {"evdev": {"type": "button", "code": 544, "value": 1}, "sdl": None}
+        custom_mapping["dpad_down"] = {"evdev": {"type": "button", "code": 545, "value": 1}, "sdl": None}
 
         lookup = build_evdev_lookup(custom_mapping)
 
@@ -250,7 +365,7 @@ class TestBuildEvdevLookup:
     def test_unknown_action_is_skipped(self) -> None:
         """build_evdev_lookup skips entries with unknown action names."""
         custom_mapping = get_default_mapping()
-        custom_mapping["unknown_action"] = {"type": "button", "code": 999, "value": 1}
+        custom_mapping["unknown_action"] = {"evdev": {"type": "button", "code": 999, "value": 1}, "sdl": None}
 
         lookup = build_evdev_lookup(custom_mapping)
         # The unknown action should not appear in the lookup
@@ -259,7 +374,7 @@ class TestBuildEvdevLookup:
     def test_invalid_entry_is_skipped(self) -> None:
         """build_evdev_lookup skips entries with invalid code/value types."""
         custom_mapping = get_default_mapping()
-        custom_mapping["accept"] = {"type": "button", "code": "not_an_int", "value": 1}
+        custom_mapping["accept"] = {"evdev": {"type": "button", "code": "not_an_int", "value": 1}, "sdl": None}
 
         lookup = build_evdev_lookup(custom_mapping)
         # accept should not be in lookup since code is invalid
@@ -271,6 +386,122 @@ class TestBuildEvdevLookup:
         lookup = build_evdev_lookup(DEFAULT_MAPPING)
         # 14 actions → 14 entries (each action maps to exactly one key combo)
         assert len(lookup) == 14
+
+
+# ---------------------------------------------------------------------------
+# build_web_gamepad_mapping tests
+# ---------------------------------------------------------------------------
+
+
+class TestBuildWebGamepadMapping:
+    def _make_mapping_with_sdl(self) -> dict:
+        """Create a dual-record mapping with SDL halves populated."""
+        return {
+            "accept": {
+                "evdev": {"type": "button", "code": 305, "value": 1},
+                "sdl": {"type": "button", "sdl_button": 1},
+            },
+            "cancel": {
+                "evdev": {"type": "button", "code": 304, "value": 1},
+                "sdl": {"type": "button", "sdl_button": 0},
+            },
+            "dpad_up": {
+                "evdev": {"type": "axis", "code": 17, "value": -1},
+                "sdl": {"type": "hat", "sdl_hat": 0, "dir": "up"},
+            },
+            "dpad_down": {
+                "evdev": {"type": "axis", "code": 17, "value": 1},
+                "sdl": {"type": "hat", "sdl_hat": 0, "dir": "down"},
+            },
+            "left_trigger": {
+                "evdev": {"type": "axis", "code": 2, "value": 1},
+                "sdl": {"type": "axis", "sdl_axis": 2, "dir": 1},
+            },
+            "right_trigger": {
+                "evdev": {"type": "axis", "code": 5, "value": 1},
+                "sdl": {"type": "axis", "sdl_axis": 5, "dir": 1},
+            },
+        }
+
+    def test_returns_none_when_all_sdl_halves_null(self) -> None:
+        """build_web_gamepad_mapping returns None when no entry has a non-null SDL half."""
+        result = build_web_gamepad_mapping(DEFAULT_MAPPING)
+        assert result is None
+
+    def test_returns_dict_when_sdl_data_present(self) -> None:
+        """build_web_gamepad_mapping returns a dict when SDL data is present."""
+        mapping = self._make_mapping_with_sdl()
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        assert "buttons" in result
+        assert "axes" in result
+        assert "dpadButtons" in result
+
+    def test_button_sdl_half_maps_to_correct_index(self) -> None:
+        """SDL button entries map to the correct web gamepad button index."""
+        mapping = self._make_mapping_with_sdl()
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        # accept → sdl_button=1 → web index 1 → "accept"
+        assert result["buttons"][1] == "accept"
+        # cancel → sdl_button=0 → web index 0 → "cancel"
+        assert result["buttons"][0] == "cancel"
+
+    def test_hat_entries_produce_dpad_buttons(self) -> None:
+        """Hat SDL entries produce synthetic high button indices in dpadButtons."""
+        mapping = self._make_mapping_with_sdl()
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        # dpad_up → hat dir "up" → synthetic index 1000
+        assert 1000 in result["buttons"]
+        assert result["buttons"][1000] == "up"
+        assert result["dpadButtons"][1000] is True
+        # dpad_down → hat dir "down" → synthetic index 1001
+        assert 1001 in result["buttons"]
+        assert result["buttons"][1001] == "down"
+        assert result["dpadButtons"][1001] is True
+
+    def test_axis_sdl_half_maps_to_correct_index(self) -> None:
+        """SDL axis entries map to the correct web gamepad axis index."""
+        mapping = self._make_mapping_with_sdl()
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        # left_trigger → sdl_axis=2, dir=1 → axes[2][1] = "leftTrigger"
+        assert 2 in result["axes"]
+        assert result["axes"][2][1] == "leftTrigger"
+        # right_trigger → sdl_axis=5, dir=1 → axes[5][1] = "rightTrigger"
+        assert 5 in result["axes"]
+        assert result["axes"][5][1] == "rightTrigger"
+
+    def test_alternate_layout_swaps_accept_cancel(self) -> None:
+        """Alternate button layout swaps accept↔cancel in the web mapping."""
+        mapping = self._make_mapping_with_sdl()
+        result = build_web_gamepad_mapping(mapping, button_layout="alternate")
+        assert result is not None
+        # In alternate layout, accept action → "cancel" web name, cancel action → "accept" web name
+        assert result["buttons"][1] == "cancel"  # accept entry → swapped to "cancel"
+        assert result["buttons"][0] == "accept"  # cancel entry → swapped to "accept"
+
+    def test_skips_metadata_keys(self) -> None:
+        """build_web_gamepad_mapping skips keys starting with underscore."""
+        mapping = self._make_mapping_with_sdl()
+        mapping["_device"] = {"buttons": [304, 305], "axes": [0, 1]}
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        # _device should not cause errors or appear in output
+        assert "_device" not in result
+
+    def test_skips_entries_with_null_sdl(self) -> None:
+        """Entries with sdl=None are skipped in the web mapping."""
+        mapping = self._make_mapping_with_sdl()
+        mapping["start"] = {
+            "evdev": {"type": "button", "code": 315, "value": 1},
+            "sdl": None,
+        }
+        result = build_web_gamepad_mapping(mapping)
+        assert result is not None
+        # "start" should not appear in buttons (its sdl is None)
+        assert "start" not in result["buttons"].values()
 
 
 # ---------------------------------------------------------------------------
@@ -350,8 +581,8 @@ class TestGamepadManagerRawMode:
         assert len(received) == 1
         assert received[0] == ("button", ecodes.BTN_SOUTH, 1)
 
-    def test_raw_mode_button_release_does_not_emit(self) -> None:
-        """In raw mode, button release (value=0) does NOT emit rawInput."""
+    def test_raw_mode_button_release_emits_raw_input(self) -> None:
+        """In raw mode, button release (value=0) now emits rawInput."""
         from backend.gamepad import GamepadManager
 
         manager = GamepadManager()
@@ -362,8 +593,25 @@ class TestGamepadManagerRawMode:
 
         handler = self._make_handler(manager)
 
-        # Simulate BTN_SOUTH release
         event = _make_mock_event(ecodes.EV_KEY, ecodes.BTN_SOUTH, 0)
+        handler._handle_event(event)
+
+        assert len(received) == 1
+        assert received[0] == ("button", ecodes.BTN_SOUTH, 0)
+
+    def test_raw_mode_button_autorepeat_does_not_emit(self) -> None:
+        """In raw mode, kernel auto-repeat (value=2) does NOT emit rawInput."""
+        from backend.gamepad import GamepadManager
+
+        manager = GamepadManager()
+        manager.startRawMode()
+
+        received: list[tuple] = []
+        manager.rawInput.connect(lambda t, c, v: received.append((t, c, v)))
+
+        handler = self._make_handler(manager)
+
+        event = _make_mock_event(ecodes.EV_KEY, ecodes.BTN_SOUTH, 2)
         handler._handle_event(event)
 
         assert received == []
@@ -487,7 +735,7 @@ class TestGamepadManagerReloadMapping:
 
         # Now save a custom mapping that changes accept to code 999
         custom = get_default_mapping()
-        custom["accept"]["code"] = 999
+        custom["accept"]["evdev"]["code"] = 999
         mapping_file.write_text(json.dumps(custom), encoding="utf-8")
 
         manager.reloadMapping()
@@ -520,7 +768,7 @@ class TestGamepadManagerReloadMapping:
 
         # Now save a new mapping and reload
         custom = get_default_mapping()
-        custom["accept"]["code"] = 888
+        custom["accept"]["evdev"]["code"] = 888
         mapping_file.write_text(json.dumps(custom), encoding="utf-8")
 
         manager.reloadMapping()
@@ -729,9 +977,9 @@ class TestDeviceHandlerUnifiedLookup:
         from backend.gamepad import GamepadManager
         from PySide6.QtCore import QEvent
 
-        # Custom mapping: D-pad up is a button
+        # Custom mapping: D-pad up is a button (dual-record format)
         custom_mapping = get_default_mapping()
-        custom_mapping["dpad_up"] = {"type": "button", "code": 544, "value": 1}
+        custom_mapping["dpad_up"] = {"evdev": {"type": "button", "code": 544, "value": 1}, "sdl": None}
         lookup = build_evdev_lookup(custom_mapping)
 
         manager = GamepadManager()

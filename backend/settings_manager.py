@@ -27,7 +27,6 @@ import backend.retroarch_config as _ra_cfg
 
 logger = logging.getLogger(__name__)
 
-
 _OAUTH_POLL_INTERVAL_MS = 2000   # 2 seconds between polls
 _OAUTH_MAX_POLLS = 60            # give up after 60 × 2 s = 120 s
 
@@ -863,6 +862,24 @@ class SettingsManager(QObject):
             for name, display_name, _qt_key, skippable in ACTIONS
         ]
 
+    @Slot(result="QVariant")
+    def getControllerActionEvdevCodes(self) -> dict:
+        """Return a dict of action_name → evdev button code for the current mapping.
+
+        Used by ControllerMappingDialog to detect Start+Select combo cancel.
+        Only includes button-type entries with a valid code.
+        """
+        from backend.controller_mapping import load_mapping
+        mapping = load_mapping()
+        result: dict[str, int] = {}
+        for action, entry in mapping.items():
+            if not isinstance(entry, dict):
+                continue
+            evdev = entry.get("evdev")
+            if isinstance(evdev, dict) and evdev.get("type") == "button" and isinstance(evdev.get("code"), int):
+                result[action] = evdev["code"]
+        return result
+
     @Slot("QVariant")
     def saveControllerMapping(self, mapping: object) -> None:
         """Save a controller mapping recorded by the QML dialog.
@@ -870,9 +887,8 @@ class SettingsManager(QObject):
         ``mapping`` is a JS array of objects from QML:
         ``[{name, type, code, value}, ...]``
 
-        Converts to the dict format expected by save_mapping() and reloads.
-        Also records the current device capabilities as ``_device`` so the
-        browser extension can auto-generate its button/axis mapping.
+        Converts to the dual-record format expected by save_mapping() and reloads.
+        The SDL half is resolved at save time using the SdlResolver singleton.
         """
         # QML passes JS arrays as QJSValue — convert to Python list
         from PySide6.QtQml import QJSValue
@@ -881,6 +897,8 @@ class SettingsManager(QObject):
         if not isinstance(mapping, list):
             logger.warning("saveControllerMapping: expected list, got %s", type(mapping))
             return
+
+        from backend.sdl_resolver import resolver as _sdl_resolver
 
         mapping_dict: dict[str, dict] = {}
         for entry in mapping:
@@ -896,15 +914,33 @@ class SettingsManager(QObject):
                 and isinstance(code, int)
                 and isinstance(value, int)
             ):
-                mapping_dict[name] = {"type": ev_type, "code": code, "value": value}
+                evdev_part = {"type": ev_type, "code": code, "value": value}
+                # Resolve SDL half — value for axis is already ±1 from raw mode normalisation
+                sdl_part = _sdl_resolver.resolve(ev_type, code, value)
 
-        # Record device capabilities so the browser extension can auto-generate
-        # its Web Gamepad API mapping at deploy time.
-        if self._gamepad_manager is not None:
-            caps = self._gamepad_manager.getDeviceCapabilities()  # type: ignore[union-attr]
-            if isinstance(caps, dict) and caps:
-                mapping_dict["_device"] = caps
+                # Resolve co-firing (also) events
+                also_raw = entry.get("also") or []
+                also_evdev: list[dict] = []
+                for ae in also_raw:
+                    ae_type = ae.get("type")
+                    ae_code = ae.get("code")
+                    ae_value = ae.get("value")
+                    if (
+                        ae_type in ("button", "axis")
+                        and isinstance(ae_code, int)
+                        and isinstance(ae_value, int)
+                    ):
+                        ae_evdev = {"type": ae_type, "code": ae_code, "value": ae_value}
+                        ae_sdl = _sdl_resolver.resolve(ae_type, ae_code, ae_value)
+                        also_evdev.append({"evdev": ae_evdev, "sdl": ae_sdl})
 
+                mapping_dict[name] = {
+                    "evdev": evdev_part,
+                    "sdl": sdl_part,
+                    "also": also_evdev,
+                }
+
+        # _device key is no longer stored — SDL resolution is done at capture time
         save_mapping(mapping_dict)
         logger.info("saveControllerMapping: saved %d entries", len(mapping_dict))
 
@@ -924,15 +960,23 @@ class SettingsManager(QObject):
     # Slots — RetroArch hotkey configuration
     # ------------------------------------------------------------------
 
-    # Ordered list of HTPC actions for the hotkey UI rows.
-    _HTPC_ACTION_ORDER = [
-        "accept", "cancel", "context1", "context2",
-        "left_shoulder", "right_shoulder",
-        "start", "select",
-        "left_trigger", "right_trigger",
+    # Ordered hotkey rows for the UI (hotkey-function-centric model).
+    _HOTKEY_ROWS: list[dict] = [
+        {"hotkey_action": "save_state",          "label": "Save State"},
+        {"hotkey_action": "load_state",          "label": "Load State"},
+        {"hotkey_action": "fast_forward_toggle", "label": "Fast Forward (Toggle)"},
+        {"hotkey_action": "fast_forward_hold",   "label": "Fast Forward (Hold)"},
+        {"hotkey_action": "rewind",              "label": "Rewind"},
+        {"hotkey_action": "menu_toggle",         "label": "Open Menu"},
+        {"hotkey_action": "screenshot",          "label": "Screenshot"},
+        {"hotkey_action": "show_fps",            "label": "Show FPS"},
+        {"hotkey_action": "state_slot_increase", "label": "Next Save Slot"},
+        {"hotkey_action": "state_slot_decrease", "label": "Previous Save Slot"},
+        {"hotkey_action": "pause_toggle",        "label": "Pause Toggle"},
+        {"hotkey_action": "exit_emulator",       "label": "Exit Emulator"},
     ]
 
-    # Human-readable labels for evdev button codes.
+    # Human-readable labels for evdev button codes (kept for modifier fallback display).
     _EVDEV_LABELS: dict[int, str] = {
         304: "B/South", 305: "A/East", 307: "X/North", 308: "Y/West",
         310: "L1", 311: "R1", 312: "L2", 313: "R2",
@@ -940,9 +984,77 @@ class SettingsManager(QObject):
         317: "L3", 318: "R3",
     }
 
-    def _get_hotkey_button_label(self, evdev_code: int) -> str:
-        """Return a human-readable label for an evdev button code."""
-        return self._EVDEV_LABELS.get(evdev_code, f"Button {evdev_code}")
+    # Face button labels with cardinal positions.
+    # SDL always uses Xbox button names internally: A=East, B=South, X=West, Y=North.
+    # This codebase defines two layouts:
+    #   Standard:  A=East, B=South, X=North, Y=West  (Nintendo-style labelling)
+    #   Alternate: A=South, B=East, X=West, Y=North  (Xbox-style labelling)
+    #
+    # The maps below translate SDL names → display label + cardinal for each layout.
+    # Standard swaps X↔Y relative to SDL (SDL X=West→display Y=West, SDL Y=North→display X=North).
+    # Alternate matches SDL names directly (SDL X=West, SDL Y=North).
+    _FACE_LABELS_STANDARD: dict[str, str] = {
+        "A": "A (East)",   # SDL A = East physical = display A in standard
+        "B": "B (South)",  # SDL B = South physical = display B in standard
+        "X": "Y (West)",   # SDL X = West physical = display Y in standard
+        "Y": "X (North)",  # SDL Y = North physical = display X in standard
+    }
+    _FACE_LABELS_ALTERNATE: dict[str, str] = {
+        "A": "B (East)",   # SDL A = East physical = display B in alternate
+        "B": "A (South)",  # SDL B = South physical = display A in alternate
+        "X": "X (West)",   # SDL X = West physical = display X in alternate
+        "Y": "Y (North)",  # SDL Y = North physical = display Y in alternate
+    }
+
+    def _sdl_record_label(self, sdl_record: dict | None) -> str:
+        """Return a human-readable label for an SDL record, honoring button_layout."""
+        if sdl_record is None or not isinstance(sdl_record, dict):
+            return ""
+        sdl_type = sdl_record.get("type")
+        if sdl_type == "button":
+            # Label is stored in the record at capture time by resolver.resolve()
+            label = sdl_record.get("label", "")
+            if label:
+                # Expand face button labels with cardinal position
+                face_map = (
+                    self._FACE_LABELS_ALTERNATE
+                    if self._config.button_layout == "alternate"
+                    else self._FACE_LABELS_STANDARD
+                )
+                return face_map.get(label, label)
+            # Fallback for records stored before label was added
+            from backend.sdl_resolver import resolver as _sdl_resolver
+            idx = sdl_record.get("sdl_button", -1)
+            return _sdl_resolver.button_label(idx)
+        elif sdl_type == "axis":
+            # Label is stored in the record at capture time by resolver.resolve()
+            label = sdl_record.get("label", "")
+            if label:
+                return label
+            # Fallback for records stored before label was added
+            axis = sdl_record.get("sdl_axis", -1)
+            direction = sdl_record.get("dir", 1)
+            return f"Axis {axis} {'-' if direction < 0 else '+'}"
+        elif sdl_type == "hat":
+            direction = sdl_record.get("dir", "")
+            _HAT_LABELS = {"up": "D-pad Up", "down": "D-pad Down",
+                           "left": "D-pad Left", "right": "D-pad Right"}
+            return _HAT_LABELS.get(direction, f"Hat {direction}")
+        return ""
+
+    @Slot(result=bool)
+    def hasControllerMappingWithSdl(self) -> bool:
+        """Return True if the saved controller mapping has at least one non-null SDL half.
+
+        Used by RetroarchHotkeysScreen to warn the user if they haven't run the
+        controller mapping wizard before assigning hotkeys.
+        """
+        from backend.controller_mapping import load_mapping
+        mapping = load_mapping()
+        return any(
+            isinstance(entry, dict) and isinstance(entry.get("sdl"), dict)
+            for entry in mapping.values()
+        )
 
     @Slot(result="QVariant")
     def getRetroarchHotkeyConfig(self) -> dict:
@@ -950,58 +1062,51 @@ class SettingsManager(QObject):
 
         Returns dict with:
           - modifier_evdev: int | None  (evdev code of modifier button)
-          - modifier_sdl: int | None    (SDL index, derived from evdev code)
+          - modifier_sdl_record: dict | None  (SDL record for modifier)
           - modifier_label: str         (human-readable button name, e.g. "Home")
-          - mapping: dict[str, int|None]  (hotkey_action → SDL index)
-          - htpc_actions: list[dict]    (ordered list for UI rows)
+          - mapping: dict[str, dict|None]  (hotkey_action → SDL record)
+          - hotkey_rows: list[dict]     (ordered list for UI rows)
           - cfg_path: str
+          - rewind_enable: bool
+          - rewind_buffer_size: int
+          - rewind_granularity: int
         """
         modifier_evdev = self._config.hotkey_modifier_evdev
-        modifier_sdl = (
-            _ra_cfg.evdev_code_to_sdl_index(modifier_evdev)
-            if modifier_evdev is not None
-            else None
-        )
-        modifier_label = (
-            self._get_hotkey_button_label(modifier_evdev)
-            if modifier_evdev is not None
-            else ""
-        )
+        modifier_sdl_record = self._config.hotkey_modifier_sdl
 
-        # If hotkey_mapping is empty (first run), derive defaults from controller mapping.
+        # Derive modifier label: prefer SDL record label, fall back to evdev label
+        if modifier_sdl_record is not None:
+            modifier_label = self._sdl_record_label(modifier_sdl_record)
+        elif modifier_evdev is not None:
+            modifier_label = self._EVDEV_LABELS.get(modifier_evdev, f"Button {modifier_evdev}")
+        else:
+            modifier_label = ""
+
+        # The mapping is always config.hotkey_mapping (empty dict = nothing assigned yet).
         mapping = dict(self._config.hotkey_mapping)
-        if not mapping:
-            controller_mapping = load_mapping()
-            for htpc_action, hotkey_action in _ra_cfg.HTPC_TO_HOTKEY.items():
-                entry = controller_mapping.get(htpc_action)
-                if entry is not None and entry.get("type") == "button":
-                    evdev_code = entry.get("code")
-                    if isinstance(evdev_code, int):
-                        mapping[hotkey_action] = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
-                    else:
-                        mapping[hotkey_action] = None
-                else:
-                    mapping[hotkey_action] = None
 
-        # Build ordered htpc_actions list for UI rows.
-        htpc_actions = []
-        for htpc_action in self._HTPC_ACTION_ORDER:
-            hotkey_action = _ra_cfg.HTPC_TO_HOTKEY.get(htpc_action, "")
-            sdl_index = mapping.get(hotkey_action)
-            htpc_actions.append({
-                "htpc_action": htpc_action,
-                "hotkey_action": hotkey_action,
-                "label": hotkey_action.replace("_", " ").title(),
-                "sdl_index": sdl_index,
+        # Build ordered hotkey_rows list for UI rows.
+        hotkey_rows = []
+        for row in self._HOTKEY_ROWS:
+            action = row["hotkey_action"]
+            sdl_record = mapping.get(action)
+            hotkey_rows.append({
+                "hotkey_action": action,
+                "label": row["label"],
+                "sdl_record": sdl_record,
+                "button_label": self._sdl_record_label(sdl_record),
             })
 
         return {
             "modifier_evdev": modifier_evdev,
-            "modifier_sdl": modifier_sdl,
+            "modifier_sdl_record": modifier_sdl_record,
             "modifier_label": modifier_label,
             "mapping": mapping,
-            "htpc_actions": htpc_actions,
+            "hotkey_rows": hotkey_rows,
             "cfg_path": self._config.retroarch_cfg_path_str,
+            "rewind_enable": self._config.rewind_enable,
+            "rewind_buffer_size": self._config.rewind_buffer_size,
+            "rewind_granularity": self._config.rewind_granularity,
         }
 
     @Slot(str, int)
@@ -1014,17 +1119,28 @@ class SettingsManager(QObject):
 
     @Slot(int)
     def setHotkeyModifier(self, evdev_code: int) -> None:
-        """Set the modifier button by evdev code. Derives SDL index. Persists."""
+        """Set the modifier button by evdev code. Resolves SDL record. Persists."""
+        from backend.sdl_resolver import resolver as _sdl_resolver
+        sdl_record = _sdl_resolver.resolve("button", evdev_code, 1)
+        # Evict any hotkey action using the same SDL record
+        if sdl_record is not None:
+            mapping = dict(self._config.hotkey_mapping)
+            changed = False
+            for action, rec in mapping.items():
+                if rec == sdl_record:
+                    mapping[action] = None
+                    changed = True
+            if changed:
+                self._config.set_hotkey_mapping(mapping)
         self._config.set_hotkey_modifier_evdev(evdev_code)
-        sdl = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
-        logger.debug(
-            "setHotkeyModifier: evdev %d → SDL %s", evdev_code, sdl
-        )
+        self._config.set_hotkey_modifier_sdl(sdl_record)
+        logger.debug("setHotkeyModifier: evdev %d → SDL %s", evdev_code, sdl_record)
 
     @Slot()
     def clearHotkeyModifier(self) -> None:
         """Clear the modifier button (set to None). Persists."""
         self._config.set_hotkey_modifier_evdev(None)
+        self._config.set_hotkey_modifier_sdl(None)
         logger.debug("clearHotkeyModifier: modifier cleared")
 
     @Slot()
@@ -1032,37 +1148,30 @@ class SettingsManager(QObject):
         """Write current hotkey config to retroarch.cfg.
 
         Calls retroarch_config.build_hotkey_cfg() then write_cfg().
-        Logs success or error. Does not raise.
+        Also writes rewind settings. Logs success or error. Does not raise.
         """
-        modifier_evdev = self._config.hotkey_modifier_evdev
-        modifier_sdl = (
-            _ra_cfg.evdev_code_to_sdl_index(modifier_evdev)
-            if modifier_evdev is not None
-            else None
-        )
-
+        modifier_sdl_record = self._config.hotkey_modifier_sdl
         mapping = dict(self._config.hotkey_mapping)
-        # If mapping is empty, derive from controller mapping (same logic as getRetroarchHotkeyConfig)
-        if not mapping:
-            controller_mapping = load_mapping()
-            for htpc_action, hotkey_action in _ra_cfg.HTPC_TO_HOTKEY.items():
-                entry = controller_mapping.get(htpc_action)
-                if entry is not None and entry.get("type") == "button":
-                    evdev_code = entry.get("code")
-                    if isinstance(evdev_code, int):
-                        mapping[hotkey_action] = _ra_cfg.evdev_code_to_sdl_index(evdev_code)
-                    else:
-                        mapping[hotkey_action] = None
-                else:
-                    mapping[hotkey_action] = None
 
-        cfg_updates = _ra_cfg.build_hotkey_cfg(mapping, modifier_sdl)
+        cfg_updates = _ra_cfg.build_hotkey_cfg(mapping, modifier_sdl_record)
         cfg_path = self._config.retroarch_cfg_path
         try:
             _ra_cfg.write_cfg(cfg_path, cfg_updates)
             logger.info("applyRetroarchHotkeys: wrote %d keys to %s", len(cfg_updates), cfg_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("applyRetroarchHotkeys: failed to write %s: %s", cfg_path, exc)
+            return
+
+        rewind_updates = {
+            "rewind_enable": "true" if self._config.rewind_enable else "false",
+            "rewind_buffer_size": str(self._config.rewind_buffer_size),
+            "rewind_granularity": str(self._config.rewind_granularity),
+        }
+        try:
+            _ra_cfg.write_cfg(cfg_path, rewind_updates)
+            logger.info("applyRetroarchHotkeys: wrote rewind settings to %s", cfg_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("applyRetroarchHotkeys: failed to write rewind settings to %s: %s", cfg_path, exc)
 
     @Slot(result=str)
     def getRetroarchCfgPath(self) -> str:
@@ -1074,3 +1183,57 @@ class SettingsManager(QObject):
         """Set the retroarch.cfg path and persist."""
         self._config.set_retroarch_cfg_path(path)
         logger.debug("setRetroarchCfgPath: %s", path)
+
+    @Slot(bool)
+    def setRewindEnable(self, value: bool) -> None:
+        """Enable or disable rewind in RetroArch."""
+        self._config.set_rewind_enable(value)
+
+    @Slot(int)
+    def setRewindBufferSize(self, value: int) -> None:
+        """Set the rewind buffer size in MB."""
+        self._config.set_rewind_buffer_size(value)
+
+    @Slot(int)
+    def setRewindGranularity(self, value: int) -> None:
+        """Set the rewind granularity in frames."""
+        self._config.set_rewind_granularity(value)
+
+    @Slot(str, int)
+    def setHotkeyActionByEvdev(self, hotkey_action: str, evdev_code: int) -> None:
+        """Set a hotkey action by evdev button code. Resolves SDL record internally."""
+        from backend.sdl_resolver import resolver as _sdl_resolver
+        sdl_record = _sdl_resolver.resolve("button", evdev_code, 1)
+        self._store_hotkey_sdl(hotkey_action, sdl_record)
+        logger.debug("setHotkeyActionByEvdev: %s → evdev %d → SDL %s", hotkey_action, evdev_code, sdl_record)
+
+    @Slot(str, int, int)
+    def setHotkeyActionByAxis(self, hotkey_action: str, evdev_code: int, value: int) -> None:
+        """Set a hotkey action by evdev axis/hat event. Resolves SDL record internally."""
+        from backend.sdl_resolver import resolver as _sdl_resolver
+        sdl_record = _sdl_resolver.resolve("axis", evdev_code, value)
+        self._store_hotkey_sdl(hotkey_action, sdl_record)
+        logger.debug("setHotkeyActionByAxis: %s → evdev %d/%d → SDL %s", hotkey_action, evdev_code, value, sdl_record)
+
+    def _store_hotkey_sdl(self, hotkey_action: str, sdl_record: dict | None) -> None:
+        """Store an SDL record for a hotkey action, evicting conflicts."""
+        mapping = dict(self._config.hotkey_mapping)
+        # Evict any OTHER action using the same SDL record
+        if sdl_record is not None:
+            for action, rec in mapping.items():
+                if action != hotkey_action and rec == sdl_record:
+                    mapping[action] = None
+        # Evict modifier if it uses the same SDL record
+        if sdl_record is not None and self._config.hotkey_modifier_sdl == sdl_record:
+            self._config.set_hotkey_modifier_evdev(None)
+            self._config.set_hotkey_modifier_sdl(None)
+        mapping[hotkey_action] = sdl_record
+        self._config.set_hotkey_mapping(mapping)
+
+    @Slot(str)
+    def clearHotkeyAction(self, hotkey_action: str) -> None:
+        """Clear a single hotkey action (set to None/nul)."""
+        mapping = dict(self._config.hotkey_mapping)
+        mapping[hotkey_action] = None
+        self._config.set_hotkey_mapping(mapping)
+        logger.debug("clearHotkeyAction: %s cleared", hotkey_action)

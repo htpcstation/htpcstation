@@ -11,59 +11,74 @@ DEFAULT_RETROARCH_CFG = (
     Path.home() / ".var/app/org.libretro.RetroArch/config/retroarch/retroarch.cfg"
 )
 
-# Hotkey action name → retroarch.cfg key
-HOTKEY_CFG_KEYS: dict[str, str] = {
-    "menu_toggle":       "input_menu_toggle_btn",
-    "exit_emulator":     "input_exit_emulator_btn",
-    "save_state":        "input_save_state_btn",
-    "load_state":        "input_load_state_btn",
-    "state_slot_minus":  "input_state_slot_decrease_btn",
-    "state_slot_plus":   "input_state_slot_increase_btn",
-    "pause_toggle":      "input_pause_toggle_btn",
-    "screenshot":        "input_screenshot_btn",
-    "rewind":            "input_rewind_btn",
-    "fast_forward":      "input_fast_forward_btn",
-    "enable_hotkey":     "input_enable_hotkey_btn",
+# Hotkey action name → dict of three parallel cfg keys (btn / axis / hat)
+HOTKEY_CFG_KEYS: dict[str, dict[str, str]] = {
+    "save_state": {
+        "btn":  "input_save_state_btn",
+        "axis": "input_save_state_axis",
+        "hat":  "input_save_state_hat",
+    },
+    "load_state": {
+        "btn":  "input_load_state_btn",
+        "axis": "input_load_state_axis",
+        "hat":  "input_load_state_hat",
+    },
+    "fast_forward_toggle": {
+        "btn":  "input_toggle_fast_forward_btn",
+        "axis": "input_toggle_fast_forward_axis",
+        "hat":  "input_toggle_fast_forward_hat",
+    },
+    "fast_forward_hold": {
+        "btn":  "input_hold_fast_forward_btn",
+        "axis": "input_hold_fast_forward_axis",
+        "hat":  "input_hold_fast_forward_hat",
+    },
+    "rewind": {
+        "btn":  "input_rewind_btn",
+        "axis": "input_rewind_axis",
+        "hat":  "input_rewind_hat",
+    },
+    "menu_toggle": {
+        "btn":  "input_menu_toggle_btn",
+        "axis": "input_menu_toggle_axis",
+        "hat":  "input_menu_toggle_hat",
+    },
+    "screenshot": {
+        "btn":  "input_screenshot_btn",
+        "axis": "input_screenshot_axis",
+        "hat":  "input_screenshot_hat",
+    },
+    "show_fps": {
+        "btn":  "input_toggle_statistics_btn",
+        "axis": "input_toggle_statistics_axis",
+        "hat":  "input_toggle_statistics_hat",
+    },
+    "state_slot_increase": {
+        "btn":  "input_state_slot_increase_btn",
+        "axis": "input_state_slot_increase_axis",
+        "hat":  "input_state_slot_increase_hat",
+    },
+    "state_slot_decrease": {
+        "btn":  "input_state_slot_decrease_btn",
+        "axis": "input_state_slot_decrease_axis",
+        "hat":  "input_state_slot_decrease_hat",
+    },
+    "pause_toggle": {
+        "btn":  "input_pause_toggle_btn",
+        "axis": "input_pause_toggle_axis",
+        "hat":  "input_pause_toggle_hat",
+    },
+    "exit_emulator": {
+        "btn":  "input_exit_emulator_btn",
+        "axis": "input_exit_emulator_axis",
+        "hat":  "input_exit_emulator_hat",
+    },
+    "enable_hotkey": {
+        "btn":  "input_enable_hotkey_btn",
+        "axis": "input_enable_hotkey_axis",   # written as "nul" always (modifier is btn-only)
+        "hat":  "input_enable_hotkey_hat",    # written as "nul" always
+    },
 }
-
-# HTPC Station action name → hotkey action name (for default mapping)
-HTPC_TO_HOTKEY: dict[str, str] = {
-    "accept":          "menu_toggle",
-    "cancel":          "exit_emulator",
-    "context1":        "save_state",
-    "context2":        "load_state",
-    "left_shoulder":   "state_slot_minus",
-    "right_shoulder":  "state_slot_plus",
-    "start":           "pause_toggle",
-    "select":          "screenshot",
-    "left_trigger":    "rewind",
-    "right_trigger":   "fast_forward",
-}
-
-# Static evdev button code → SDL joypad index for 8BitDo Micro D-input.
-# SDL indices are determined by the SDL gamepad database entry for this device.
-# This table covers all buttons in DEFAULT_MAPPING plus BTN_MODE (Home).
-# For unknown controllers, fall back to None (write "nul").
-EVDEV_TO_SDL: dict[int, int] = {
-    305: 0,   # BTN_EAST   → SDL 0
-    304: 1,   # BTN_SOUTH  → SDL 1
-    308: 2,   # BTN_WEST   → SDL 2
-    307: 3,   # BTN_NORTH  → SDL 3
-    310: 4,   # BTN_TL     → SDL 4
-    311: 5,   # BTN_TR     → SDL 5
-    314: 6,   # BTN_SELECT → SDL 6
-    315: 7,   # BTN_START  → SDL 7
-    316: 8,   # BTN_MODE   → SDL 8  (Home button)
-    312: 9,   # BTN_TL2    → SDL 9
-    313: 10,  # BTN_TR2    → SDL 10
-    317: 11,  # BTN_THUMBL → SDL 11
-    318: 12,  # BTN_THUMBR → SDL 12
-}
-
-
-def evdev_code_to_sdl_index(evdev_code: int) -> int | None:
-    """Return SDL joypad index for an evdev button code, or None if unknown."""
-    return EVDEV_TO_SDL.get(evdev_code)
 
 
 def read_cfg(path: Path) -> dict[str, str]:
@@ -142,25 +157,63 @@ def write_cfg(path: Path, updates: dict[str, str]) -> None:
 
 
 def build_hotkey_cfg(
-    hotkey_mapping: dict[str, int | None],  # hotkey_action → SDL index or None
-    modifier_sdl: int | None,               # SDL index for enable_hotkey, or None
+    hotkey_mapping: dict[str, dict | None],  # hotkey_action → SDL record or None
+    modifier_sdl_record: dict | None,        # SDL record for enable_hotkey, or None
 ) -> dict[str, str]:
     """Convert hotkey mapping to retroarch.cfg key=value pairs.
 
-    Returns dict ready to pass to write_cfg().
-    None values write "nul". Includes input_enable_hotkey_btn.
+    For each action, writes exactly one of _btn/_axis/_hat with the value,
+    and writes "nul" for the other two. None values write "nul" for all three.
+    Modifier (enable_hotkey) is always written as _btn only (axis/hat = "nul").
     """
     result: dict[str, str] = {}
 
-    for hotkey_action, cfg_key in HOTKEY_CFG_KEYS.items():
+    for hotkey_action, cfg_keys in HOTKEY_CFG_KEYS.items():
         if hotkey_action == "enable_hotkey":
-            sdl_index = modifier_sdl
+            sdl_record = modifier_sdl_record
         else:
-            sdl_index = hotkey_mapping.get(hotkey_action)
+            sdl_record = hotkey_mapping.get(hotkey_action)
 
-        if sdl_index is None:
-            result[cfg_key] = "nul"
+        btn_key  = cfg_keys["btn"]
+        axis_key = cfg_keys["axis"]
+        hat_key  = cfg_keys["hat"]
+
+        if sdl_record is None or hotkey_action == "enable_hotkey":
+            # Modifier: always btn-only. Others: None = nul for all.
+            if hotkey_action == "enable_hotkey" and sdl_record is not None:
+                sdl_type = sdl_record.get("type")
+                if sdl_type == "button":
+                    result[btn_key]  = str(sdl_record["sdl_button"])
+                else:
+                    result[btn_key]  = "nul"
+            else:
+                result[btn_key]  = "nul"
+            result[axis_key] = "nul"
+            result[hat_key]  = "nul"
+            continue
+
+        sdl_type = sdl_record.get("type")
+
+        if sdl_type == "button":
+            result[btn_key]  = str(sdl_record["sdl_button"])
+            result[axis_key] = "nul"
+            result[hat_key]  = "nul"
+        elif sdl_type == "axis":
+            sdl_axis = sdl_record["sdl_axis"]
+            direction = sdl_record["dir"]  # +1 or -1
+            axis_str = f"+{sdl_axis}" if direction > 0 else f"-{sdl_axis}"
+            result[btn_key]  = "nul"
+            result[axis_key] = axis_str
+            result[hat_key]  = "nul"
+        elif sdl_type == "hat":
+            sdl_hat = sdl_record["sdl_hat"]
+            direction = sdl_record["dir"]  # "up"|"down"|"left"|"right"
+            result[btn_key]  = "nul"
+            result[axis_key] = "nul"
+            result[hat_key]  = f"{sdl_hat}{direction}"  # e.g. "0up"
         else:
-            result[cfg_key] = str(sdl_index)
+            result[btn_key]  = "nul"
+            result[axis_key] = "nul"
+            result[hat_key]  = "nul"
 
     return result

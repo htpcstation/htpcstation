@@ -76,20 +76,20 @@ _ABS_HAT0X  = 16
 _ABS_HAT0Y  = 17
 
 DEFAULT_MAPPING: dict[str, dict] = {
-    "dpad_up":        {"type": "axis",   "code": _ABS_HAT0Y,  "value": -1},
-    "dpad_down":      {"type": "axis",   "code": _ABS_HAT0Y,  "value":  1},
-    "dpad_left":      {"type": "axis",   "code": _ABS_HAT0X,  "value": -1},
-    "dpad_right":     {"type": "axis",   "code": _ABS_HAT0X,  "value":  1},
-    "accept":         {"type": "button", "code": _BTN_EAST,   "value":  1},
-    "cancel":         {"type": "button", "code": _BTN_SOUTH,  "value":  1},
-    "context1":       {"type": "button", "code": _BTN_NORTH,  "value":  1},
-    "context2":       {"type": "button", "code": _BTN_WEST,   "value":  1},
-    "left_shoulder":  {"type": "button", "code": _BTN_TL,     "value":  1},
-    "right_shoulder": {"type": "button", "code": _BTN_TR,     "value":  1},
-    "left_trigger":   {"type": "axis",   "code": _ABS_Z,      "value":  1},
-    "right_trigger":  {"type": "axis",   "code": _ABS_RZ,     "value":  1},
-    "start":          {"type": "button", "code": _BTN_START,  "value":  1},
-    "select":         {"type": "button", "code": _BTN_SELECT, "value":  1},
+    "dpad_up":        {"evdev": {"type": "axis",   "code": _ABS_HAT0Y,  "value": -1}, "sdl": None},
+    "dpad_down":      {"evdev": {"type": "axis",   "code": _ABS_HAT0Y,  "value":  1}, "sdl": None},
+    "dpad_left":      {"evdev": {"type": "axis",   "code": _ABS_HAT0X,  "value": -1}, "sdl": None},
+    "dpad_right":     {"evdev": {"type": "axis",   "code": _ABS_HAT0X,  "value":  1}, "sdl": None},
+    "accept":         {"evdev": {"type": "button", "code": _BTN_EAST,   "value":  1}, "sdl": None},
+    "cancel":         {"evdev": {"type": "button", "code": _BTN_SOUTH,  "value":  1}, "sdl": None},
+    "context1":       {"evdev": {"type": "button", "code": _BTN_NORTH,  "value":  1}, "sdl": None},
+    "context2":       {"evdev": {"type": "button", "code": _BTN_WEST,   "value":  1}, "sdl": None},
+    "left_shoulder":  {"evdev": {"type": "button", "code": _BTN_TL,     "value":  1}, "sdl": None},
+    "right_shoulder": {"evdev": {"type": "button", "code": _BTN_TR,     "value":  1}, "sdl": None},
+    "left_trigger":   {"evdev": {"type": "axis",   "code": _ABS_Z,      "value":  1}, "sdl": None},
+    "right_trigger":  {"evdev": {"type": "axis",   "code": _ABS_RZ,     "value":  1}, "sdl": None},
+    "start":          {"evdev": {"type": "button", "code": _BTN_START,  "value":  1}, "sdl": None},
+    "select":         {"evdev": {"type": "button", "code": _BTN_SELECT, "value":  1}, "sdl": None},
 }
 
 # ---------------------------------------------------------------------------
@@ -104,14 +104,17 @@ def get_mapping_path() -> Path:
 
 def get_default_mapping() -> dict[str, dict]:
     """Return a deep copy of DEFAULT_MAPPING."""
-    return {action: dict(entry) for action, entry in DEFAULT_MAPPING.items()}
+    import copy
+    return copy.deepcopy(DEFAULT_MAPPING)
 
 
 def load_mapping() -> dict[str, dict]:
     """Load mapping from file; fall back to DEFAULT_MAPPING if missing or corrupt.
 
-    The returned dict may contain a ``_device`` key with device capabilities
-    recorded at mapping time (see :func:`save_mapping`).
+    Supports migration from the old single-record format (pre-008-B):
+    entries without an ``evdev`` key are wrapped as ``{"evdev": old_entry, "sdl": None}``.
+
+    The ``_device`` key (legacy) is silently dropped on load.
     """
     path = get_mapping_path()
     if not path.exists():
@@ -125,17 +128,27 @@ def load_mapping() -> dict[str, dict]:
         result = get_default_mapping()
         for action, entry in data.items():
             if action == "_device":
-                # Preserve device capabilities block as-is (validated below)
-                if isinstance(entry, dict):
-                    result["_device"] = entry
+                continue  # silently drop legacy _device key
+            if not isinstance(entry, dict):
                 continue
+
+            # Migration: old single-record format → wrap as evdev half
+            if "evdev" not in entry and entry.get("type") in ("button", "axis"):
+                entry = {"evdev": entry, "sdl": None}
+
+            evdev_part = entry.get("evdev")
             if (
-                isinstance(entry, dict)
-                and entry.get("type") in ("button", "axis")
-                and isinstance(entry.get("code"), int)
-                and isinstance(entry.get("value"), int)
+                isinstance(evdev_part, dict)
+                and evdev_part.get("type") in ("button", "axis")
+                and isinstance(evdev_part.get("code"), int)
+                and isinstance(evdev_part.get("value"), int)
             ):
-                result[action] = {"type": entry["type"], "code": entry["code"], "value": entry["value"]}
+                sdl_part = entry.get("sdl")  # may be None or a dict
+                result[action] = {
+                    "evdev": evdev_part,
+                    "sdl": sdl_part,
+                    "also": entry.get("also") or [],
+                }
         return result
     except Exception as exc:
         log.warning("Failed to load controller mapping from %s: %s — using defaults", path, exc)
@@ -190,9 +203,13 @@ def build_evdev_lookup(mapping: dict[str, dict]) -> dict[tuple[int, int, int], Q
         if qt_key is None:
             continue  # Unknown action — skip
 
-        ev_type_str = entry.get("type")
-        code = entry.get("code")
-        value = entry.get("value")
+        evdev_part = entry.get("evdev") if isinstance(entry, dict) else None
+        if not isinstance(evdev_part, dict):
+            continue
+
+        ev_type_str = evdev_part.get("type")
+        code = evdev_part.get("code")
+        value = evdev_part.get("value")
 
         if not isinstance(code, int) or not isinstance(value, int):
             continue
@@ -209,22 +226,6 @@ def build_evdev_lookup(mapping: dict[str, dict]) -> dict[tuple[int, int, int], Q
 # ---------------------------------------------------------------------------
 # Web Gamepad API mapping generation
 # ---------------------------------------------------------------------------
-
-# Hat axis codes (ABS_HAT0X, ABS_HAT0Y) — hard-coded for evdev-absent environments
-_ABS_HAT_CODES = {_ABS_HAT0X, _ABS_HAT0Y}
-
-# Chromium hat-to-button offset table:
-# ABS_HAT0Y=-1 → up   (offset 0)
-# ABS_HAT0Y=+1 → down (offset 1)
-# ABS_HAT0X=-1 → left (offset 2)
-# ABS_HAT0X=+1 → right (offset 3)
-_HAT_BUTTON_OFFSETS: dict[tuple[int, int], int] = {
-    (_ABS_HAT0Y, -1): 0,  # up
-    (_ABS_HAT0Y,  1): 1,  # down
-    (_ABS_HAT0X, -1): 2,  # left
-    (_ABS_HAT0X,  1): 3,  # right
-}
-
 
 # Translation from our semantic action names to the names content.js expects.
 _WEB_ACTION_NAMES: dict[str, str] = {
@@ -248,96 +249,81 @@ _WEB_ACTION_NAMES: dict[str, str] = {
 def build_web_gamepad_mapping(mapping: dict, button_layout: str = "standard") -> Optional[dict]:
     """Generate a Web Gamepad API button/axis mapping from the stored config.
 
-    Uses the ``_device`` capabilities recorded at mapping time to translate
-    evdev codes to Web Gamepad API indices.
+    Reads the ``sdl`` half of each dual-record entry. Returns None if no entry
+    has a non-null sdl half (user has not run the mapping dialog with SDL support).
 
     Returns a dict with keys:
         ``buttons``     — {web_index: action_name}
         ``axes``        — {web_index: [neg_action, pos_action]}
         ``dpadButtons`` — {web_index: True} for D-pad button indices
-
-    Returns ``None`` if ``_device`` is missing from the mapping (user has not
-    run the mapping dialog yet).
     """
-    device = mapping.get("_device")
-    if not isinstance(device, dict):
+    # Check if any entry has SDL data
+    has_sdl = any(
+        isinstance(entry, dict) and entry.get("sdl") is not None
+        for action, entry in mapping.items()
+        if not action.startswith("_")
+    )
+    if not has_sdl:
         return None
 
-    raw_buttons = device.get("buttons")
-    raw_axes = device.get("axes")
-    if not isinstance(raw_buttons, list) or not isinstance(raw_axes, list):
-        return None
-
-    # Sorted EV_KEY button codes → Web API button indices
-    sorted_buttons: list[int] = sorted(int(c) for c in raw_buttons if isinstance(c, int))
-    # Sorted EV_ABS axis codes
-    sorted_axes: list[int] = sorted(int(c) for c in raw_axes if isinstance(c, int))
-
-    # Regular (non-hat) axes — these become Web API axes
-    regular_axes: list[int] = [c for c in sorted_axes if c not in _ABS_HAT_CODES]
-    # Hat axes present on this device
-    hat_axes_present: set[int] = {c for c in sorted_axes if c in _ABS_HAT_CODES}
-
-    # Number of regular EV_KEY buttons → hat buttons start here
-    n_regular_buttons = len(sorted_buttons)
+    _layout_swap: dict[str, str] = {}
+    if button_layout == "alternate":
+        _layout_swap = {
+            "accept": "cancel", "cancel": "accept",
+            "context1": "context2", "context2": "context1",
+        }
 
     buttons_out: dict[int, str] = {}
     axes_out: dict[int, list] = {}
     dpad_buttons_out: dict[int, bool] = {}
 
-    # When alternate layout, swap accept↔cancel and context1↔context2
-    # so the browser extension matches the functional swap in keys.py.
-    _layout_swap: dict[str, str] = {}
-    if button_layout == "alternate":
-        _layout_swap = {
-            "accept": "cancel",
-            "cancel": "accept",
-            "context1": "context2",
-            "context2": "context1",
-        }
-
     for action_name, entry in mapping.items():
         if action_name.startswith("_"):
-            continue  # skip metadata keys
-
-        ev_type = entry.get("type")
-        code = entry.get("code")
-        value = entry.get("value")
-
-        if not isinstance(code, int) or not isinstance(value, int):
+            continue
+        if not isinstance(entry, dict):
             continue
 
-        # Apply layout swap before translating to web action name
+        sdl = entry.get("sdl")
+        if not isinstance(sdl, dict):
+            continue
+
         swapped_name = _layout_swap.get(action_name, action_name)
         web_name = _WEB_ACTION_NAMES.get(swapped_name, swapped_name)
 
-        if ev_type == "button":
-            # EV_KEY button → position in sorted button list
-            if code in sorted_buttons:
-                web_idx = sorted_buttons.index(code)
+        sdl_type = sdl.get("type")
+
+        if sdl_type == "button":
+            web_idx = sdl.get("sdl_button")
+            if isinstance(web_idx, int):
                 buttons_out[web_idx] = web_name
 
-        elif ev_type == "axis":
-            if code in _ABS_HAT_CODES and code in hat_axes_present:
-                # Hat axis → Chromium converts to button after regular buttons
-                sign = 1 if value > 0 else -1
-                offset = _HAT_BUTTON_OFFSETS.get((code, sign))
-                if offset is not None:
-                    web_idx = n_regular_buttons + offset
-                    buttons_out[web_idx] = web_name
-                    dpad_buttons_out[web_idx] = True
-            elif code in regular_axes:
-                # Trigger / stick axis → position in regular axes list
-                web_idx = regular_axes.index(code)
-                sign = 1 if value > 0 else -1
-                existing = axes_out.get(web_idx)
+        elif sdl_type == "hat":
+            # SDL hats are exposed as buttons in the Web Gamepad API.
+            # Hat 0 directions map to buttons at indices beyond the regular buttons.
+            # We don't know n_regular_buttons here — use a fixed offset of 0 for hat 0.
+            # The browser extension must handle hat-to-button mapping itself.
+            # Store as a special entry with hat info for the extension to interpret.
+            hat_idx = sdl.get("sdl_hat", 0)
+            direction = sdl.get("dir", "")
+            # Encode as a synthetic high button index: hat 0 up=1000, down=1001, etc.
+            # The extension will recognise these as hat inputs.
+            _HAT_WEB_INDICES = {"up": 1000, "down": 1001, "left": 1002, "right": 1003}
+            web_idx = _HAT_WEB_INDICES.get(direction)
+            if web_idx is not None:
+                buttons_out[web_idx] = web_name
+                dpad_buttons_out[web_idx] = True
+
+        elif sdl_type == "axis":
+            sdl_axis = sdl.get("sdl_axis")
+            direction = sdl.get("dir", 1)
+            if isinstance(sdl_axis, int):
+                existing = axes_out.get(sdl_axis)
                 if existing is None:
-                    # Placeholder: [neg_action, pos_action]
-                    axes_out[web_idx] = [None, None]
-                if sign == -1:
-                    axes_out[web_idx][0] = web_name
+                    axes_out[sdl_axis] = [None, None]
+                if direction == -1:
+                    axes_out[sdl_axis][0] = web_name
                 else:
-                    axes_out[web_idx][1] = web_name
+                    axes_out[sdl_axis][1] = web_name
 
     return {
         "buttons": buttons_out,

@@ -176,7 +176,12 @@ FocusScope {
         else if (key === "videoSnapAutoplay")      settings.setVideoSnapAutoplay(value)
         else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
         else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
-        else if (key === "buttonLayout")           settings.setButtonLayout(value)
+        else if (key === "buttonLayout") {
+            settings.setButtonLayout(value)
+            // Refresh hotkey screen labels — face button labels depend on layout
+            if (retroarchHotkeysScreen.visible && settings)
+                retroarchHotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+        }
         else if (key === "showRetroGamesTab") {
             settings.setShowRetroGamesTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")

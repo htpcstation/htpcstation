@@ -36,11 +36,27 @@ FocusScope {
     // Current action index
     property int _currentIndex: 0
 
-    // Recorded mappings: list of {name, type, code, value}
+    // Recorded mappings: list of {name, type, code, value} (may also have also: [...])
     property var _recordedMappings: []
 
-    // Countdown seconds remaining for skippable actions
+    // Co-firing events collected in the same tick as the primary event.
+    property var _coFiringEvents: []
+
+    // Currently held raw button codes — used to detect Start+Select combo cancel.
+    property var _heldButtons: ({})
+
+    // Evdev codes for start and select, loaded from the controller mapping.
+    property int _startCode: -1
+    property int _selectCode: -1
+
+    // Countdown seconds remaining for auto-skip timer (skippable actions)
     property int _skipCountdown: 5
+
+    // Hold-to-skip state: evdev code of the button being held for skip, -1 if none
+    property int _holdSkipCode: -1
+    property string _holdSkipEvType: "button"
+    property int _holdSkipValue: 1
+    property int _holdSkipCountdown: 3
 
     // Status text shown below the prompt
     property string _statusText: ""
@@ -51,8 +67,17 @@ FocusScope {
     function start() {
         _actions = settings ? settings.getControllerActions() : []
         _recordedMappings = []
+        _coFiringEvents = []
+        _heldButtons = {}
         _currentIndex = 0
         _state = "idle"
+
+        // Load start/select evdev codes for combo-cancel detection
+        if (settings) {
+            var m = settings.getControllerActionEvdevCodes()
+            mappingDialog._startCode  = m["start"]  !== undefined ? m["start"]  : -1
+            mappingDialog._selectCode = m["select"] !== undefined ? m["select"] : -1
+        }
 
         if (_actions.length === 0) {
             _statusText = "No controller actions found."
@@ -71,20 +96,27 @@ FocusScope {
     function _advanceTo(index) {
         skipTimer.stop()
         advanceTimer.stop()
+        holdSkipTimer.stop()
+        holdSkipCountdownTimer.stop()
+        mappingDialog._holdSkipCode = -1
+        mappingDialog._holdSkipEvType = "button"
+        mappingDialog._holdSkipValue = 1
+        mappingDialog._holdSkipCountdown = 3
 
         if (index >= _actions.length) {
             // Stop raw mode and auto-save.  We can't require a button press
             // to confirm because the A/B mapping may be swapped until the
             // new mapping is applied — the user would hit "cancel" thinking
             // they're hitting "accept".
-            if (typeof gamepadManager !== "undefined" && gamepadManager) {
-                gamepadManager.stopRawMode()
-            }
             _state = "complete"
             _statusText = "Saved!"
-            // Save immediately
+            // Save BEFORE stopping raw mode so the SDL resolver is still open
+            // when saveControllerMapping resolves SDL records for each input.
             if (settings) {
                 settings.saveControllerMapping(_recordedMappings)
+            }
+            if (typeof gamepadManager !== "undefined" && gamepadManager) {
+                gamepadManager.stopRawMode()
             }
             // Close after a brief confirmation
             autoCloseTimer.restart()
@@ -104,27 +136,100 @@ FocusScope {
         }
     }
 
-    // Check if an input is already recorded for a previous action.
+    // Check if an input is already recorded for a previous action (including also arrays).
     function _isDuplicate(evType, code, value) {
         for (var i = 0; i < _recordedMappings.length; i++) {
             var m = _recordedMappings[i]
-            if (m.type === evType && m.code === code && m.value === value) {
-                return true
+            if (m.type === evType && m.code === code && m.value === value) return true
+            var also = m.also || []
+            for (var j = 0; j < also.length; j++) {
+                if (also[j].type === evType && also[j].code === code && also[j].value === value)
+                    return true
             }
         }
         return false
     }
 
-    // Called when raw input arrives during "waiting" state.
+    // Called for all raw input while Connections is enabled.
     function _onRawInput(evType, code, value) {
-        // Check for duplicates
+        // Track held buttons for Start+Select combo cancel (works in any state).
+        if (evType === "button") {
+            if (value === 1) {
+                var held = mappingDialog._heldButtons
+                held[code] = true
+                mappingDialog._heldButtons = held
+                // Start+Select held simultaneously → cancel at any time
+                if (mappingDialog._startCode >= 0 && mappingDialog._selectCode >= 0
+                        && mappingDialog._heldButtons[mappingDialog._startCode]
+                        && mappingDialog._heldButtons[mappingDialog._selectCode]) {
+                    mappingDialog._cancel()
+                    return
+                }
+            } else if (value === 0) {
+                var held2 = mappingDialog._heldButtons
+                delete held2[code]
+                mappingDialog._heldButtons = held2
+                // Button released — if it was the hold-to-skip button and timer
+                // is still running, cancel the hold and record the input normally.
+                if (mappingDialog._holdSkipCode === code && holdSkipTimer.running) {
+                    holdSkipTimer.stop()
+                    holdSkipCountdownTimer.stop()
+                    var recEvType = mappingDialog._holdSkipEvType
+                    var recCode  = mappingDialog._holdSkipCode
+                    var recValue = mappingDialog._holdSkipValue
+                    mappingDialog._holdSkipCode = -1
+                    mappingDialog._holdSkipEvType = "button"
+                    mappingDialog._holdSkipValue = 1
+                    mappingDialog._holdSkipCountdown = 3
+                    mappingDialog._statusText = ""
+                    if (mappingDialog._state === "waiting" && !_isDuplicate(recEvType, recCode, recValue)) {
+                        mappingDialog._coFiringEvents = []
+                        _recordInput(recEvType, recCode, recValue)
+                        coFiringTimer.restart()
+                    }
+                }
+                return
+            }
+        }
+
+        // Only process mapping input during "waiting" state.
+        // Axis events are also accepted during the co-firing window (interval:0 timer).
+        // Button events during the co-firing window are NOT co-firing — ignore them.
+        if (evType === "button" && mappingDialog._state !== "waiting") return
+        if (evType === "axis" && mappingDialog._state !== "waiting" && !coFiringTimer.running) return
+
+        // Silently skip duplicates
         if (_isDuplicate(evType, code, value)) {
-            _statusText = "Already mapped — press a different button"
+            if (mappingDialog._state === "waiting")
+                _statusText = "Already mapped — press a different button"
             return
         }
 
-        // Record immediately for all actions
-        _recordInput(evType, code, value)
+        if (!coFiringTimer.running) {
+            // First event for this action — check if skippable and start hold timer
+            var action = mappingDialog._actions[mappingDialog._currentIndex]
+            if (action && action.skippable && mappingDialog._holdSkipCode === -1) {
+                // Skippable action: start hold-to-skip timer.
+                // Record on button release (handled in value===0 block above).
+                // For axis events (triggers), record immediately after hold timer
+                // fires or is cancelled — store the event for later.
+                mappingDialog._holdSkipCode = code
+                mappingDialog._holdSkipEvType = evType
+                mappingDialog._holdSkipValue = value
+                mappingDialog._holdSkipCountdown = 3
+                mappingDialog._statusText = "Hold to skip..."
+                holdSkipTimer.restart()
+                holdSkipCountdownTimer.restart()
+            } else {
+                // Non-skippable or already have a pending hold — record immediately
+                mappingDialog._coFiringEvents = []
+                _recordInput(evType, code, value)
+                coFiringTimer.restart()
+            }
+        } else if (evType === "axis") {
+            // Co-firing axis event — collect it (only axes co-fire with buttons)
+            mappingDialog._coFiringEvents.push({"type": evType, "code": code, "value": value})
+        }
     }
 
     // Record the current action with the given raw input and advance.
@@ -150,6 +255,12 @@ FocusScope {
     // so saveControllerMapping will use whatever is already on disk for that action).
     function _skipCurrent() {
         skipTimer.stop()
+        holdSkipTimer.stop()
+        holdSkipCountdownTimer.stop()
+        mappingDialog._holdSkipCode = -1
+        mappingDialog._holdSkipEvType = "button"
+        mappingDialog._holdSkipValue = 1
+        mappingDialog._holdSkipCountdown = 3
         _state = "recorded"
         _statusText = "Skipped"
         advanceTimer.restart()
@@ -162,6 +273,15 @@ FocusScope {
     function _cancel() {
         skipTimer.stop()
         advanceTimer.stop()
+        coFiringTimer.stop()
+        holdSkipTimer.stop()
+        holdSkipCountdownTimer.stop()
+        mappingDialog._coFiringEvents = []
+        mappingDialog._heldButtons = {}
+        mappingDialog._holdSkipCode = -1
+        mappingDialog._holdSkipEvType = "button"
+        mappingDialog._holdSkipValue = 1
+        mappingDialog._holdSkipCountdown = 3
         _state = "idle"
         if (typeof gamepadManager !== "undefined" && gamepadManager) {
             gamepadManager.stopRawMode()
@@ -169,9 +289,6 @@ FocusScope {
         mappingDialog.visible = false
         mappingDialog.closed()
     }
-
-    // _save is no longer needed — auto-save happens in _advanceTo when
-    // all actions are complete.
 
     // ── Timers ────────────────────────────────────────────────────────────────
 
@@ -187,6 +304,52 @@ FocusScope {
                 mappingDialog._skipCurrent()
             } else {
                 mappingDialog._statusText = "Press button to map, or wait to skip (" + mappingDialog._skipCountdown + "s)"
+            }
+        }
+    }
+
+    // Fires one event loop tick after the primary event is recorded.
+    // By then all co-firing events from the same _on_readable() loop have arrived.
+    Timer {
+        id: coFiringTimer
+        interval: 0
+        repeat: false
+        onTriggered: {
+            // Co-firing collection window closed. If any co-firing events were collected,
+            // update the last recorded entry to include them.
+            if (mappingDialog._coFiringEvents.length > 0) {
+                var last = _recordedMappings[_recordedMappings.length - 1]
+                last.also = mappingDialog._coFiringEvents.slice()
+                _recordedMappings[_recordedMappings.length - 1] = last
+                mappingDialog._coFiringEvents = []
+            }
+        }
+    }
+
+    // Hold-to-skip: fires after 3s hold on a skippable action.
+    Timer {
+        id: holdSkipTimer
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            holdSkipCountdownTimer.stop()
+            mappingDialog._holdSkipCode = -1
+            mappingDialog._holdSkipEvType = "button"
+            mappingDialog._holdSkipValue = 1
+            mappingDialog._holdSkipCountdown = 3
+            mappingDialog._skipCurrent()
+        }
+    }
+
+    // Ticks every second to update the hold-to-skip countdown display.
+    Timer {
+        id: holdSkipCountdownTimer
+        interval: 1000
+        repeat: true
+        onTriggered: {
+            if (mappingDialog._holdSkipCountdown > 1) {
+                mappingDialog._holdSkipCountdown -= 1
+                mappingDialog._statusText = "Hold to skip (" + mappingDialog._holdSkipCountdown + "s)..."
             }
         }
     }
@@ -217,7 +380,9 @@ FocusScope {
 
     Connections {
         target: (typeof gamepadManager !== "undefined") ? gamepadManager : null
-        enabled: mappingDialog._state === "waiting"
+        // Enabled in all active states so we can track button releases for
+        // the Start+Select combo cancel and co-firing axis collection.
+        enabled: mappingDialog._state !== "idle"
 
         function onRawInput(evType, code, value) {
             mappingDialog._onRawInput(evType, code, value)
@@ -341,7 +506,7 @@ FocusScope {
                 bottomMargin: root.vpx(20)
             }
             visible: mappingDialog._state !== "complete"
-            text: keys.useGamepadLabels ? keys.cancelLabel + "  Cancel" : "Esc  Cancel"
+            text: keys.useGamepadLabels ? "Start+Select  —  Cancel" : "Esc  —  Cancel"
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
             color: Theme.colorTextDim

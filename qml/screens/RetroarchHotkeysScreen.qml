@@ -3,7 +3,7 @@ import ".."
 import "../components"
 
 // RetroArch Hotkeys sub-screen — shows the hotkey modifier and the
-// HTPC-action → RetroArch-hotkey mapping derived from the controller mapping.
+// hotkey action → button mapping, plus rewind settings.
 //
 // Usage (from SettingsScreen.qml):
 //   RetroarchHotkeysScreen {
@@ -26,7 +26,8 @@ FocusScope {
     enabled: focus
 
     // Config object populated by showRetroarchHotkeys():
-    //   { modifier_evdev, modifier_sdl, modifier_label, mapping, htpc_actions, cfg_path }
+    //   { modifier_evdev, modifier_sdl, modifier_label, mapping, hotkey_rows, cfg_path,
+    //     rewind_enable, rewind_buffer_size, rewind_granularity }
     property var config: ({})
 
     // Emit when B (Escape) is pressed.
@@ -34,14 +35,46 @@ FocusScope {
 
     // ── Internal state ────────────────────────────────────────────────────────
 
-    // Total focusable rows: modifier row + htpc_actions rows + apply button
+    // Total focusable rows:
+    //   Row 0:     modifier
+    //   Rows 1–N:  hotkey rows (from config.hotkey_rows)
+    //   Row N+1:   Rewind Enable (toggle)
+    //   Row N+2:   Buffer Size (cycle)
+    //   Row N+3:   Rewind Frames (cycle)
+    //   Row N+4:   Apply button
     property int _rowCount: {
-        var actions = (config && config.htpc_actions) ? config.htpc_actions.length : 0
-        return 1 + actions + 1
+        var rows = (config && config.hotkey_rows) ? config.hotkey_rows.length : 0
+        return 1 + rows + 3 + 1  // modifier + hotkeys + rewind rows + apply
     }
 
-    // Currently focused row index (0 = modifier, 1..N = htpc actions, N+1 = apply)
+    // Currently focused row index
     property int _focusedRow: 0
+
+    // Which hotkey action is being captured
+    property string _captureTargetAction: ""
+
+    // Rewind state (kept in sync with config)
+    property bool _rewindEnable: config ? !!config.rewind_enable : false
+    property int _rewindBufferSize: config ? (config.rewind_buffer_size || 20) : 20
+    property int _rewindGranularity: config ? (config.rewind_granularity || 1) : 1
+
+    // Sync rewind state when config changes
+    onConfigChanged: {
+        if (config) {
+            hotkeysScreen._rewindEnable = !!config.rewind_enable
+            hotkeysScreen._rewindBufferSize = config.rewind_buffer_size || 20
+            hotkeysScreen._rewindGranularity = config.rewind_granularity || 1
+        }
+        // Warn if the controller mapping wizard hasn't been run yet.
+        if (settings && !settings.hasControllerMappingWithSdl()) {
+            hotkeysScreen._showToast("Recommended: run the controller mapping wizard before assigning hotkeys")
+        }
+    }
+
+    // Buffer size cycle values
+    readonly property var _bufferSizeOptions: [20, 40, 60, 80, 100, 150, 200, 300, 500]
+    // Rewind frames cycle values
+    readonly property var _granularityOptions: [1, 2, 4, 8, 16, 32]
 
     // ── Toast notification ────────────────────────────────────────────────────
     property string _toastText: ""
@@ -58,6 +91,50 @@ FocusScope {
         toastTimer.restart()
     }
 
+    // ── Helper: number of hotkey rows ─────────────────────────────────────────
+    function _hotkeyRowCount() {
+        return (config && config.hotkey_rows) ? config.hotkey_rows.length : 0
+    }
+
+    // ── Rewind row indices (computed from hotkey count) ───────────────────────
+    // Row index for Rewind Enable
+    function _rewindEnableRow() { return 1 + _hotkeyRowCount() }
+    // Row index for Buffer Size
+    function _bufferSizeRow()   { return 2 + _hotkeyRowCount() }
+    // Row index for Rewind Frames
+    function _granularityRow()  { return 3 + _hotkeyRowCount() }
+    // Row index for Apply button
+    function _applyRow()        { return 4 + _hotkeyRowCount() }
+
+    // ── Cycle helpers ─────────────────────────────────────────────────────────
+    function _cycleBufferSize(forward) {
+        var opts = hotkeysScreen._bufferSizeOptions
+        var idx = opts.indexOf(hotkeysScreen._rewindBufferSize)
+        if (idx < 0) idx = 0
+        if (forward) {
+            idx = (idx + 1) % opts.length
+        } else {
+            idx = (idx - 1 + opts.length) % opts.length
+        }
+        var newVal = opts[idx]
+        hotkeysScreen._rewindBufferSize = newVal
+        if (settings) settings.setRewindBufferSize(newVal)
+    }
+
+    function _cycleGranularity(forward) {
+        var opts = hotkeysScreen._granularityOptions
+        var idx = opts.indexOf(hotkeysScreen._rewindGranularity)
+        if (idx < 0) idx = 0
+        if (forward) {
+            idx = (idx + 1) % opts.length
+        } else {
+            idx = (idx - 1 + opts.length) % opts.length
+        }
+        var newVal = opts[idx]
+        hotkeysScreen._rewindGranularity = newVal
+        if (settings) settings.setRewindGranularity(newVal)
+    }
+
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Up) {
@@ -72,7 +149,26 @@ FocusScope {
                 hotkeysScreen._focusedRow += 1
                 _scrollToFocused()
             }
-        } else if (keys.isAccept(event) || event.key === Qt.Key_Right) {
+        } else if (event.key === Qt.Key_Left) {
+            event.accepted = true
+            var focused = hotkeysScreen._focusedRow
+            if (focused === _bufferSizeRow()) {
+                _cycleBufferSize(false)
+            } else if (focused === _granularityRow()) {
+                _cycleGranularity(false)
+            }
+        } else if (event.key === Qt.Key_Right) {
+            event.accepted = true
+            var focused = hotkeysScreen._focusedRow
+            if (focused === _bufferSizeRow()) {
+                _cycleBufferSize(true)
+            } else if (focused === _granularityRow()) {
+                _cycleGranularity(true)
+            } else if (focused === 0 || focused === _applyRow()) {
+                _activateFocused()
+            }
+            // hotkey rows and rewind enable: Right does nothing
+        } else if (keys.isAccept(event)) {
             event.accepted = true
             _activateFocused()
         } else if (keys.isCancel(event)) {
@@ -82,25 +178,40 @@ FocusScope {
     }
 
     function _scrollToFocused() {
-        // Scroll the list so the focused row is visible.
-        // The apply button is outside the scroll view, so only scroll for rows 0..N.
-        var actions = (config && config.htpc_actions) ? config.htpc_actions.length : 0
-        if (hotkeysScreen._focusedRow <= actions) {
+        // Only scroll for rows inside the ListView (modifier + hotkey rows).
+        var rows = _hotkeyRowCount()
+        if (hotkeysScreen._focusedRow <= rows) {
             hotkeysList.positionViewAtIndex(hotkeysScreen._focusedRow, ListView.Contain)
         }
     }
 
     function _activateFocused() {
-        var actions = (config && config.htpc_actions) ? config.htpc_actions.length : 0
+        var rows = _hotkeyRowCount()
         if (hotkeysScreen._focusedRow === 0) {
-            // Modifier row — open capture dialog
+            // Modifier row — open modifier capture dialog
             modifierCaptureDialog.visible = true
             modifierCaptureDialog.forceActiveFocus()
-        } else if (hotkeysScreen._focusedRow === actions + 1) {
+        } else if (hotkeysScreen._focusedRow >= 1 && hotkeysScreen._focusedRow <= rows) {
+            // Hotkey row — open hotkey capture dialog
+            var rowData = config.hotkey_rows[hotkeysScreen._focusedRow - 1]
+            hotkeysScreen._captureTargetAction = rowData.hotkey_action
+            hotkeyCaptureDialog.visible = true
+            hotkeyCaptureDialog.forceActiveFocus()
+        } else if (hotkeysScreen._focusedRow === _rewindEnableRow()) {
+            // Toggle rewind enable
+            var newVal = !hotkeysScreen._rewindEnable
+            hotkeysScreen._rewindEnable = newVal
+            if (settings) settings.setRewindEnable(newVal)
+        } else if (hotkeysScreen._focusedRow === _bufferSizeRow()) {
+            // Cycle buffer size forward on Accept
+            _cycleBufferSize(true)
+        } else if (hotkeysScreen._focusedRow === _granularityRow()) {
+            // Cycle granularity forward on Accept
+            _cycleGranularity(true)
+        } else if (hotkeysScreen._focusedRow === _applyRow()) {
             // Apply button
             _applyHotkeys()
         }
-        // Hotkey rows (1..N) are read-only in V1 — no action
     }
 
     function _applyHotkeys() {
@@ -178,7 +289,7 @@ FocusScope {
             top: headerBar.bottom
             left: parent.left
             right: parent.right
-            bottom: applyButton.top
+            bottom: rewindSection.top
             topMargin: root.vpx(8)
             leftMargin: root.vpx(48)
             rightMargin: root.vpx(48)
@@ -189,13 +300,13 @@ FocusScope {
         interactive: false  // We handle scrolling manually via positionViewAtIndex
         highlightMoveDuration: Theme.animDurationFast
 
-        // Model: modifier row (index 0) + one entry per htpc_action
+        // Model: modifier row (index 0) + one entry per hotkey_row
         model: {
             var rows = [{ _type: "modifier" }]
-            var actions = (hotkeysScreen.config && hotkeysScreen.config.htpc_actions)
-                ? hotkeysScreen.config.htpc_actions : []
-            for (var i = 0; i < actions.length; i++) {
-                rows.push({ _type: "hotkey", _data: actions[i] })
+            var hotkeys = (hotkeysScreen.config && hotkeysScreen.config.hotkey_rows)
+                ? hotkeysScreen.config.hotkey_rows : []
+            for (var i = 0; i < hotkeys.length; i++) {
+                rows.push({ _type: "hotkey", _data: hotkeys[i] })
             }
             return rows
         }
@@ -209,10 +320,6 @@ FocusScope {
             readonly property bool _isFocused: hotkeysScreen._focusedRow === index
             readonly property bool _isModifier: modelData._type === "modifier"
             readonly property var _hotkeyData: modelData._data || null
-            readonly property bool _isDimmed: {
-                if (_isModifier) return false
-                return _hotkeyData ? (_hotkeyData.sdl_index === null || _hotkeyData.sdl_index === undefined) : true
-            }
 
             // ── Row highlight ─────────────────────────────────────────────────
             Rectangle {
@@ -295,18 +402,11 @@ FocusScope {
                 }
                 visible: !delegateItem._isModifier
 
-                // Left column: HTPC action label (e.g. "Accept", "Cancel", "Left Trigger")
-                // Derived from htpc_action by replacing underscores and title-casing.
+                // Left column: hotkey action label (e.g. "Save State")
                 Text {
                     width: parent.width * 0.55
-                    text: {
-                        if (!delegateItem._hotkeyData) return ""
-                        var a = delegateItem._hotkeyData.htpc_action || ""
-                        return a.replace(/_/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase() })
-                    }
-                    color: delegateItem._isDimmed ? Theme.colorTextDim
-                        : (delegateItem._isFocused ? Theme.colorText : Theme.colorTextDim)
-                    opacity: delegateItem._isDimmed ? 0.5 : 1.0
+                    text: delegateItem._hotkeyData ? (delegateItem._hotkeyData.label || "") : ""
+                    color: delegateItem._isFocused ? Theme.colorText : Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                     elide: Text.ElideRight
@@ -318,14 +418,19 @@ FocusScope {
                     }
                 }
 
-                // Right column: hotkey action label (e.g. "Menu Toggle", "Exit Emulator")
-                // The backend provides this as `label` (derived from hotkey_action).
+                // Right column: assigned button label (e.g. "A/East") or "Not set"
                 Text {
                     width: parent.width * 0.45
-                    text: delegateItem._hotkeyData ? (delegateItem._hotkeyData.label || "") : ""
-                    color: delegateItem._isDimmed ? Theme.colorTextDim
-                        : (delegateItem._isFocused ? Theme.colorText : Theme.colorTextDim)
-                    opacity: delegateItem._isDimmed ? 0.5 : 1.0
+                    text: {
+                        if (!delegateItem._hotkeyData) return "Not set"
+                        var lbl = delegateItem._hotkeyData.button_label
+                        return (lbl && lbl !== "") ? lbl : "Not set"
+                    }
+                    color: {
+                        if (!delegateItem._hotkeyData) return Theme.colorTextDim
+                        var lbl = delegateItem._hotkeyData.button_label
+                        return (lbl && lbl !== "") ? Theme.colorPrimary : Theme.colorTextDim
+                    }
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                     horizontalAlignment: Text.AlignRight
@@ -353,6 +458,225 @@ FocusScope {
         }
     }
 
+    // ── Rewind section (3 rows: Enable, Buffer Size, Rewind Frames) ───────────
+    Item {
+        id: rewindSection
+        anchors {
+            left: parent.left
+            right: parent.right
+            bottom: applyButton.top
+            leftMargin: root.vpx(48)
+            rightMargin: root.vpx(48)
+            bottomMargin: root.vpx(0)
+        }
+        height: root.vpx(56) * 3
+
+        // ── Row: Rewind Enable ────────────────────────────────────────────────
+        Item {
+            id: rewindEnableRow
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: parent.top
+            }
+            height: root.vpx(56)
+
+            readonly property bool _isFocused: hotkeysScreen._focusedRow === hotkeysScreen._rewindEnableRow()
+
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorSecondary
+                opacity: rewindEnableRow._isFocused ? 0.6 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.color: Theme.colorFocusRing
+                border.width: root.vpx(Theme.focusRingWidth)
+                radius: root.vpx(Theme.focusRingRadius)
+                visible: rewindEnableRow._isFocused
+            }
+
+            Row {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+
+                Text {
+                    width: parent.width * 0.55
+                    text: "Rewind"
+                    color: rewindEnableRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                }
+
+                Text {
+                    width: parent.width * 0.45
+                    text: hotkeysScreen._rewindEnable ? "On" : "Off"
+                    color: hotkeysScreen._rewindEnable ? Theme.colorPrimary : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                }
+            }
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: root.vpx(1)
+                color: Theme.colorTextDim
+                opacity: 0.15
+            }
+        }
+
+        // ── Row: Buffer Size ──────────────────────────────────────────────────
+        Item {
+            id: bufferSizeRow
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: rewindEnableRow.bottom
+            }
+            height: root.vpx(56)
+
+            readonly property bool _isFocused: hotkeysScreen._focusedRow === hotkeysScreen._bufferSizeRow()
+
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorSecondary
+                opacity: bufferSizeRow._isFocused ? 0.6 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.color: Theme.colorFocusRing
+                border.width: root.vpx(Theme.focusRingWidth)
+                radius: root.vpx(Theme.focusRingRadius)
+                visible: bufferSizeRow._isFocused
+            }
+
+            Row {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+
+                Text {
+                    width: parent.width * 0.55
+                    text: "Buffer Size"
+                    color: bufferSizeRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                }
+
+                Text {
+                    width: parent.width * 0.45
+                    text: hotkeysScreen._rewindBufferSize + " MB"
+                    color: Theme.colorPrimary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                }
+            }
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: root.vpx(1)
+                color: Theme.colorTextDim
+                opacity: 0.15
+            }
+        }
+
+        // ── Row: Rewind Frames ────────────────────────────────────────────────
+        Item {
+            id: granularityRow
+            anchors {
+                left: parent.left
+                right: parent.right
+                top: bufferSizeRow.bottom
+            }
+            height: root.vpx(56)
+
+            readonly property bool _isFocused: hotkeysScreen._focusedRow === hotkeysScreen._granularityRow()
+
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorSecondary
+                opacity: granularityRow._isFocused ? 0.6 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+            Rectangle {
+                anchors.fill: parent
+                color: "transparent"
+                border.color: Theme.colorFocusRing
+                border.width: root.vpx(Theme.focusRingWidth)
+                radius: root.vpx(Theme.focusRingRadius)
+                visible: granularityRow._isFocused
+            }
+
+            Row {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    verticalCenter: parent.verticalCenter
+                    leftMargin: root.vpx(16)
+                    rightMargin: root.vpx(16)
+                }
+
+                Text {
+                    width: parent.width * 0.55
+                    text: "Rewind Frames"
+                    color: granularityRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                }
+
+                Text {
+                    width: parent.width * 0.45
+                    text: hotkeysScreen._rewindGranularity + " frames"
+                    color: Theme.colorPrimary
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    horizontalAlignment: Text.AlignRight
+                    verticalAlignment: Text.AlignVCenter
+                    height: root.vpx(56)
+                }
+            }
+
+            Rectangle {
+                anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                height: root.vpx(1)
+                color: Theme.colorTextDim
+                opacity: 0.15
+            }
+        }
+    }
+
     // ── Apply button ──────────────────────────────────────────────────────────
     Item {
         id: applyButton
@@ -367,11 +691,7 @@ FocusScope {
         }
         height: root.vpx(56)
 
-        readonly property bool _isFocused: {
-            var actions = (hotkeysScreen.config && hotkeysScreen.config.htpc_actions)
-                ? hotkeysScreen.config.htpc_actions.length : 0
-            return hotkeysScreen._focusedRow === actions + 1
-        }
+        readonly property bool _isFocused: hotkeysScreen._focusedRow === hotkeysScreen._applyRow()
 
         // ── Background highlight ──────────────────────────────────────────────
         Rectangle {
@@ -476,6 +796,50 @@ FocusScope {
                 hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
             }
             // Focus the list directly — FocusScope needs a focused child to receive Keys events
+            hotkeysList.forceActiveFocus()
+        }
+
+        onButtonCleared: {
+            if (settings) {
+                settings.clearHotkeyModifier()
+                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            }
+            hotkeysList.forceActiveFocus()
+        }
+
+        onCancelled: {
+            hotkeysList.forceActiveFocus()
+        }
+    }
+
+    // ── Hotkey capture dialog (for hotkey rows 1–N) ───────────────────────────
+    ModifierCaptureDialog {
+        id: hotkeyCaptureDialog
+        anchors.fill: parent
+        visible: false
+        allowAxisInput: true
+
+        onButtonCaptured: (evdev_code) => {
+            if (settings && hotkeysScreen._captureTargetAction !== "") {
+                settings.setHotkeyActionByEvdev(hotkeysScreen._captureTargetAction, evdev_code)
+                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            }
+            hotkeysList.forceActiveFocus()
+        }
+
+        onAxisCaptured: (evdev_code, value) => {
+            if (settings && hotkeysScreen._captureTargetAction !== "") {
+                settings.setHotkeyActionByAxis(hotkeysScreen._captureTargetAction, evdev_code, value)
+                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            }
+            hotkeysList.forceActiveFocus()
+        }
+
+        onButtonCleared: {
+            if (settings && hotkeysScreen._captureTargetAction !== "") {
+                settings.clearHotkeyAction(hotkeysScreen._captureTargetAction)
+                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            }
             hotkeysList.forceActiveFocus()
         }
 

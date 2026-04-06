@@ -83,7 +83,62 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 
 ---
 
-## M8 — Local Videos tab (V1)
+## M8 — Dual-record input mapping (evdev + SDL)
+
+**What:** Extend the controller mapping system to record both evdev and SDL representations of every input simultaneously. Each consumer reads the half it needs — evdev for HTPC Station Qt key injection and in-process MPV, SDL for RetroArch config and the browser gamepad extension. This makes hotkey assignment and controller mapping work correctly for any device in the SDL GameControllerDB — XInput, Switch Pro Controller, DualSense, etc.
+
+**Why now:** The current evdev→SDL translation is hardcoded for the 8BitDo Micro D-input via `EVDEV_TO_SDL`. D-pad and trigger hotkey assignment are blocked on this. The controller mapping wizard has the same limitation. The fix is to record SDL indices at capture time (when the device is connected and queryable) rather than translating at apply time via a static table.
+
+**Architecture:**
+
+Each mapping entry changes from a single evdev record to a dual record:
+```json
+{
+  "evdev": {"type": "axis", "code": 17, "value": -1},
+  "sdl":   {"type": "hat",  "hat": 0,   "dir": "up"}
+}
+```
+
+Consumer routing:
+| Consumer | Reads | Reason |
+|---|---|---|
+| `gamepad.py` Qt key injection | `evdev` half | Injects raw evdev codes as QKeyEvents |
+| `LibMpvPlayer` (in-process) | `evdev` half | Uses Qt key injection path |
+| `build_hotkey_cfg()` → retroarch.cfg | `sdl` half | RetroArch uses SDL internally |
+| `build_web_gamepad_mapping()` → browser extension | `sdl` half | Web Gamepad API uses SDL indices |
+| Hotkey modifier (`input_enable_hotkey_btn`) | `sdl` half only | RetroArch concept; HTPC launcher never uses it |
+
+**Scope:**
+
+- **M8-A: SDL resolver** — `backend/sdl_resolver.py`. ctypes wrapper that locates and loads the SDL library at runtime (see SDL library caveats below). Given a connected evdev device, opens the matching SDL joystick (matched by name/GUID), enumerates its buttons/axes/hats, and resolves an evdev event `(type, code, value)` to an SDL record `{"type": "button"|"axis"|"hat", ...}`. The GameControllerDB is compiled into the SDL library — no local cache or network fetch needed. Lifecycle: open on `GamepadManager.startRawMode()`, close on `stopRawMode()`. Graceful fallback (returns `None`) if SDL unavailable, no device connected, or device not in SDL database.
+
+**Effort:** Large (7–9 tasks).
+
+**Caveats:**
+
+- **SDL library portability — must work on any distro.** The SDL library name and location vary:
+  - Fedora 43: `sdl2-compat` (SDL2 API shim over SDL3) at `/usr/lib64/libSDL2-2.0.so.0`
+  - Ubuntu/Debian: real `libSDL2-2.0.so.0` from `libsdl2-2.0-0` package
+  - Arch: SDL3 natively (`libSDL3.so.0`); SDL2 available separately
+  - The resolver must probe a candidate list in order: `libSDL2-2.0.so.0`, `libSDL2-2.0.so`, `libSDL2.so`, `libSDL3.so.0`, `libSDL3.so`. Load the first one that works via `ctypes.CDLL`. If none found, log a warning and operate in evdev-only mode (SDL half = `null` for all inputs).
+  - `sdl2-compat` on Fedora is a drop-in SDL2 API replacement — function signatures are identical. Smoke-test during M8-A to confirm no edge cases.
+  - The GameControllerDB is compiled into whichever SDL library is loaded — no distro ships it as a separate file. No local cache or network fetch needed on any distro.
+
+- **SDL init:** Initialise with `SDL_INIT_JOYSTICK` only. PySide6 does not use SDL on Linux — no conflict. Call `SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1")` so SDL receives events while the Qt window has focus.
+
+- **SDL joystick matching:** Prefer GUID match against the connected evdev device; fall back to name match; fall back to first joystick if only one is connected.
+
+- **Fallback when SDL can't resolve:** Store `"sdl": null`. Consumers that need SDL write `nul` to retroarch.cfg and show `"Button <N>"` label. The evdev half is always recorded regardless.
+
+- **Existing saved mappings** (evdev-only format) are migrated on load: wrap the existing record as the `evdev` half, set `sdl` to `null`. No data loss.
+
+- Per-system cfg overrides remain deferred until after M8-C.
+
+**Unblocks:** D-pad and trigger hotkey assignment. XInput support. Switch Pro Controller support.
+
+---
+
+## M9 — Local Videos tab (V1)
 
 **What:** New "Local Videos" tab. Plays local video files via `LibMpvPlayer`. V1: flat or two-level (folder/file) directory browse. No metadata scraping, no posters — filename only.
 
@@ -118,10 +173,12 @@ New Phase 6 in `install.sh`. Gated on Retro Games tab selected + RetroArch Flatp
 |---|---|
 | Local Music V2 — tag scanning | Add mutagen dependency, async scan, populate artist/album/title/duration from ID3/Vorbis tags |
 | Local Videos V2 — resume + metadata | Local resume JSON, TMDb scraping, poster cache |
-| RetroArch config V2 — rewind + per-system overrides | Build on M6 backend; add rewind enable/buffer-size, per-system cfg overrides |
-| RetroArch config V3 — full Batocera parity | Shader presets, integer scaling, run-ahead, netplay defaults |
+| RetroArch config V3 — per-system cfg overrides | Per-system retroarch.cfg overrides (shader, integer scaling, etc.). Blocked on M8-C. |
+| RetroArch config V4 — full Batocera parity | Shader presets, integer scaling, run-ahead, netplay defaults |
 | On-screen keyboard | Prerequisite for first-run wizard (text input without physical keyboard) |
 | First-run setup wizard | Guided config for new installs |
 | UI Refresh 4b/4c — token replacement + theme switcher | High blast radius; do after tab restructure is stable |
 | Plex search | New navigation flow |
 | Moonlight rich metadata | Deferred from original roadmap |
+| XInput controller support | Blocked on M8 |
+| Switch Pro Controller support | Blocked on M8 |

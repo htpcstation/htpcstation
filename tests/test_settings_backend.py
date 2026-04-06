@@ -1362,7 +1362,7 @@ class TestSettingsManagerGetControllerActions:
 
 class TestSettingsManagerSaveControllerMapping:
     def test_saves_valid_mapping_to_disk(self, tmp_path: Path) -> None:
-        """saveControllerMapping writes the mapping to disk."""
+        """saveControllerMapping writes the mapping to disk in dual-record format."""
         from backend.controller_mapping import load_mapping
 
         mapping_file = tmp_path / "controller_mapping.json"
@@ -1373,12 +1373,63 @@ class TestSettingsManagerSaveControllerMapping:
             {"name": "accept", "type": "button", "code": 305, "value": 1},
         ]
 
-        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+        mock_sdl_record = {"type": "button", "sdl_button": 1}
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=mock_sdl_record):
             manager.saveControllerMapping(mapping)
             result = load_mapping()
 
-        assert result["dpad_up"]["code"] == 17
-        assert result["accept"]["code"] == 305
+        # Dual-record format: evdev half
+        assert result["dpad_up"]["evdev"]["code"] == 17
+        assert result["accept"]["evdev"]["code"] == 305
+
+    def test_saves_dual_record_format(self, tmp_path: Path) -> None:
+        """saveControllerMapping stores dual-record format with evdev and sdl halves."""
+        from backend.controller_mapping import load_mapping
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        mapping = [
+            {"name": "accept", "type": "button", "code": 305, "value": 1},
+        ]
+
+        mock_sdl_record = {"type": "button", "sdl_button": 1}
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=mock_sdl_record):
+            manager.saveControllerMapping(mapping)
+            result = load_mapping()
+
+        # Should have dual-record format
+        assert "evdev" in result["accept"]
+        assert "sdl" in result["accept"]
+        assert result["accept"]["evdev"]["type"] == "button"
+        assert result["accept"]["evdev"]["code"] == 305
+        assert result["accept"]["sdl"] == mock_sdl_record
+
+    def test_device_key_not_saved(self, tmp_path: Path) -> None:
+        """saveControllerMapping does NOT save a _device key."""
+        from backend.controller_mapping import load_mapping
+        import json as _json
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        mock_gamepad = MagicMock()
+        mock_gamepad.getDeviceCapabilities.return_value = {
+            "buttons": [304, 305], "axes": [0, 1], "name": "Test"
+        }
+        manager = _make_settings_manager_with_gamepad(tmp_path, gamepad_manager=mock_gamepad)
+
+        mapping = [
+            {"name": "accept", "type": "button", "code": 305, "value": 1},
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.saveControllerMapping(mapping)
+
+        # Read raw JSON to check _device is not present
+        raw = _json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert "_device" not in raw
 
     def test_calls_reload_mapping_on_gamepad_manager(self, tmp_path: Path) -> None:
         """saveControllerMapping calls gamepad_manager.reloadMapping() after saving."""
@@ -1390,7 +1441,8 @@ class TestSettingsManagerSaveControllerMapping:
             {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
         ]
 
-        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
             manager.saveControllerMapping(mapping)
 
         mock_gamepad.reloadMapping.assert_called_once()
@@ -1404,7 +1456,8 @@ class TestSettingsManagerSaveControllerMapping:
             {"name": "dpad_up", "type": "axis", "code": 17, "value": -1},
         ]
 
-        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
             manager.saveControllerMapping(mapping)  # should not raise
 
     def test_ignores_invalid_entries(self, tmp_path: Path) -> None:
@@ -1421,12 +1474,13 @@ class TestSettingsManagerSaveControllerMapping:
             "not a dict",  # not a dict at all
         ]
 
-        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file):
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
             manager.saveControllerMapping(mapping)
             result = load_mapping()
 
         # Only the valid entry should be saved
-        assert result["dpad_up"]["code"] == 17
+        assert result["dpad_up"]["evdev"]["code"] == 17
 
     def test_rejects_non_list_input(self, tmp_path: Path) -> None:
         """saveControllerMapping logs a warning and returns early for non-list input."""
@@ -1437,17 +1491,107 @@ class TestSettingsManagerSaveControllerMapping:
         manager.saveControllerMapping(None)  # type: ignore[arg-type]
         manager.saveControllerMapping(42)  # type: ignore[arg-type]
 
+    def test_also_raw_events_produce_also_in_saved_dict(self, tmp_path: Path) -> None:
+        """saveControllerMapping resolves also events and stores them in the saved dict."""
+        import json as _json
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        # Entry with a co-firing also event (axis 9 fires alongside button 312)
+        mapping = [
+            {
+                "name": "left_trigger",
+                "type": "button",
+                "code": 312,
+                "value": 1,
+                "also": [{"type": "axis", "code": 9, "value": 1}],
+            },
+        ]
+
+        primary_sdl = {"type": "button", "sdl_button": 8, "label": "LT"}
+        also_sdl = {"type": "axis", "sdl_axis": 4, "dir": 1}
+
+        def mock_resolve(ev_type, code, value):
+            if ev_type == "button" and code == 312:
+                return primary_sdl
+            if ev_type == "axis" and code == 9:
+                return also_sdl
+            return None
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", side_effect=mock_resolve):
+            manager.saveControllerMapping(mapping)
+
+        raw = _json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert "left_trigger" in raw
+        entry = raw["left_trigger"]
+        assert "also" in entry
+        assert len(entry["also"]) == 1
+        also_entry = entry["also"][0]
+        assert also_entry["evdev"]["type"] == "axis"
+        assert also_entry["evdev"]["code"] == 9
+        assert also_entry["sdl"] == also_sdl
+
+    def test_also_empty_when_no_co_firing_events(self, tmp_path: Path) -> None:
+        """saveControllerMapping stores also=[] when no co-firing events are present."""
+        import json as _json
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        mapping = [
+            {"name": "accept", "type": "button", "code": 305, "value": 1},
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.saveControllerMapping(mapping)
+
+        raw = _json.loads(mapping_file.read_text(encoding="utf-8"))
+        assert raw["accept"]["also"] == []
+
+    def test_also_invalid_entries_are_skipped(self, tmp_path: Path) -> None:
+        """saveControllerMapping skips also entries with invalid structure."""
+        import json as _json
+
+        mapping_file = tmp_path / "controller_mapping.json"
+        manager = _make_settings_manager_with_gamepad(tmp_path)
+
+        mapping = [
+            {
+                "name": "accept",
+                "type": "button",
+                "code": 305,
+                "value": 1,
+                "also": [
+                    {"type": "unknown", "code": 9, "value": 1},  # bad type
+                    {"type": "axis", "code": "not_int", "value": 1},  # bad code
+                    {"type": "axis", "code": 9, "value": "not_int"},  # bad value
+                ],
+            },
+        ]
+
+        with patch("backend.controller_mapping.get_mapping_path", return_value=mapping_file), \
+             patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.saveControllerMapping(mapping)
+
+        raw = _json.loads(mapping_file.read_text(encoding="utf-8"))
+        # All invalid also entries should be skipped
+        assert raw["accept"]["also"] == []
+
 
 class TestSettingsManagerResetControllerMapping:
     def test_resets_to_defaults_on_disk(self, tmp_path: Path) -> None:
         """resetControllerMapping writes the default mapping to disk."""
-        from backend.controller_mapping import DEFAULT_MAPPING, load_mapping
+        from backend.controller_mapping import DEFAULT_MAPPING, load_mapping, get_default_mapping
+        import copy
 
         mapping_file = tmp_path / "controller_mapping.json"
-        # Write a custom mapping first
+        # Write a custom mapping first (dual-record format)
         import json as _json
-        custom = {k: dict(v) for k, v in DEFAULT_MAPPING.items()}
-        custom["accept"]["code"] = 9999
+        custom = copy.deepcopy(DEFAULT_MAPPING)
+        custom["accept"]["evdev"]["code"] = 9999
         mapping_file.write_text(_json.dumps(custom), encoding="utf-8")
 
         manager = _make_settings_manager_with_gamepad(tmp_path)
@@ -1456,7 +1600,7 @@ class TestSettingsManagerResetControllerMapping:
             manager.resetControllerMapping()
             result = load_mapping()
 
-        assert result["accept"]["code"] == DEFAULT_MAPPING["accept"]["code"]
+        assert result["accept"]["evdev"]["code"] == DEFAULT_MAPPING["accept"]["evdev"]["code"]
 
     def test_calls_reload_mapping_on_gamepad_manager(self, tmp_path: Path) -> None:
         """resetControllerMapping calls gamepad_manager.reloadMapping() after saving."""
@@ -3132,33 +3276,41 @@ class TestRetroarchHotkeyConfig:
         manager, _ = _make_hotkey_manager(tmp_path)
         result = manager.getRetroarchHotkeyConfig()
         assert "modifier_evdev" in result
-        assert "modifier_sdl" in result
+        assert "modifier_sdl_record" in result
         assert "modifier_label" in result
         assert "mapping" in result
-        assert "htpc_actions" in result
+        assert "hotkey_rows" in result
         assert "cfg_path" in result
+        assert "rewind_enable" in result
+        assert "rewind_buffer_size" in result
+        assert "rewind_granularity" in result
+        # hotkey_rows should have sdl_record and button_label (not sdl_index)
+        for row in result["hotkey_rows"]:
+            assert "sdl_record" in row
+            assert "button_label" in row
 
     def test_htpc_actions_has_10_entries(self, tmp_path: Path) -> None:
-        """htpc_actions has one entry per HTPC action in HTPC_TO_HOTKEY."""
-        import backend.retroarch_config as ra_cfg
-
+        """hotkey_rows has 12 entries (one per hotkey action in _HOTKEY_ROWS)."""
         manager, _ = _make_hotkey_manager(tmp_path)
         result = manager.getRetroarchHotkeyConfig()
-        assert len(result["htpc_actions"]) == len(ra_cfg.HTPC_TO_HOTKEY)
+        assert len(result["hotkey_rows"]) == 12
 
     def test_set_hotkey_modifier_persists(self, tmp_path: Path) -> None:
-        """setHotkeyModifier(316) → config saved, modifier_evdev == 316, modifier_sdl == 8."""
+        """setHotkeyModifier(316) → config saved, modifier_evdev == 316."""
         manager, config = _make_hotkey_manager(tmp_path)
-        manager.setHotkeyModifier(316)
+        mock_sdl_record = {"type": "button", "sdl_button": 8}
+        with patch("backend.sdl_resolver.resolver.resolve", return_value=mock_sdl_record):
+            manager.setHotkeyModifier(316)
         config.save.assert_called()
         result = manager.getRetroarchHotkeyConfig()
         assert result["modifier_evdev"] == 316
-        assert result["modifier_sdl"] == 8
+        assert result["modifier_sdl_record"] == mock_sdl_record
 
     def test_clear_hotkey_modifier(self, tmp_path: Path) -> None:
         """clearHotkeyModifier() → modifier_evdev is None."""
         manager, config = _make_hotkey_manager(tmp_path)
-        manager.setHotkeyModifier(316)
+        with patch("backend.sdl_resolver.resolver.resolve", return_value=None):
+            manager.setHotkeyModifier(316)
         manager.clearHotkeyModifier()
         result = manager.getRetroarchHotkeyConfig()
         assert result["modifier_evdev"] is None
@@ -3172,25 +3324,24 @@ class TestRetroarchHotkeyConfig:
         assert result["mapping"]["menu_toggle"] == 3
 
     def test_apply_retroarch_hotkeys_writes_cfg(self, tmp_path: Path) -> None:
-        """applyRetroarchHotkeys calls write_cfg with correct args."""
+        """applyRetroarchHotkeys writes correct hotkey keys to retroarch.cfg."""
         import backend.retroarch_config as ra_cfg
 
         manager, config = _make_hotkey_manager(tmp_path)
         cfg_path = tmp_path / "retroarch.cfg"
         config.retroarch_cfg_path = cfg_path
-        config._hotkey_modifier_evdev = 316  # BTN_MODE → SDL 8
-        config._hotkey_mapping = {"menu_toggle": 3}
+        config._hotkey_modifier_sdl = {"type": "button", "sdl_button": 8}
+        config._hotkey_mapping = {
+            "menu_toggle": {"type": "button", "sdl_button": 3},
+            "load_state": {"type": "button", "sdl_button": 1},
+        }
 
-        with patch.object(ra_cfg, "write_cfg") as mock_write:
-            manager.applyRetroarchHotkeys()
+        manager.applyRetroarchHotkeys()
 
-        mock_write.assert_called_once()
-        call_args = mock_write.call_args
-        written_path = call_args[0][0]
-        written_updates = call_args[0][1]
-        assert written_path == cfg_path
-        assert written_updates["input_menu_toggle_btn"] == "3"
-        assert written_updates["input_enable_hotkey_btn"] == "8"
+        result = ra_cfg.read_cfg(cfg_path)
+        assert result["input_menu_toggle_btn"] == "3"
+        assert result["input_load_state_btn"] == "1"
+        assert result["input_enable_hotkey_btn"] == "8"
 
     def test_apply_retroarch_hotkeys_handles_missing_file_gracefully(
         self, tmp_path: Path
@@ -3200,24 +3351,19 @@ class TestRetroarchHotkeyConfig:
 
         manager, config = _make_hotkey_manager(tmp_path)
         config.retroarch_cfg_path = Path("/nonexistent/readonly/retroarch.cfg")
-        config._hotkey_mapping = {"menu_toggle": 3}
+        config._hotkey_mapping = {"menu_toggle": {"type": "button", "sdl_button": 3}}
 
         # Should not raise even when write_cfg raises OSError
         with patch.object(ra_cfg, "write_cfg", side_effect=OSError("permission denied")):
             manager.applyRetroarchHotkeys()  # must not raise
 
     def test_first_run_derives_mapping_from_controller(self, tmp_path: Path) -> None:
-        """When _hotkey_mapping is empty (first run), getRetroarchHotkeyConfig derives
-        the hotkey mapping from the controller mapping via load_mapping."""
+        """When hotkey_mapping is empty, hotkey_rows all have sdl_record as None."""
         manager, config = _make_hotkey_manager(tmp_path)
         # Confirm first-run state: no stored mapping
         assert config.hotkey_mapping == {}
 
-        fake_mapping = {
-            "accept": {"type": "button", "code": 305, "value": 1},  # BTN_EAST → SDL 0
-        }
-        with patch("backend.settings_manager.load_mapping", return_value=fake_mapping):
-            result = manager.getRetroarchHotkeyConfig()
+        result = manager.getRetroarchHotkeyConfig()
 
-        # accept → menu_toggle; BTN_EAST (305) → SDL 0
-        assert result["mapping"]["menu_toggle"] == 0
+        for row in result["hotkey_rows"]:
+            assert row["sdl_record"] is None

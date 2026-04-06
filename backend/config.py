@@ -363,7 +363,12 @@ class Config:
         self.rom_directory: Optional[Path] = None
         # RetroArch hotkey configuration
         self._hotkey_modifier_evdev: int | None = None   # evdev code of modifier button
-        self._hotkey_mapping: dict[str, int | None] = {}  # hotkey_action → SDL index or None
+        self._hotkey_modifier_sdl: dict | None = None    # SDL record for modifier button
+        self._hotkey_mapping: dict[str, dict | None] = {}  # hotkey_action → SDL record or None
+        # RetroArch rewind configuration
+        self._rewind_enable: bool = False
+        self._rewind_buffer_size: int = 20      # MB
+        self._rewind_granularity: int = 1       # frames
         # Merged system configs: built-in defaults overridden by user config.
         self._systems: dict[str, SystemConfig] = {
             key: SystemConfig(**values) for key, values in SYSTEM_DEFAULTS.items()
@@ -691,13 +696,53 @@ class Config:
         self.save()
 
     @property
-    def hotkey_mapping(self) -> dict[str, int | None]:
-        """Hotkey action → SDL index mapping. Empty dict means not yet configured."""
+    def hotkey_modifier_sdl(self) -> dict | None:
+        """SDL record for the modifier (enable_hotkey) button. None if not configured."""
+        return self._hotkey_modifier_sdl
+
+    def set_hotkey_modifier_sdl(self, record: dict | None) -> None:
+        """Set the modifier SDL record and persist the config."""
+        self._hotkey_modifier_sdl = record
+        self.save()
+
+    @property
+    def hotkey_mapping(self) -> dict[str, dict | None]:
+        """Hotkey action → SDL record mapping. Empty dict means not yet configured."""
         return self._hotkey_mapping
 
-    def set_hotkey_mapping(self, mapping: dict[str, int | None]) -> None:
+    def set_hotkey_mapping(self, mapping: dict[str, dict | None]) -> None:
         """Set the full hotkey mapping and persist the config."""
         self._hotkey_mapping = dict(mapping)
+        self.save()
+
+    @property
+    def rewind_enable(self) -> bool:
+        """Whether rewind is enabled in RetroArch. Defaults to False."""
+        return self._rewind_enable
+
+    def set_rewind_enable(self, value: bool) -> None:
+        """Set rewind enable and persist the config."""
+        self._rewind_enable = value
+        self.save()
+
+    @property
+    def rewind_buffer_size(self) -> int:
+        """Rewind buffer size in MB. Defaults to 20."""
+        return self._rewind_buffer_size
+
+    def set_rewind_buffer_size(self, value: int) -> None:
+        """Set rewind buffer size in MB and persist the config."""
+        self._rewind_buffer_size = value
+        self.save()
+
+    @property
+    def rewind_granularity(self) -> int:
+        """Rewind granularity in frames. Defaults to 1."""
+        return self._rewind_granularity
+
+    def set_rewind_granularity(self, value: int) -> None:
+        """Set rewind granularity in frames and persist the config."""
+        self._rewind_granularity = value
         self.save()
 
     @property
@@ -814,8 +859,12 @@ class Config:
                 "command": self.retroarch_command,
                 "cores_directory": str(self.cores_directory),
                 "hotkey_modifier_evdev": self._hotkey_modifier_evdev,
+                "hotkey_modifier_sdl": self._hotkey_modifier_sdl,
                 "hotkey_mapping": self._hotkey_mapping,
                 "retroarch_cfg_path": str(self.retroarch_cfg_path),
+                "rewind_enable": self._rewind_enable,
+                "rewind_buffer_size": self._rewind_buffer_size,
+                "rewind_granularity": self._rewind_granularity,
             },
             "systems": {
                 key: {
@@ -921,14 +970,38 @@ class Config:
             raw_modifier = retroarch.get("hotkey_modifier_evdev")
             if raw_modifier is None or isinstance(raw_modifier, int):
                 self._hotkey_modifier_evdev = raw_modifier
-            # hotkey_mapping: stored as dict of str → int|null; default {} (not yet configured)
+            # hotkey_modifier_sdl: stored as dict or null
+            raw_modifier_sdl = retroarch.get("hotkey_modifier_sdl")
+            if raw_modifier_sdl is None or (
+                isinstance(raw_modifier_sdl, dict)
+                and raw_modifier_sdl.get("type") in ("button", "axis", "hat")
+            ):
+                self._hotkey_modifier_sdl = raw_modifier_sdl
+            # hotkey_mapping: stored as dict of str → SDL record dict or null
+            # Migration: old int SDL index → button record
             raw_mapping = retroarch.get("hotkey_mapping")
             if isinstance(raw_mapping, dict):
-                loaded: dict[str, int | None] = {}
+                loaded: dict[str, dict | None] = {}
                 for k, v in raw_mapping.items():
-                    if v is None or isinstance(v, int):
+                    if v is None:
+                        loaded[k] = None
+                    elif isinstance(v, int):
+                        # Migration: old int SDL index → button record
+                        loaded[k] = {"type": "button", "sdl_button": v}
+                    elif isinstance(v, dict) and v.get("type") in ("button", "axis", "hat"):
                         loaded[k] = v
+                    # else: malformed — skip (action will be absent from mapping, treated as None)
                 self._hotkey_mapping = loaded
+            # rewind settings
+            raw_rewind_enable = retroarch.get("rewind_enable")
+            if isinstance(raw_rewind_enable, bool):
+                self._rewind_enable = raw_rewind_enable
+            raw_rewind_buffer_size = retroarch.get("rewind_buffer_size")
+            if isinstance(raw_rewind_buffer_size, int):
+                self._rewind_buffer_size = raw_rewind_buffer_size
+            raw_rewind_granularity = retroarch.get("rewind_granularity")
+            if isinstance(raw_rewind_granularity, int):
+                self._rewind_granularity = raw_rewind_granularity
 
         # systems — merge: built-in defaults first, then user overrides
         user_systems: dict = raw.get("systems", {})
