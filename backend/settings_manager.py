@@ -632,6 +632,22 @@ class SettingsManager(QObject):
         self._config.set_auto_skip_intro(enabled)
         self.autoSkipIntroChanged.emit()
 
+    # -- Lazy refresh Plex content ------------------------------------
+
+    lazyRefreshPlexChanged = Signal()
+
+    def _get_lazy_refresh_plex(self) -> bool:
+        return self._config.lazy_refresh_plex
+
+    lazyRefreshPlex = Property(bool, fget=_get_lazy_refresh_plex,
+                               notify=lazyRefreshPlexChanged)
+
+    @Slot(bool)
+    def setLazyRefreshPlex(self, enabled: bool) -> None:
+        """Set whether to silently re-fetch section content when entering a Plex content view."""
+        self._config.set_lazy_refresh_plex(enabled)
+        self.lazyRefreshPlexChanged.emit()
+
     @Slot(str)
     def setButtonLayout(self, layout: str) -> None:
         """Set the button layout ('standard' or 'alternate')."""

@@ -60,6 +60,9 @@ FocusScope {
     // Prevent redundant library lookups when re-entering the tab.
     property bool _initialized: false
 
+    // True while a manual Refresh is in-flight (set false when artists data arrives).
+    property bool _refreshing: false
+
     // Selected artist ratingKey (set when user selects an artist).
     property string _selectedArtistKey: ""
 
@@ -89,6 +92,13 @@ FocusScope {
 
     // Playlist tracks (populated when entering playlistdetail view).
     property var _playlistTracks: []
+
+    // Loading flags for async view transitions
+    property bool _detailLoading: false
+    property bool _albumLoading: false
+    property bool _recentLoading: false
+    property bool _playlistsLoading: false
+    property bool _playlistTracksLoading: false
 
     // Error banner — shown when plex.plexError fires
     property string _errorMessage: ""
@@ -173,11 +183,52 @@ FocusScope {
         target: plex
         function onArtistsModelChanged() {
             listenScreen._loading = false
+            listenScreen._refreshing = false
         }
         function onLibrariesModelChanged() {
             listenScreen._trySelectMusicLibrary()
         }
         function onPlexError(errorType) { listenScreen._showPlexError(errorType) }
+
+        function onArtistDetailReady(ratingKey, data) {
+            if (ratingKey !== listenScreen._selectedArtistKey) return
+            listenScreen._artistData = data.artist
+            listenScreen._albums = data.albums
+            listenScreen._detailLoading = false
+            // Set initial focus to first non-header entry
+            var firstAlbum = 0
+            for (var i = 0; i < listenScreen._albums.length; i++) {
+                if (listenScreen._albums[i].type !== "header") { firstAlbum = i; break }
+            }
+            albumList.currentIndex = firstAlbum
+        }
+
+        function onAlbumDetailReady(ratingKey, data) {
+            if (ratingKey !== listenScreen._selectedAlbumKey) return
+            listenScreen._albumData = data.album
+            listenScreen._tracks = data.tracks
+            listenScreen._albumLoading = false
+            trackList.currentIndex = 0
+        }
+
+        function onRecentAlbumsReady(albums) {
+            listenScreen._recentAlbums = albums
+            listenScreen._recentLoading = false
+            recentAlbumsList.currentIndex = 0
+        }
+
+        function onPlaylistsReady(playlists) {
+            listenScreen._playlists = playlists
+            listenScreen._playlistsLoading = false
+            playlistsList.currentIndex = 0
+        }
+
+        function onPlaylistTracksReady(ratingKey, tracks) {
+            if (ratingKey !== listenScreen._selectedPlaylist.ratingKey) return
+            listenScreen._playlistTracks = tracks
+            listenScreen._playlistTracksLoading = false
+            playlistTrackList.currentIndex = 0
+        }
     }
 
     // ── Duration formatting helpers ───────────────────────────────────────────
@@ -243,43 +294,48 @@ FocusScope {
                 _loading = true
                 _noLibrary = false
                 if (plex) {
-                    plex.refresh()
                     _trySelectMusicLibrary()
                 }
+            } else if (_noLibrary && !_loading) {
+                // Retry: plex was unavailable on first load but artists model is still empty
+                _trySelectMusicLibrary()
             }
             _routeFocus()
         }
     }
 
     onCurrentViewChanged: {
+        // Lazy refresh: silently re-fetch section content when entering artists or recently added
+        if ((currentView === "artists" || currentView === "recentlyadded")
+                && settings && settings.lazyRefreshPlex
+                && listenScreen._musicSectionKey !== "") {
+            plex.selectLibrary(listenScreen._musicSectionKey)
+        }
         if (currentView !== "nowplaying") {
             _previousView = currentView
         }
         if (currentView === "detail" && _selectedArtistKey) {
-            _artistData = plex.getArtist(_selectedArtistKey)
-            _albums = plex.getArtistAlbums(_selectedArtistKey)
-            // Set initial focus to first non-header entry (index 1, since index 0 is the first header)
-            var firstAlbum = 0
-            for (var i = 0; i < _albums.length; i++) {
-                if (_albums[i].type !== "header") {
-                    firstAlbum = i
-                    break
-                }
-            }
-            albumList.currentIndex = firstAlbum
+            _detailLoading = true
+            _artistData = {}
+            _albums = []
+            plex.fetchArtistDetail(_selectedArtistKey)
         } else if (currentView === "recentlyadded" && _musicSectionKey) {
-            _recentAlbums = plex.getRecentlyAddedAlbums(_musicSectionKey)
-            recentAlbumsList.currentIndex = 0
+            _recentLoading = true
+            _recentAlbums = []
+            plex.fetchRecentAlbums(_musicSectionKey)
         } else if (currentView === "album" && _selectedAlbumKey) {
-            _albumData = plex.getAlbum(_selectedAlbumKey)
-            _tracks = plex.getTracks(_selectedAlbumKey)
-            trackList.currentIndex = 0
+            _albumLoading = true
+            _albumData = {}
+            _tracks = []
+            plex.fetchAlbumDetail(_selectedAlbumKey)
         } else if (currentView === "playlists") {
-            _playlists = plex.getPlaylists()
-            playlistsList.currentIndex = 0
+            _playlistsLoading = true
+            _playlists = []
+            plex.fetchPlaylists()
         } else if (currentView === "playlistdetail" && _selectedPlaylist.ratingKey) {
-            _playlistTracks = plex.getPlaylistTracks(_selectedPlaylist.ratingKey)
-            playlistTrackList.currentIndex = 0
+            _playlistTracksLoading = true
+            _playlistTracks = []
+            plex.fetchPlaylistTracks(_selectedPlaylist.ratingKey)
         }
         _routeFocus()
     }
@@ -342,6 +398,8 @@ FocusScope {
             items.push({ label: "Recently Added", action: "recentlyadded" })
             items.push({ label: "Playlists", action: "playlists" })
             items.push({ label: "Artists", action: "artists" })
+            items.push({ label: listenScreen._refreshing ? "Refreshing..." : "↻  Refresh",
+                         action: "refresh" })
             return items
         }
 
@@ -412,6 +470,13 @@ FocusScope {
                         listenScreen.currentView = "playlists"
                     } else if (item.menuAction === "artists") {
                         listenScreen.currentView = "artists"
+                    } else if (item.menuAction === "refresh") {
+                        if (!listenScreen._refreshing) {
+                            listenScreen._refreshing = true
+                            listenScreen._loading = true
+                            plex.refresh()
+                            _trySelectMusicLibrary()
+                        }
                     }
                 }
             } else if (keys.isCancel(event)) {
@@ -461,6 +526,17 @@ FocusScope {
 
         anchors.fill: parent
         visible: listenScreen.currentView === "album"
+
+        // ── Loading indicator ────────────────────────────────────────────────
+        Text {
+            anchors.centerIn: parent
+            visible: listenScreen._albumLoading
+            text: "Loading..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            z: 10
+        }
 
         // ── Album detail header bar ──────────────────────────────────────────
         Rectangle {
@@ -805,7 +881,7 @@ FocusScope {
             // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                visible: listenScreen.currentView === "album" && listenScreen._tracks.length === 0
+                visible: listenScreen.currentView === "album" && listenScreen._tracks.length === 0 && !listenScreen._albumLoading
                 text: "No tracks found"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1541,6 +1617,17 @@ FocusScope {
         anchors.fill: parent
         visible: listenScreen.currentView === "recentlyadded"
 
+        // ── Loading indicator ────────────────────────────────────────────────
+        Text {
+            anchors.centerIn: parent
+            visible: listenScreen._recentLoading
+            text: "Loading..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            z: 10
+        }
+
         // ── Recently Added header bar ────────────────────────────────────────
         Rectangle {
             id: recentlyAddedHeaderBar
@@ -1612,7 +1699,7 @@ FocusScope {
             // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                visible: listenScreen.currentView === "recentlyadded" && listenScreen._recentAlbums.length === 0
+                visible: listenScreen.currentView === "recentlyadded" && listenScreen._recentAlbums.length === 0 && !listenScreen._recentLoading
                 text: "No recently added albums"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1761,6 +1848,17 @@ FocusScope {
         anchors.fill: parent
         visible: listenScreen.currentView === "playlists"
 
+        // ── Loading indicator ────────────────────────────────────────────────
+        Text {
+            anchors.centerIn: parent
+            visible: listenScreen._playlistsLoading
+            text: "Loading..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            z: 10
+        }
+
         // ── Playlists header bar ─────────────────────────────────────────────
         Rectangle {
             id: playlistsHeaderBar
@@ -1831,7 +1929,7 @@ FocusScope {
             // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                visible: listenScreen.currentView === "playlists" && listenScreen._playlists.length === 0
+                visible: listenScreen.currentView === "playlists" && listenScreen._playlists.length === 0 && !listenScreen._playlistsLoading
                 text: "No playlists found"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1928,6 +2026,17 @@ FocusScope {
 
         anchors.fill: parent
         visible: listenScreen.currentView === "playlistdetail"
+
+        // ── Loading indicator ────────────────────────────────────────────────
+        Text {
+            anchors.centerIn: parent
+            visible: listenScreen._playlistTracksLoading
+            text: "Loading..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            z: 10
+        }
 
         // ── Playlist detail header bar ───────────────────────────────────────
         Rectangle {
@@ -2120,7 +2229,7 @@ FocusScope {
             // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                visible: listenScreen.currentView === "playlistdetail" && listenScreen._playlistTracks.length === 0
+                visible: listenScreen.currentView === "playlistdetail" && listenScreen._playlistTracks.length === 0 && !listenScreen._playlistTracksLoading
                 text: "No tracks found"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -2308,6 +2417,17 @@ FocusScope {
         anchors.fill: parent
         visible: listenScreen.currentView === "detail"
 
+        // ── Loading indicator ────────────────────────────────────────────────
+        Text {
+            anchors.centerIn: parent
+            visible: listenScreen._detailLoading
+            text: "Loading..."
+            color: Theme.colorTextDim
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            z: 10
+        }
+
         // ── Detail header bar ────────────────────────────────────────────────
         Rectangle {
             id: detailHeaderBar
@@ -2380,7 +2500,7 @@ FocusScope {
             // ── Empty state ──────────────────────────────────────────────────
             Text {
                 anchors.centerIn: parent
-                visible: listenScreen.currentView === "detail" && listenScreen._albums.length === 0
+                visible: listenScreen.currentView === "detail" && listenScreen._albums.length === 0 && !listenScreen._detailLoading
                 text: "No albums found"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily

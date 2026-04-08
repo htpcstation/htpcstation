@@ -4520,3 +4520,519 @@ class TestRateSlot:
         lib.rate("123", 7.0)
 
         assert len(submitted) == 0
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.fetchArtistDetail — Task 004 (async listen screen)
+# ---------------------------------------------------------------------------
+
+
+def _run_fetch_worker_with_events(lib, method_name, *args):
+    """Submit a fetch* call, run the captured worker synchronously, then flush Qt events.
+
+    The new async slots (fetchArtistDetail, fetchAlbumDetail, etc.) use
+    QueuedConnection for the private→public signal chain, so we must call
+    processEvents() after the worker runs to deliver the queued signal.
+    """
+    from PySide6.QtCore import QCoreApplication
+    submitted = []
+
+    def fake_submit(fn, *a, **kw):
+        submitted.append(fn)
+
+    lib._executor.submit = fake_submit  # type: ignore[method-assign]
+    getattr(lib, method_name)(*args)
+    for fn in submitted:
+        fn()
+    QCoreApplication.processEvents()
+
+
+class TestFetchArtistDetail:
+    """fetchArtistDetail() emits artistDetailReady with artist metadata and albums."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_emits_artist_detail_ready_with_artist_and_albums(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "100",
+            "title": "Test Artist",
+            "summary": "A great artist.",
+            "Genre": [{"tag": "Rock"}],
+        }
+        mock_client.get_hubs.return_value = [
+            {
+                "hubIdentifier": "artist.albums",
+                "title": "Albums",
+                "Metadata": [
+                    {
+                        "ratingKey": "200",
+                        "title": "Album One",
+                        "year": 2020,
+                        "leafCount": 10,
+                        "type": "album",
+                    }
+                ],
+            }
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.artistDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "100")
+
+        assert len(received) == 1
+        rk, data = received[0]
+        assert rk == "100"
+        assert data["artist"]["ratingKey"] == "100"
+        assert data["artist"]["title"] == "Test Artist"
+        assert data["artist"]["summary"] == "A great artist."
+        assert len(data["albums"]) == 2  # header + 1 album
+        assert data["albums"][0]["type"] == "header"
+        assert data["albums"][1]["type"] == "album"
+        assert data["albums"][1]["ratingKey"] == "200"
+
+    def test_no_op_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.fetchArtistDetail("100")
+
+        assert len(submitted) == 0
+
+    def test_emits_empty_artist_when_metadata_not_found(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = None
+        mock_client.get_hubs.return_value = []
+        lib._client = mock_client
+
+        received = []
+        lib.artistDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "999")
+
+        assert len(received) == 1
+        rk, data = received[0]
+        assert rk == "999"
+        assert data["artist"] == {}
+        assert data["albums"] == []
+
+    def test_albums_sorted_by_year_descending(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {"ratingKey": "100", "title": "Artist"}
+        mock_client.get_hubs.return_value = [
+            {
+                "hubIdentifier": "artist.albums",
+                "title": "Albums",
+                "Metadata": [
+                    {"ratingKey": "201", "title": "Old Album", "year": 2010, "leafCount": 5, "type": "album"},
+                    {"ratingKey": "202", "title": "New Album", "year": 2022, "leafCount": 8, "type": "album"},
+                ],
+            }
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.artistDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "100")
+
+        _, data = received[0]
+        albums = [a for a in data["albums"] if a["type"] == "album"]
+        assert albums[0]["year"] == 2022
+        assert albums[1]["year"] == 2010
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.fetchAlbumDetail — Task 004 (async listen screen)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchAlbumDetail:
+    """fetchAlbumDetail() emits albumDetailReady with album metadata and tracks."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_emits_album_detail_ready_with_album_and_tracks(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "200",
+            "title": "Test Album",
+            "year": 2021,
+            "leafCount": 2,
+            "parentTitle": "Test Artist",
+            "summary": "A great album.",
+            "studio": "Test Label",
+            "Genre": [{"tag": "Rock"}],
+            "userRating": 8.0,
+        }
+        mock_client.get_children.return_value = [
+            {
+                "type": "track",
+                "ratingKey": "300",
+                "title": "Track One",
+                "index": 1,
+                "duration": 240000,
+                "parentTitle": "Test Album",
+                "grandparentTitle": "Test Artist",
+                "Media": [{"Part": [{"key": "/library/parts/300/file.mp3"}]}],
+            },
+            {
+                "type": "track",
+                "ratingKey": "301",
+                "title": "Track Two",
+                "index": 2,
+                "duration": 200000,
+                "parentTitle": "Test Album",
+                "grandparentTitle": "Test Artist",
+                "Media": [{"Part": [{"key": "/library/parts/301/file.mp3"}]}],
+            },
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.albumDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchAlbumDetail", "200")
+
+        assert len(received) == 1
+        rk, data = received[0]
+        assert rk == "200"
+        assert data["album"]["ratingKey"] == "200"
+        assert data["album"]["title"] == "Test Album"
+        assert data["album"]["year"] == 2021
+        assert data["album"]["parentTitle"] == "Test Artist"
+        assert len(data["tracks"]) == 2
+        assert data["tracks"][0]["ratingKey"] == "300"
+        assert data["tracks"][0]["title"] == "Track One"
+        assert data["tracks"][1]["ratingKey"] == "301"
+
+    def test_no_op_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.fetchAlbumDetail("200")
+
+        assert len(submitted) == 0
+
+    def test_filters_out_non_track_children(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {"ratingKey": "200", "title": "Album"}
+        mock_client.get_children.return_value = [
+            {"type": "track", "ratingKey": "300", "title": "Track One", "index": 1},
+            {"type": "album", "ratingKey": "999", "title": "Not a track"},
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.albumDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchAlbumDetail", "200")
+
+        _, data = received[0]
+        assert len(data["tracks"]) == 1
+        assert data["tracks"][0]["ratingKey"] == "300"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.fetchRecentAlbums — Task 004 (async listen screen)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchRecentAlbums:
+    """fetchRecentAlbums() emits recentAlbumsReady with a list of album dicts."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_emits_recent_albums_ready(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "200",
+                        "title": "Recent Album",
+                        "year": 2023,
+                        "parentTitle": "Some Artist",
+                    }
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        received = []
+        lib.recentAlbumsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchRecentAlbums", "3")
+
+        assert len(received) == 1
+        albums = received[0]
+        assert len(albums) == 1
+        assert albums[0]["ratingKey"] == "200"
+        assert albums[0]["title"] == "Recent Album"
+        assert albums[0]["year"] == 2023
+        assert albums[0]["parentTitle"] == "Some Artist"
+
+    def test_no_op_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.fetchRecentAlbums("3")
+
+        assert len(submitted) == 0
+
+    def test_filters_out_non_album_items(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {"type": "album", "ratingKey": "200", "title": "Album"},
+                    {"type": "track", "ratingKey": "300", "title": "Track"},
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        received = []
+        lib.recentAlbumsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchRecentAlbums", "3")
+
+        albums = received[0]
+        assert len(albums) == 1
+        assert albums[0]["ratingKey"] == "200"
+
+    def test_emits_empty_list_when_no_data(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = None
+        lib._client = mock_client
+
+        received = []
+        lib.recentAlbumsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchRecentAlbums", "3")
+
+        assert len(received) == 1
+        assert received[0] == []
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.fetchPlaylists — Task 004 (async listen screen)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPlaylists:
+    """fetchPlaylists() emits playlistsReady with a list of audio playlist dicts."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_emits_playlists_ready_with_audio_playlists(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {
+                "ratingKey": "500",
+                "title": "My Playlist",
+                "playlistType": "audio",
+                "leafCount": 10,
+                "duration": 3600000,
+                "smart": False,
+            }
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.playlistsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchPlaylists")
+
+        assert len(received) == 1
+        playlists = received[0]
+        assert len(playlists) == 1
+        assert playlists[0]["ratingKey"] == "500"
+        assert playlists[0]["title"] == "My Playlist"
+        assert playlists[0]["leafCount"] == 10
+
+    def test_no_op_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.fetchPlaylists()
+
+        assert len(submitted) == 0
+
+    def test_filters_out_non_audio_playlists(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlists.return_value = [
+            {"ratingKey": "500", "title": "Audio PL", "playlistType": "audio", "leafCount": 5, "duration": 0, "smart": False},
+            {"ratingKey": "501", "title": "Video PL", "playlistType": "video", "leafCount": 3, "duration": 0, "smart": False},
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.playlistsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchPlaylists")
+
+        playlists = received[0]
+        assert len(playlists) == 1
+        assert playlists[0]["ratingKey"] == "500"
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.fetchPlaylistTracks — Task 004 (async listen screen)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchPlaylistTracks:
+    """fetchPlaylistTracks() emits playlistTracksReady with a list of track dicts."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_emits_playlist_tracks_ready(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = [
+            {
+                "type": "track",
+                "ratingKey": "300",
+                "title": "Track One",
+                "index": 1,
+                "duration": 240000,
+                "parentTitle": "Album",
+                "grandparentTitle": "Artist",
+                "Media": [{"Part": [{"key": "/library/parts/300/file.mp3"}]}],
+            }
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.playlistTracksReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchPlaylistTracks", "500")
+
+        assert len(received) == 1
+        rk, tracks = received[0]
+        assert rk == "500"
+        assert len(tracks) == 1
+        assert tracks[0]["ratingKey"] == "300"
+        assert tracks[0]["title"] == "Track One"
+        assert tracks[0]["durationMs"] == 240000
+        assert tracks[0]["parentTitle"] == "Album"
+        assert tracks[0]["grandparentTitle"] == "Artist"
+
+    def test_no_op_when_no_client(self) -> None:
+        lib = self._make_lib()
+        lib._client = None
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.fetchPlaylistTracks("500")
+
+        assert len(submitted) == 0
+
+    def test_emits_empty_list_when_no_items(self) -> None:
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = []
+        lib._client = mock_client
+
+        received = []
+        lib.playlistTracksReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchPlaylistTracks", "500")
+
+        assert len(received) == 1
+        rk, tracks = received[0]
+        assert rk == "500"
+        assert tracks == []
+
+    def test_rating_key_passed_through_signal(self) -> None:
+        """The rating_key in the signal matches the one passed to fetchPlaylistTracks."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_playlist_items.return_value = []
+        lib._client = mock_client
+
+        received_keys = []
+        lib.playlistTracksReady.connect(lambda rk, d: received_keys.append(rk))
+        _run_fetch_worker_with_events(lib, "fetchPlaylistTracks", "my-playlist-key")
+
+        assert received_keys == ["my-playlist-key"]

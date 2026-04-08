@@ -62,6 +62,7 @@ FocusScope {
         { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
         { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
         { type: "toggle",  label: "Auto-Skip Intro",   settingKey: "autoSkipIntro" },
+        { type: "toggle",  label: "Lazy Refresh Plex Content", settingKey: "lazyRefreshPlex" },
         { type: "header",  label: "Browser" },
         { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
         { type: "header",  label: "Moonlight" },
@@ -152,6 +153,7 @@ FocusScope {
         if (key === "showMoonlightTab")   return settings.showMoonlightTab
         if (key === "showWatchTab")       return settings.showWatchTab
         if (key === "showListenTab")      return settings.showListenTab
+        if (key === "lazyRefreshPlex")    return settings.lazyRefreshPlex
         return ""
     }
 
@@ -202,6 +204,7 @@ FocusScope {
             settings.setShowListenTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
+        else if (key === "lazyRefreshPlex") settings.setLazyRefreshPlex(value)
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────

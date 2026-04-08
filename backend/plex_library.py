@@ -487,6 +487,11 @@ class PlexLibrary(QObject):
     showReady     = Signal(str, "QVariant")   # (rating_key, show_dict)
     seasonsReady  = Signal(str, "QVariant")   # (rating_key, seasons_list)
     episodesReady = Signal(str, "QVariant")   # (season_rating_key, episodes_list)
+    artistDetailReady  = Signal(str, "QVariant")   # (artist_rating_key, {artist, albums})
+    albumDetailReady   = Signal(str, "QVariant")   # (album_rating_key, {album, tracks})
+    recentAlbumsReady  = Signal("QVariant")        # list of album dicts
+    playlistsReady     = Signal("QVariant")        # list of playlist dicts
+    playlistTracksReady = Signal(str, "QVariant")  # (rating_key, list of track dicts)
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
@@ -506,6 +511,11 @@ class PlexLibrary(QObject):
     _showReady     = Signal(str, object)
     _seasonsReady  = Signal(str, object)
     _episodesReady = Signal(str, object)
+    _artistDetailReady  = Signal(str, object)
+    _albumDetailReady   = Signal(str, object)
+    _recentAlbumsReady  = Signal(object)
+    _playlistsReady     = Signal(object)
+    _playlistTracksReady = Signal(str, object)
 
     def __init__(
         self,
@@ -588,6 +598,16 @@ class PlexLibrary(QObject):
         self._showReady.connect(lambda rk, d: self.showReady.emit(rk, d))
         self._seasonsReady.connect(lambda rk, d: self.seasonsReady.emit(rk, d))
         self._episodesReady.connect(lambda rk, d: self.episodesReady.emit(rk, d))
+        self._artistDetailReady.connect(self._on_artist_detail_ready,
+                                        Qt.ConnectionType.QueuedConnection)
+        self._albumDetailReady.connect(self._on_album_detail_ready,
+                                       Qt.ConnectionType.QueuedConnection)
+        self._recentAlbumsReady.connect(self._on_recent_albums_ready,
+                                        Qt.ConnectionType.QueuedConnection)
+        self._playlistsReady.connect(self._on_playlists_ready,
+                                     Qt.ConnectionType.QueuedConnection)
+        self._playlistTracksReady.connect(self._on_playlist_tracks_ready,
+                                          Qt.ConnectionType.QueuedConnection)
 
         # MPV launcher for direct stream playback
         self._mpv_launcher = LibMpvPlayer(parent=self)
@@ -1577,6 +1597,182 @@ class PlexLibrary(QObject):
             })
         return result
 
+    @Slot(str)
+    def fetchArtistDetail(self, rating_key: str) -> None:
+        """Async: fetch artist metadata + albums. Emits artistDetailReady."""
+        if self._client is None:
+            return
+        client = self._client
+        poster_cache = self._poster_cache
+        def _worker():
+            import re
+            artist_dict = {}
+            data = client.get_metadata(rating_key)
+            if data:
+                artist = parse_artist(data)
+                if artist.thumb_path and poster_cache:
+                    artist.poster_local = poster_cache.get_poster(client, artist.thumb_path)
+                artist_dict = {
+                    "ratingKey": artist.rating_key,
+                    "title": artist.title,
+                    "summary": artist.summary,
+                    "genre": artist.genre,
+                    "posterLocal": artist.poster_local,
+                }
+            # Reuse existing getArtistAlbums logic inline
+            albums = []
+            hubs = client.get_hubs(rating_key)
+            for hub in hubs:
+                hub_id = hub.get("hubIdentifier", "")
+                if not (hub_id.startswith("artist.albums") or hub_id.startswith("hub.artist.albums")):
+                    continue
+                raw_title = hub.get("title", "")
+                clean_title = re.sub(r'^\d+\s+', '', raw_title)
+                if clean_title == "Album":
+                    clean_title = "Albums"
+                hub_albums = []
+                for item in hub.get("Metadata", []):
+                    album = parse_album(item)
+                    if album.thumb_path and poster_cache:
+                        album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                    hub_albums.append({
+                        "type": "album",
+                        "ratingKey": album.rating_key,
+                        "title": album.title,
+                        "year": album.year,
+                        "leafCount": album.leaf_count,
+                        "posterLocal": album.poster_local,
+                    })
+                hub_albums.sort(key=lambda a: a["year"] or 0, reverse=True)
+                albums.append({"type": "header", "title": clean_title})
+                albums.extend(hub_albums)
+            self._artistDetailReady.emit(rating_key, {"artist": artist_dict, "albums": albums})
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchAlbumDetail(self, rating_key: str) -> None:
+        """Async: fetch album metadata + tracks. Emits albumDetailReady."""
+        if self._client is None:
+            return
+        client = self._client
+        poster_cache = self._poster_cache
+        def _worker():
+            album_dict = {}
+            data = client.get_metadata(rating_key)
+            if data:
+                album = parse_album(data)
+                if album.thumb_path and poster_cache:
+                    album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                album_dict = {
+                    "ratingKey": album.rating_key,
+                    "title": album.title,
+                    "year": album.year,
+                    "leafCount": album.leaf_count,
+                    "parentTitle": album.parent_title,
+                    "posterLocal": album.poster_local,
+                    "summary": album.summary,
+                    "studio": album.studio,
+                    "genre": album.genre,
+                    "rating": album.rating,
+                }
+            tracks = []
+            children = client.get_children(rating_key)
+            for item in children:
+                if item.get("type") == "track":
+                    track = parse_track(item)
+                    tracks.append({
+                        "ratingKey": track.rating_key,
+                        "title": track.title,
+                        "index": track.index,
+                        "durationMs": track.duration_ms,
+                        "parentTitle": track.parent_title,
+                        "grandparentTitle": track.grandparent_title,
+                        "mediaKey": track.media_key,
+                    })
+            self._albumDetailReady.emit(rating_key, {"album": album_dict, "tracks": tracks})
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchRecentAlbums(self, section_key: str) -> None:
+        """Async: fetch recently added albums. Emits recentAlbumsReady."""
+        if self._client is None:
+            return
+        client = self._client
+        poster_cache = self._poster_cache
+        def _worker():
+            data = client._get(f"/library/sections/{section_key}/recentlyAdded")
+            result = []
+            if data:
+                for item in data.get("MediaContainer", {}).get("Metadata", []):
+                    if item.get("type") != "album":
+                        continue
+                    album = parse_album(item)
+                    if album.thumb_path and poster_cache:
+                        album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                    result.append({
+                        "ratingKey": album.rating_key,
+                        "title": album.title,
+                        "year": album.year,
+                        "parentTitle": album.parent_title,
+                        "posterLocal": album.poster_local,
+                    })
+            self._recentAlbumsReady.emit(result)
+        self._executor.submit(_worker)
+
+    @Slot()
+    def fetchPlaylists(self) -> None:
+        """Async: fetch audio playlists. Emits playlistsReady."""
+        if self._client is None:
+            return
+        client = self._client
+        def _worker():
+            # Reuse existing getPlaylists logic
+            raw = client.get_playlists()
+            result = []
+            for p in raw:
+                if p.get("playlistType") != "audio":
+                    continue
+                leaf_count = int(p.get("leafCount", 0) or 0)
+                if leaf_count > PlexLibrary._MAX_PLAYLIST_TRACKS:
+                    continue
+                rk = str(p.get("ratingKey", ""))
+                if p.get("smart") and rk:
+                    probe = client.get_playlist_items(rk, limit=1)
+                    if not probe:
+                        continue
+                result.append({
+                    "ratingKey": rk,
+                    "title": PlexLibrary._replace_emoji(p.get("title", "")),
+                    "leafCount": leaf_count,
+                    "duration": int(p.get("duration", 0) or 0),
+                    "smart": bool(p.get("smart", False)),
+                })
+            self._playlistsReady.emit(result)
+        self._executor.submit(_worker)
+
+    @Slot(str)
+    def fetchPlaylistTracks(self, rating_key: str) -> None:
+        """Async: fetch tracks for a playlist. Emits playlistTracksReady."""
+        if self._client is None:
+            return
+        client = self._client
+        def _worker():
+            raw = client.get_playlist_items(rating_key)
+            result = []
+            for item in raw:
+                track = parse_track(item)
+                result.append({
+                    "ratingKey": track.rating_key,
+                    "title": track.title,
+                    "index": track.index,
+                    "durationMs": track.duration_ms,
+                    "parentTitle": track.parent_title,
+                    "grandparentTitle": track.grandparent_title,
+                    "mediaKey": track.media_key,
+                })
+            self._playlistTracksReady.emit(rating_key, result)
+        self._executor.submit(_worker)
+
     @Slot(str, result="QVariant")
     def getRecentlyAddedAlbums(self, section_key: str) -> list:
         """Return recently added albums for a music library section."""
@@ -2075,6 +2271,21 @@ class PlexLibrary(QObject):
                     self._poster_executor.submit(
                         self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
+
+    def _on_artist_detail_ready(self, rating_key: str, data: object) -> None:
+        self.artistDetailReady.emit(rating_key, data)
+
+    def _on_album_detail_ready(self, rating_key: str, data: object) -> None:
+        self.albumDetailReady.emit(rating_key, data)
+
+    def _on_recent_albums_ready(self, data: object) -> None:
+        self.recentAlbumsReady.emit(data)
+
+    def _on_playlists_ready(self, data: object) -> None:
+        self.playlistsReady.emit(data)
+
+    def _on_playlist_tracks_ready(self, rating_key: str, data: object) -> None:
+        self.playlistTracksReady.emit(rating_key, data)
 
     def _on_artists_ready(self, artists: list, total: int) -> None:
         self._artists_model.set_artists(artists)

@@ -64,6 +64,9 @@ FocusScope {
     // every time the user navigates back to this tab.
     property bool _refreshed: false
 
+    // True while a manual Refresh is in-flight (set false when libraries data arrives).
+    property bool _refreshing: false
+
     // True when focus is inside a content grid/list — drives the library area
     // fade so the content area receives visual prominence.
     property bool _contentFocused: false
@@ -329,7 +332,10 @@ FocusScope {
     Connections {
         target: plex
         function onAvailableChanged() { watchScreen._availabilityKnown = true }
-        function onLibrariesModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
+        function onLibrariesModelChanged() {
+            watchScreen._libraryEntries = watchScreen._getVideoLibraries()
+            watchScreen._refreshing = false
+        }
         function onOnDeckModelChanged() { watchScreen._libraryEntries = watchScreen._getVideoLibraries() }
         function onMyListChanged(added) {
             watchScreen._libraryEntries = watchScreen._getVideoLibraries()
@@ -415,12 +421,22 @@ FocusScope {
 
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
-    onCurrentViewChanged: _routeFocus()
+    onCurrentViewChanged: {
+        _routeFocus()
+        // Lazy refresh: silently re-fetch section content when entering a content view
+        if (currentView === "content"
+                && settings && settings.lazyRefreshPlex
+                && selectedSectionKey !== ""
+                && selectedLibraryType !== "mylist"
+                && selectedLibraryType !== "livetv") {
+            plex.selectLibrary(selectedSectionKey)
+        }
+    }
     on_ViewModeChanged: { if (currentView === "content") _routeFocus() }
     onActiveFocusChanged: {
         if (activeFocus) {
             _contentFocused = false   // reset; _routeFocus will set correctly
-            if (!_refreshed || _libraryEntries.length === 0) {
+            if (_libraryEntries.length === 0 && !_refreshed) {
                 _refreshed = true
                 _availabilityKnown = false
                 plex.refresh()
@@ -439,6 +455,8 @@ FocusScope {
         if (_loadingOverlayVisible) { loadingOverlay.forceActiveFocus(); return }
         if (currentView === "libraries") {
             _contentFocused = false
+            // Don't steal focus from the Refresh item when it is already focused.
+            if (refreshItem.activeFocus) return
             libraryList.forceActiveFocus()
         } else if (currentView === "content") {
             _contentFocused = true
@@ -529,7 +547,7 @@ FocusScope {
                 top: headerBar.bottom
                 left: parent.left
                 right: parent.right
-                bottom: parent.bottom
+                bottom: refreshItem.top
                 topMargin: root.vpx(16)
                 leftMargin: root.vpx(32)
                 rightMargin: root.vpx(32)
@@ -567,6 +585,9 @@ FocusScope {
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
                         watchScreen.back()
+                    } else if (event.key === Qt.Key_Down && currentIndex === count - 1) {
+                        event.accepted = true
+                        refreshItem.forceActiveFocus()
                     }
                 }
 
@@ -664,6 +685,59 @@ FocusScope {
                 }
             }
         }
+
+        // ── Refresh item ──────────────────────────────────────────────────────
+        Item {
+            id: refreshItem
+
+            anchors {
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                leftMargin: root.vpx(32)
+                rightMargin: root.vpx(32)
+                bottomMargin: root.vpx(16)
+            }
+            height: root.vpx(64)
+
+            // Highlight background (matches library list delegate style)
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorSecondary
+                opacity: refreshItem.activeFocus ? 1.0 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+            }
+
+            Text {
+                anchors { left: parent.left; leftMargin: root.vpx(40); verticalCenter: parent.verticalCenter }
+                text: watchScreen._refreshing ? "Refreshing..." : "↻  Refresh"
+                color: watchScreen._refreshing ? Theme.colorTextDim : Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            FocusRing {}
+
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)) {
+                    event.accepted = true
+                    if (!watchScreen._refreshing) {
+                        watchScreen._refreshing = true
+                        watchScreen._availabilityKnown = false
+                        plex.refresh()
+                    }
+                } else if (keys.isCancel(event)) {
+                    event.accepted = true
+                    watchScreen.back()
+                } else if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    libraryList.forceActiveFocus()
+                    libraryList.currentIndex = libraryList.count - 1
+                }
+            }
+        }
+    }
 
     // ── Movie grid (task 017) ─────────────────────────────────────────────────
     PlexMovieGrid {
@@ -1025,11 +1099,6 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
-        }
-        if (plex && !_refreshed) {
-            _refreshed = true
-            _availabilityKnown = false
-            plex.refresh()
         }
     }
 

@@ -400,6 +400,8 @@ class Config:
         self._plex_player: str = "mpv"
         # Auto-skip intro markers during Plex playback
         self._auto_skip_intro: bool = False
+        # Lazy refresh: re-fetch section content when entering a third-level Plex screen
+        self._lazy_refresh_plex: bool = False
         # Sort preferences
         self._sort_retro_games: str = "az"
         self._sort_steam_games: str = "az"
@@ -515,6 +517,16 @@ class Config:
     def set_auto_skip_intro(self, enabled: bool) -> None:
         """Set auto-skip intro and persist the config."""
         self._auto_skip_intro = bool(enabled)
+        self.save()
+
+    @property
+    def lazy_refresh_plex(self) -> bool:
+        """Whether to silently re-fetch section content when entering a Plex content view."""
+        return self._lazy_refresh_plex
+
+    def set_lazy_refresh_plex(self, enabled: bool) -> None:
+        """Set lazy refresh Plex and persist the config."""
+        self._lazy_refresh_plex = bool(enabled)
         self.save()
 
     @property
@@ -897,6 +909,7 @@ class Config:
                 "music_library_key": self._music_library_key,
                 "player": self._plex_player,
                 "auto_skip_intro": self._auto_skip_intro,
+                "lazy_refresh_plex": self._lazy_refresh_plex,
             },
             "browser": {
                 "command": self._browser_command,
@@ -1057,6 +1070,7 @@ class Config:
             if player in ("mpv", "browser"):
                 self._plex_player = player
             self._auto_skip_intro = bool(plex.get("auto_skip_intro", False))
+            self._lazy_refresh_plex = bool(plex.get("lazy_refresh_plex", False))
             # Backward compatibility: old configs may have server_url — ignore it gracefully
 
         # browser section

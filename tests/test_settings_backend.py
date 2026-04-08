@@ -3367,3 +3367,169 @@ class TestRetroarchHotkeyConfig:
 
         for row in result["hotkey_rows"]:
             assert row["sdl_record"] is None
+
+
+# ---------------------------------------------------------------------------
+# Config — lazy_refresh_plex (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestConfigLazyRefreshPlex:
+    def _make_config(self, tmp_path: Path, data: dict | None = None) -> Config:
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            return Config()
+
+    def test_lazy_refresh_plex_default_is_false(self, tmp_path: Path) -> None:
+        """A fresh Config() has lazy_refresh_plex == False."""
+        config = self._make_config(tmp_path)
+        assert config.lazy_refresh_plex is False
+
+    def test_set_lazy_refresh_plex_to_true(self, tmp_path: Path) -> None:
+        """set_lazy_refresh_plex(True) → lazy_refresh_plex == True."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_lazy_refresh_plex(True)
+
+        assert config.lazy_refresh_plex is True
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["lazy_refresh_plex"] is True
+
+    def test_set_lazy_refresh_plex_to_false(self, tmp_path: Path) -> None:
+        """set_lazy_refresh_plex(False) → lazy_refresh_plex == False."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(
+            json.dumps({"plex": {"lazy_refresh_plex": True}}),
+            encoding="utf-8",
+        )
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_lazy_refresh_plex(False)
+
+        assert config.lazy_refresh_plex is False
+
+    def test_lazy_refresh_plex_loaded_from_json(self, tmp_path: Path) -> None:
+        """Config._load() reads lazy_refresh_plex from the plex section."""
+        config = self._make_config(
+            tmp_path,
+            {"plex": {"lazy_refresh_plex": True}},
+        )
+        assert config.lazy_refresh_plex is True
+
+    def test_lazy_refresh_plex_missing_from_plex_section_defaults_false(
+        self, tmp_path: Path
+    ) -> None:
+        """Config without lazy_refresh_plex in plex section defaults to False."""
+        config = self._make_config(
+            tmp_path,
+            {"plex": {"player": "mpv"}},
+        )
+        assert config.lazy_refresh_plex is False
+
+    def test_lazy_refresh_plex_persistence_round_trip(self, tmp_path: Path) -> None:
+        """lazy_refresh_plex survives a save/load round-trip."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.set_lazy_refresh_plex(True)
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+
+        assert config2.lazy_refresh_plex is True
+
+    def test_lazy_refresh_plex_saved_in_plex_section(self, tmp_path: Path) -> None:
+        """Config.save() writes lazy_refresh_plex to the plex section."""
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            config.save()
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert "lazy_refresh_plex" in saved["plex"]
+        assert saved["plex"]["lazy_refresh_plex"] is False
+
+
+# ---------------------------------------------------------------------------
+# SettingsManager — lazyRefreshPlex property and setLazyRefreshPlex slot (Task 003)
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerLazyRefreshPlex:
+    def _make_manager(self, tmp_path: Path, data: dict | None = None):
+        from backend.settings_manager import SettingsManager
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(data or {}), encoding="utf-8")
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+
+        config.save = MagicMock()
+        manager = SettingsManager(config, MagicMock(), MagicMock())
+        return manager, config
+
+    def test_lazy_refresh_plex_property_default_false(self, tmp_path: Path) -> None:
+        """lazyRefreshPlex property returns False by default."""
+        manager, _ = self._make_manager(tmp_path)
+        assert manager.lazyRefreshPlex is False
+
+    def test_lazy_refresh_plex_property_reflects_config(self, tmp_path: Path) -> None:
+        """lazyRefreshPlex property reflects the config value."""
+        manager, _ = self._make_manager(
+            tmp_path, {"plex": {"lazy_refresh_plex": True}}
+        )
+        assert manager.lazyRefreshPlex is True
+
+    def test_set_lazy_refresh_plex_updates_config_and_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setLazyRefreshPlex(True) updates config and emits lazyRefreshPlexChanged."""
+        manager, config = self._make_manager(tmp_path)
+        emitted: list[bool] = []
+        manager.lazyRefreshPlexChanged.connect(lambda: emitted.append(True))
+
+        manager.setLazyRefreshPlex(True)
+
+        assert config.lazy_refresh_plex is True
+        assert len(emitted) == 1
+
+    def test_set_lazy_refresh_plex_to_false_emits_signal(
+        self, tmp_path: Path
+    ) -> None:
+        """setLazyRefreshPlex(False) also emits the signal."""
+        manager, config = self._make_manager(
+            tmp_path, {"plex": {"lazy_refresh_plex": True}}
+        )
+        emitted: list[bool] = []
+        manager.lazyRefreshPlexChanged.connect(lambda: emitted.append(True))
+
+        manager.setLazyRefreshPlex(False)
+
+        assert config.lazy_refresh_plex is False
+        assert len(emitted) == 1
+
+    def test_set_lazy_refresh_plex_calls_config_save(
+        self, tmp_path: Path
+    ) -> None:
+        """setLazyRefreshPlex calls config.save() to persist the value."""
+        manager, config = self._make_manager(tmp_path)
+
+        manager.setLazyRefreshPlex(True)
+
+        config.save.assert_called()
