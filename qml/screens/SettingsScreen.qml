@@ -301,7 +301,7 @@ FocusScope {
                 }
                 newIndex += delta
             }
-            if (delta < 0 && newIndex < 0) settingsScreen.back()
+            // do nothing when navigating past the top or bottom
         }
 
         // Initialize to first non-header row.  Only sets currentIndex —
