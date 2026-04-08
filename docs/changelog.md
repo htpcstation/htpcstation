@@ -4,6 +4,22 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP34 — UI Layout Refresh: Sub-header hints, keyboard shortcuts, gamepad fixes
+
+Task briefs: `misc/coding-team/subheader-hints/`
+
+- 001–004: Move all button hints from `headerBar` into `statusBar` sub-header on all 17 third-level screens
+- 005: Audit fixes — add missing Favorite hint to GameListView; fix GameDetailView gamepad key binding (Qt.Key_F1 → keys.isContext1)
+- 006: Favorite retro games from grid and list views; RetroGamesScreen owns toast (matches PcGamesScreen pattern)
+- 007–008: Replace footer `actionBar` with `statusBar` sub-header on all detail screens (GameDetailView, PlexMovieDetail, PlexShowDetail)
+- 009: Replace F1/F2 keyboard shortcuts with 1/2 number keys (easier on compact HTPC remote keyboards)
+- 010–011: Remove all remaining footer `actionBar` instances (SteamGameDetail, MoonlightAppDetail, RecentlyPlayedDetail, LiveTvScreen, SettingsScreen) — zero `actionBar` references remain
+- 012: Fix gamepad disconnect segfault (`deleteLater` on notifier + handler); fix hint label flash on connect (`_ready` flag)
+- 013: Remove Up-arrow back navigation from all screens (old launcher pattern, now exits tab unexpectedly)
+- Misc: Play/pause symbol indicator (▶/■) next to now playing track; global play/pause hint on Now Playing screen; fix ❚❚ font fallback crash; fix settings Up-at-top exits screen; add 16px top padding on second-level screens
+
+---
+
 ## CP33 — Homescreen Theme System V1
 
 Task briefs: `misc/coding-team/homescreen-themes/`

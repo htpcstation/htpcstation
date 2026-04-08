@@ -177,6 +177,8 @@ htpcstation/
     test_steam.py                      # 95 tests
     test_video_snap.py                 # 5 tests
     test_browser_launch.py             # 31 tests
+    test_keys.py                       # 17 tests (key code changes: 1/2 replace F1/F2)
+    test_gamepad_disconnect.py         # 10 tests (disconnect crash fix, hint flash fix)
 ```
 
 ---
@@ -192,6 +194,24 @@ htpcstation/
 - Fallback: if a button image fails to load (`Image.status !== Image.Ready`), a plain rectangle + text label is shown.
 - Color palette swap (future 4b/4c work) is separate from the image theme system.
 - Two-layer token structure (Theme.qml): `_palette` vars (internal, only these change between color themes) → semantic tokens (what QML files use). Never reference `_palette` vars directly from QML files.
+
+### UI Layout Hierarchy
+
+Every screen follows a three-level layout:
+
+| Level | Height | Contents |
+|---|---|---|
+| `headerBar` | `vpx(56)` | `◀  Screen Title` (left-aligned). Title only — no hints. |
+| `statusBar` | `vpx(28)` | Left: sort/status label. Right: button hints (`anchors.right`, `rightMargin: vpx(16)`). |
+| Content area | fills remainder | Grid, list, detail, etc. Top margin `vpx(16)` from `statusBar.bottom`. |
+
+Global status indicators (clock, network, now playing + ▶/■ symbol) live in `HomeScreen.qml`, anchored top-right, z-ordered above all content. The `rightMargin: vpx(16)` on hint Rows keeps hints flush under the indicators.
+
+Button hint conventions:
+- Accept (A/Enter) and Cancel (B/Escape) are **never** shown — universally understood.
+- Keyboard shortcuts: Context1 = `1`, Context2 = `2`, PageUp/Down = `PgUp`/`PgDn`.
+- Gamepad labels use `keys.context1Label`, `keys.context2Label`, etc. — always via the ternary `keys.useGamepadLabels ? ... : ...`.
+- Hint text switches reactively via `keys.useGamepadLabels` (set by `Keys.setGamepadInput()` / `Keys.setKeyboardInput()`).
 
 ### QML Focus Management
 - Every screen/component is a `FocusScope` with `enabled: focus`
@@ -403,6 +423,8 @@ htpcstation/
 
 ### Gamepad
 - **evdev crash loop** — `OSError` catch must wrap the entire `for event in events:` loop, not just `.read()`.
+- **Gamepad disconnect segfault** — `_cleanup()` must disconnect the `QSocketNotifier` signal (`activated.disconnect`) and call `deleteLater()` on both the notifier and the handler before removing from the dict. Python GC drops the handler reference before Qt's C++ object tree is cleaned up — if the notifier has a pending activation queued, it fires into a deleted object. `_remove_device()` must call `handler.deleteLater()`, not just `pop()`.
+- **Hint label flash on gamepad connect** — `QSocketNotifier` fires immediately on creation if the device fd has buffered kernel events. Use a `_ready` flag (set to `True` after the first `_on_readable` call) to suppress `setGamepadInput()` until the user has actually pressed a button.
 - **Auto-repeat timers leak into raw mode** — `startRawMode()` must call `_release_all_keys()`.
 - **Mapping dialog can't use Accept/Cancel** — Auto-save on completion; no confirmation button.
 - **D-input D-pad as ABS_X/ABS_Y** — Normalize 0-255 range to -1/0/1 using axis range.
@@ -416,6 +438,7 @@ htpcstation/
 
 ### Other
 - **Bundled emoji font** — Qt doesn't reliably use NotoEmoji as fallback. Use text equivalents (❤️→♥, 🎵→♫).
+- **Unicode Dingbats block causes font fallback stutter** — Characters in the Dingbats block (U+2700–U+27BF, e.g. U+275A `❚`) are not present in the `"Sans"` system font. Qt scans all installed fonts for a fallback glyph at startup and on every render until cached — causes slow load and layout stutter. Use Geometric Shapes (U+25A0–U+25FF: `■`, `▶`, `▲`) or Block Elements (U+2580–U+259F) which are in every standard Linux system font.
 - **VAAPI decoding errors in video snaps** — Set `LIBVA_MESSAGING_LEVEL=0` in `main.py`.
 - **Qt 6 Video type** — Use explicit `MediaPlayer` + `VideoOutput` with 100ms+ delay before `play()`.
 - **`git filter-repo` can be too aggressive** — Review replacement patterns before running.
@@ -443,8 +466,8 @@ Default mapping (standard layout, A=East):
 |---|---|---|---|
 | Face East (Accept) | BTN_EAST (305) | Key_Return | Accept / launch |
 | Face South (Cancel) | BTN_SOUTH (304) | Key_Escape | Cancel / back |
-| Face North | BTN_NORTH (307) | Key_F1 | Context 1 (favorite/My List) |
-| Face West | BTN_WEST (308) | Key_F2 | Context 2 (sort/subtitle) |
+| Face North | BTN_NORTH (307) | Key_1 | Context 1 (favorite/My List) |
+| Face West | BTN_WEST (308) | Key_2 | Context 2 (sort/subtitle) |
 | Start | BTN_START (315) | Key_F10 | Quit dialog |
 | Select | BTN_SELECT (314) | Key_F9 | Secondary menu |
 | Left Shoulder | BTN_TL (310) | Key_PageUp | Quick scroll |

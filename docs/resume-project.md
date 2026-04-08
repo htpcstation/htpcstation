@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 33)
+# HTPC Station — Resume Document (Checkpoint 34)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -22,15 +22,19 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,931 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,958 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
-**What's new since CP32:**
-- Theme system V1: `themes/<name>/` directory, `home-background.png` + `*-button.png` per tab.
-- `Config.theme_name` + `SettingsManager.themeName` / `themeDir` properties.
-- `HomeScreen` rewritten as two-level launcher: background image + centered image buttons; tab content only loads on A-press; B returns to launcher and destroys the tab screen (fixes Plex eager-load slowness).
-- `tabSlugs` added alongside `tabNames`/`tabSources`; Settings tab unified into `_allTabs` loop.
+**What's new since CP33:**
+- **Unified hint layout:** All third-level and detail screens now use a 28px `statusBar` sub-header for button hints (right-aligned, `rightMargin: 16px`). No more footer `actionBar` anywhere in the codebase.
+- **Keyboard shortcuts:** Context1/Context2 changed from F1/F2 to 1/2 (easier on compact HTPC remote keyboards).
+- **Play/pause indicator:** ▶/■ symbol shown next to now playing track name in the global header; switches with playback state.
+- **Global play/pause hint:** Now Playing screen shows `[X]`/`[1] Play/Pause` hint in its hint bar.
+- **Gamepad disconnect fix:** `_cleanup()` now disconnects the QSocketNotifier signal and calls `deleteLater()` — eliminates segfault on gamepad unplug.
+- **Hint label flash fix:** `_ready` flag in `_DeviceHandler` suppresses `setGamepadInput()` during the first read (buffered kernel events on device open).
+- **Navigation fixes:** Removed Up-arrow back navigation from all screens (old launcher pattern). Fixed settings screen Up-at-top exiting to homescreen.
+- **Layout:** 16px top padding added below header on all second-level screens.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 
