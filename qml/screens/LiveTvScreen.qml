@@ -190,7 +190,7 @@ FocusScope {
         highlightMoveDuration: Theme.animDurationFast
 
         Keys.onPressed: (event) => {
-            if (keys.isCancel(event) || (event.key === Qt.Key_Up && currentIndex === 0)) {
+            if (keys.isCancel(event)) {
                 event.accepted = true
                 liveTvScreen.back()
             } else if (keys.isAccept(event)) {

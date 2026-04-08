@@ -416,9 +416,6 @@ FocusScope {
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 listenScreen.back()
-            } else if (event.key === Qt.Key_Up && listenMenu.currentIndex === 0) {
-                event.accepted = true
-                listenScreen.back()
             }
         }
     }

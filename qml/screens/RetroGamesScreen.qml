@@ -102,10 +102,7 @@ FocusScope {
         visible: retroGamesScreen.currentView === "systems"
 
         Keys.onPressed: (event) => {
-            if (event.key === Qt.Key_Up && currentIndex === 0) {
-                event.accepted = true
-                retroGamesScreen.back()
-            } else if (keys.isAccept(event)) {
+            if (keys.isAccept(event)) {
                 event.accepted = true
                 if (currentItem) {
                     library.selectSystem(currentItem.folderNameValue)

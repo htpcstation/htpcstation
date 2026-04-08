@@ -155,9 +155,6 @@ FocusScope {
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 plexArtistGrid.back()
-            } else if (event.key === Qt.Key_Up && artistGrid.currentIndex < artistGrid._columns) {
-                event.accepted = true
-                plexArtistGrid.back()
             } else if (keys.isPageDown(event)) {
                 event.accepted = true
                 var mdl = plex ? plex.artistsModel : null

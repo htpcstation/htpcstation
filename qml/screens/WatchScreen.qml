@@ -548,10 +548,7 @@ FocusScope {
             }
 
                 Keys.onPressed: (event) => {
-                    if (event.key === Qt.Key_Up && currentIndex === 0) {
-                        event.accepted = true
-                        watchScreen.back()
-                    } else if (keys.isAccept(event)) {
+                    if (keys.isAccept(event)) {
                         event.accepted = true
                         if (currentItem) {
                             if (currentItem.entryType === "livetv") {
