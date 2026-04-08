@@ -100,47 +100,6 @@ FocusScope {
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
 
-        // Y button hint
-        Text {
-            id: sortHint
-            anchors {
-                right: parent.right
-                rightMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-
-        // X button hint — My List
-        Text {
-            id: myListHint
-            anchors {
-                right: sortHint.left
-                rightMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-
-        // Quick scroll hint
-        Text {
-            id: scrollHint
-            anchors {
-                right: myListHint.left
-                rightMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
     }
 
     // ── Sort/filter status bar ────────────────────────────────────────────────
@@ -172,6 +131,36 @@ FocusScope {
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        }
+
+        Row {
+            anchors {
+                right: parent.right
+                rightMargin: root.vpx(140)
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: root.vpx(16)
+
+            Text {
+                text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
+                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
+                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
         }
     }
 
