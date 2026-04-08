@@ -2035,36 +2035,19 @@ class PlexLibrary(QObject):
                 self._onDeckReady.emit([])
 
     def _worker_load_all_caches(self) -> None:
-        """Worker: read all Plex metadata caches from disk.
+        """Worker: read only the libraries and on-deck caches from disk.
 
         Runs on _cache_executor thread. No network I/O — disk reads only.
-        Emits signals as each cache is read so the UI updates incrementally
-        rather than waiting for all files to be read before showing anything.
+        Movies and shows are loaded lazily in _worker_load_section when the
+        user enters a specific library.
         """
-        # Libraries first — this is what WatchScreen needs to show the list.
         libraries = self._load_libraries_cache()
         if libraries:
             self._librariesReady.emit(libraries, True)
 
-        # On-deck second — adds the Continue Watching entry.
         ondeck = self._load_ondeck_cache()
         if ondeck:
             self._onDeckCacheReady.emit(ondeck)
-
-        # Movies and shows last — only needed when entering a library.
-        state = self._load_state_cache()
-
-        last_movie_section = state.get("last_movie_section", "")
-        if last_movie_section:
-            movies = self._load_movies_cache(last_movie_section)
-            if movies:
-                self._moviesCacheReady.emit(movies, last_movie_section)
-
-        last_show_section = state.get("last_show_section", "")
-        if last_show_section:
-            shows = self._load_shows_cache(last_show_section)
-            if shows:
-                self._showsCacheReady.emit(shows, last_show_section)
 
     def _worker_load_section(
         self,
@@ -2084,8 +2067,14 @@ class PlexLibrary(QObject):
             # Load all artists at once — most music libraries have <500 artists
             page_size = 9999
         elif section_type == "movie":
+            cached = self._load_movies_cache(section_key)
+            if cached:
+                self._moviesCacheReady.emit(cached, section_key)
             page_size = _PAGE_SIZE
         elif section_type == "show":
+            cached = self._load_shows_cache(section_key)
+            if cached:
+                self._showsCacheReady.emit(cached, section_key)
             page_size = _PAGE_SIZE
         else:
             page_size = _PAGE_SIZE
