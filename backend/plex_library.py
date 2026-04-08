@@ -499,7 +499,9 @@ class PlexLibrary(QObject):
     _moviesReady = Signal(list, int)   # (movies, total_size)
     _showsReady = Signal(list, int)    # (shows, total_size)
     _onDeckReady = Signal(list)
-    _allCachesReady = Signal(object)   # dict with keys: libraries, ondeck, movies, shows
+    _onDeckCacheReady  = Signal(list)         # pre-processed on-deck items from disk cache
+    _moviesCacheReady  = Signal(list, str)    # (PlexMovie list, section_key) from disk cache
+    _showsCacheReady   = Signal(list, str)    # (PlexShow list, section_key) from disk cache
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
@@ -590,7 +592,9 @@ class PlexLibrary(QObject):
         self._moviesReady.connect(self._on_movies_ready)
         self._showsReady.connect(self._on_shows_ready)
         self._onDeckReady.connect(self._on_on_deck_ready)
-        self._allCachesReady.connect(self._on_all_caches_ready)
+        self._onDeckCacheReady.connect(self._on_on_deck_cache_ready)
+        self._moviesCacheReady.connect(self._on_movies_cache_ready)
+        self._showsCacheReady.connect(self._on_shows_cache_ready)
         self._availabilityReady.connect(self._on_availability_ready)
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
@@ -2033,32 +2037,34 @@ class PlexLibrary(QObject):
     def _worker_load_all_caches(self) -> None:
         """Worker: read all Plex metadata caches from disk.
 
-        Runs on _executor thread. No network I/O — disk reads only.
-        Emits _allCachesReady with a dict of all cached data.
+        Runs on _cache_executor thread. No network I/O — disk reads only.
+        Emits signals as each cache is read so the UI updates incrementally
+        rather than waiting for all files to be read before showing anything.
         """
+        # Libraries first — this is what WatchScreen needs to show the list.
+        libraries = self._load_libraries_cache()
+        if libraries:
+            self._librariesReady.emit(libraries)
+
+        # On-deck second — adds the Continue Watching entry.
+        ondeck = self._load_ondeck_cache()
+        if ondeck:
+            self._onDeckCacheReady.emit(ondeck)
+
+        # Movies and shows last — only needed when entering a library.
         state = self._load_state_cache()
 
-        libraries = self._load_libraries_cache()
-        ondeck    = self._load_ondeck_cache()
-
-        movies = None
         last_movie_section = state.get("last_movie_section", "")
         if last_movie_section:
             movies = self._load_movies_cache(last_movie_section)
+            if movies:
+                self._moviesCacheReady.emit(movies, last_movie_section)
 
-        shows = None
         last_show_section = state.get("last_show_section", "")
         if last_show_section:
             shows = self._load_shows_cache(last_show_section)
-
-        self._allCachesReady.emit({
-            "libraries": libraries or [],
-            "ondeck":    ondeck    or [],
-            "movies":    movies    or [],
-            "shows":     shows     or [],
-            "movie_section": last_movie_section,
-            "show_section":  last_show_section,
-        })
+            if shows:
+                self._showsCacheReady.emit(shows, last_show_section)
 
     def _worker_load_section(
         self,
@@ -2393,32 +2399,25 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, item["thumb_path"], "ondeck", i
                     )
 
-    def _on_all_caches_ready(self, data: object) -> None:
-        """Main thread: populate models from disk cache data."""
-        libraries = data.get("libraries", [])
-        if libraries:
-            self._libraries_model.set_items(libraries)
-            self.librariesModelChanged.emit()
+    def _on_on_deck_cache_ready(self, items: list) -> None:
+        """Main thread: populate on-deck model from disk cache."""
+        self._on_deck_model.set_items(items)
+        self.onDeckModelChanged.emit()
 
-        ondeck = data.get("ondeck", [])
-        if ondeck:
-            self._on_deck_model.set_items(ondeck)
-            self.onDeckModelChanged.emit()
+    def _on_movies_cache_ready(self, movies: list, section_key: str) -> None:
+        """Main thread: populate movies model from disk cache."""
+        self._movies_model.set_movies(movies)
+        self._current_section_key  = section_key
+        self._current_section_type = "movie"
+        self.moviesModelChanged.emit()
 
-        movies = data.get("movies", [])
-        if movies:
-            self._movies_model.set_movies(movies)
-            self._current_section_key  = data.get("movie_section", "")
-            self._current_section_type = "movie"
-            self.moviesModelChanged.emit()
-
-        shows = data.get("shows", [])
-        if shows:
-            self._shows_model.set_shows(shows)
-            if not movies:   # don't overwrite if movies already set section
-                self._current_section_key  = data.get("show_section", "")
-                self._current_section_type = "show"
-            self.showsModelChanged.emit()
+    def _on_shows_cache_ready(self, shows: list, section_key: str) -> None:
+        """Main thread: populate shows model from disk cache."""
+        self._shows_model.set_shows(shows)
+        if self._current_section_type != "movie":
+            self._current_section_key  = section_key
+            self._current_section_type = "show"
+        self.showsModelChanged.emit()
 
     def _on_poster_ready(self, model_type: str, row: int, file_url: str) -> None:
         """Update the poster_local field in the appropriate model."""
