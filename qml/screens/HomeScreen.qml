@@ -471,7 +471,7 @@ FocusScope {
     Text {
         id: playPauseHint
         visible: homeScreen.nowPlayingTrack !== ""
-        text: keys.useGamepadLabels ? "[" + keys.context1Label + "]" : "[1]"
+        text: homeScreen.musicPlaybackState === MediaPlayer.PlayingState ? "❚❚" : "▶"
         color: Theme.colorTextDim
         font.family: Theme.fontFamily
         font.pixelSize: root.vpx(Theme.fontSizeSmall)
