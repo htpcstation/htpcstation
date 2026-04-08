@@ -467,6 +467,21 @@ FocusScope {
         }
     }
 
+    // ── Play/pause hint — shown next to now playing indicator ─────────────────
+    Text {
+        id: playPauseHint
+        visible: homeScreen.nowPlayingTrack !== ""
+        text: keys.useGamepadLabels ? "[" + keys.context1Label + "]" : "[F1]"
+        color: Theme.colorTextDim
+        font.family: Theme.fontFamily
+        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+        anchors {
+            right: nowPlayingIndicator.left
+            rightMargin: root.vpx(8)
+            verticalCenter: clockDisplay.verticalCenter
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function returnFocusToTabBar() {
