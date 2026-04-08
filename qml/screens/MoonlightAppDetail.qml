@@ -90,15 +90,42 @@ FocusScope {
         }
     }
 
+    // ── Status bar (sub-header) ───────────────────────────────────────────────
+    Rectangle {
+        id: statusBar
+        anchors { top: headerBar.bottom; left: parent.left; right: parent.right }
+        height: root.vpx(28)
+        color: Qt.darker(Theme.colorSecondary, 1.3)
+
+        Row {
+            anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            spacing: root.vpx(16)
+
+            Text {
+                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
+                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+        }
+    }
+
     // ── Main content area ─────────────────────────────────────────────────────
     Item {
         id: contentArea
 
         anchors {
-            top: headerBar.bottom
+            top: statusBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
             margins: root.vpx(24)
         }
 
@@ -238,29 +265,6 @@ FocusScope {
         }
     }
 
-    // ── Action hints bar ──────────────────────────────────────────────────────
-    Rectangle {
-        id: actionBar
-
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        height: root.vpx(48)
-        color: Theme.colorSecondary
-
-        Text {
-            anchors.centerIn: parent
-            text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Stream    [" + keys.context1Label + "] Favorite    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Stream    [1] Favorite    [Esc] Back"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-    }
-
     // ── Favorite toast notification ───────────────────────────────────────────
     // Shows "★ Added to Favorites" or "Removed from Favorites" for 2 seconds.
     // Does NOT take focus.
@@ -269,8 +273,8 @@ FocusScope {
 
         anchors {
             horizontalCenter: parent.horizontalCenter
-            bottom: actionBar.top
-            bottomMargin: root.vpx(16)
+            bottom: parent.bottom
+            bottomMargin: root.vpx(64)
         }
         width: moonlightDetailToastText.implicitWidth + root.vpx(32)
         height: root.vpx(40)

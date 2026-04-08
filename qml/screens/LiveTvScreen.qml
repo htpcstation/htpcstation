@@ -145,7 +145,7 @@ FocusScope {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
         }
         visible: liveTV ? (liveTV.loading && channelList.count === 0) : false
         text: "Loading channels..."
@@ -162,7 +162,7 @@ FocusScope {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
         }
         visible: liveTV ? (!liveTV.loading && channelList.count === 0) : false
         text: "No channels available"
@@ -181,7 +181,7 @@ FocusScope {
             top: statusBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
         }
 
         model: liveTV ? liveTV.channelsModel : null
@@ -482,48 +482,4 @@ FocusScope {
         }
     }
 
-    // ── Action hints bar ──────────────────────────────────────────────────────
-    Rectangle {
-        id: actionBar
-
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        height: root.vpx(40)
-        color: Qt.darker(Theme.colorSecondary, 1.3)
-
-        Row {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: root.vpx(24)
-
-            Text {
-                text: keys.useGamepadLabels ? keys.acceptLabel + "  Watch" : "A  Watch"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "B  Back"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels
-                      ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll"
-                      : "PgUp/PgDn  Scroll"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-        }
-    }
 }

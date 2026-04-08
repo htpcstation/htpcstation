@@ -131,15 +131,35 @@ FocusScope {
         }
     }
 
+    // ── Status bar (sub-header) ───────────────────────────────────────────────
+    Rectangle {
+        id: statusBar
+        anchors { top: headerBar.bottom; left: parent.left; right: parent.right }
+        height: root.vpx(28)
+        color: Qt.darker(Theme.colorSecondary, 1.3)
+
+        Row {
+            anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            spacing: root.vpx(16)
+
+            Text {
+                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+        }
+    }
+
     // ── Main content area ─────────────────────────────────────────────────────
     Item {
         id: contentArea
 
         anchors {
-            top: headerBar.bottom
+            top: statusBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
             margins: root.vpx(24)
         }
 
@@ -380,26 +400,4 @@ FocusScope {
         }
     }
 
-    // ── Action hints bar ──────────────────────────────────────────────────────
-    Rectangle {
-        id: actionBar
-
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        height: root.vpx(48)
-        color: Theme.colorSecondary
-
-        Text {
-            anchors.centerIn: parent
-            text: keys.useGamepadLabels
-                  ? "[◀▶] Prev/Next    [" + keys.acceptLabel + "] Launch    [" + keys.cancelLabel + "] Back"
-                  : "[←→] Prev/Next    [Enter] Launch    [Esc] Back"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-    }
 }

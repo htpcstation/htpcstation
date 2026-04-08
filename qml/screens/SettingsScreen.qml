@@ -252,7 +252,7 @@ FocusScope {
             top: headerBar.bottom
             left: parent.left
             right: parent.right
-            bottom: actionBar.top
+            bottom: parent.bottom
             leftMargin: root.vpx(48)
             rightMargin: root.vpx(48)
             bottomMargin: root.vpx(8)
@@ -644,48 +644,12 @@ FocusScope {
         }
     }
 
-    // ── Action bar ────────────────────────────────────────────────────────────
-    Rectangle {
-        id: actionBar
-        anchors {
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        height: root.vpx(44)
-        color: Theme.colorSecondary
-        opacity: 0.8
-
-        Row {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(48)
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: root.vpx(24)
-
-            Text {
-                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels ? keys.acceptLabel + "  Select" : "Enter  Select"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-        }
-    }
-
     // ── Toast overlay ─────────────────────────────────────────────────────────
     Rectangle {
         id: toastOverlay
         anchors {
             horizontalCenter: parent.horizontalCenter
-            bottom: actionBar.top
+            bottom: parent.bottom
             bottomMargin: root.vpx(16)
         }
         width: toastLabel.implicitWidth + root.vpx(32)
