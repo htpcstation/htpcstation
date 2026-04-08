@@ -113,16 +113,35 @@ FocusScope {
         }
     }
 
+    // ── Header bar ───────────────────────────────────────────────────────────
+    Rectangle {
+        id: headerBar
+
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.vpx(56)
+        color: Theme.colorSecondary
+
+        Text {
+            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            text: "Moonlight"
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
+    }
+
     // ── Source list ──────────────────────────────────────────────────────────
     ListView {
         id: sourceList
 
         anchors {
-            top: parent.top
+            top: headerBar.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
-            margins: root.vpx(32)
+            leftMargin: root.vpx(32)
+            rightMargin: root.vpx(32)
+            bottomMargin: root.vpx(32)
         }
 
         model: moonlightScreen._sourceEntries

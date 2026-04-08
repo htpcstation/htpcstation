@@ -295,16 +295,35 @@ FocusScope {
         }
     }
 
+    // ── Header bar ───────────────────────────────────────────────────────────
+    Rectangle {
+        id: headerBar
+
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.vpx(56)
+        color: Theme.colorSecondary
+
+        Text {
+            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            text: "Plex Music"
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
+    }
+
     // ── Menu list ─────────────────────────────────────────────────────────────
     ListView {
         id: listenMenu
 
         anchors {
-            top: parent.top
+            top: headerBar.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
-            margins: root.vpx(16)
+            leftMargin: root.vpx(16)
+            rightMargin: root.vpx(16)
+            bottomMargin: root.vpx(16)
         }
 
         visible: listenScreen.currentView === "menu"

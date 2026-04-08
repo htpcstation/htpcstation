@@ -478,6 +478,23 @@ FocusScope {
         opacity: watchScreen._contentFocused ? 0.3 : 1.0
         Behavior on opacity { NumberAnimation { duration: 160 } }
 
+        // ── Header bar ────────────────────────────────────────────────────────
+        Rectangle {
+            id: headerBar
+
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                text: "Plex Media"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+        }
+
         // Loading indicator — shown immediately after refresh() is called,
         // before any data has arrived.
         Text {
@@ -509,11 +526,13 @@ FocusScope {
             id: libraryList
 
             anchors {
-                top: parent.top
+                top: headerBar.bottom
                 left: parent.left
                 right: parent.right
                 bottom: parent.bottom
-                margins: root.vpx(32)
+                leftMargin: root.vpx(32)
+                rightMargin: root.vpx(32)
+                bottomMargin: root.vpx(32)
             }
 
             clip: true
