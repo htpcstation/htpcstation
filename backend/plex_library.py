@@ -49,7 +49,8 @@ from backend.poster_cache import PosterCache
 
 logger = logging.getLogger(__name__)
 
-_POSTER_CACHE_DIR = CONFIG_DIR / "poster_cache"
+_PLEX_CACHE_DIR = CONFIG_DIR / "plex_cache"
+_POSTER_CACHE_DIR = _PLEX_CACHE_DIR / "posters"
 _PAGE_SIZE = 50
 
 # Maps Plex restriction profile names to comma-separated allowed content ratings.
@@ -496,11 +497,9 @@ class PlexLibrary(QObject):
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
     _moviesReady = Signal(list, int)   # (movies, total_size)
-    _moviesCacheReady = Signal(list)   # PlexMovie list from disk cache (always replaces)
     _showsReady = Signal(list, int)    # (shows, total_size)
-    _showsCacheReady = Signal(list)    # PlexShow list from disk cache (always replaces)
     _onDeckReady = Signal(list)
-    _onDeckCacheReady = Signal(list)   # pre-processed on-deck items from disk cache
+    _allCachesReady = Signal(object)   # dict with keys: libraries, ondeck, movies, shows
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
@@ -560,6 +559,9 @@ class PlexLibrary(QObject):
         self._executor = ThreadPoolExecutor(max_workers=2)
         # Dedicated thread pool for poster downloads (higher concurrency for LAN fetching)
         self._poster_executor = ThreadPoolExecutor(max_workers=10)
+        # Dedicated single-thread executor for disk-only cache loads — never
+        # queued behind network work, starts immediately on app launch.
+        self._cache_executor = ThreadPoolExecutor(max_workers=1)
 
         # Poster cache
         self._poster_cache = PosterCache(_POSTER_CACHE_DIR)
@@ -586,14 +588,9 @@ class PlexLibrary(QObject):
         # Connect internal signals (worker -> main thread)
         self._librariesReady.connect(self._on_libraries_ready)
         self._moviesReady.connect(self._on_movies_ready)
-        self._moviesCacheReady.connect(self._on_movies_cache_ready,
-                                       Qt.ConnectionType.QueuedConnection)
         self._showsReady.connect(self._on_shows_ready)
-        self._showsCacheReady.connect(self._on_shows_cache_ready,
-                                      Qt.ConnectionType.QueuedConnection)
         self._onDeckReady.connect(self._on_on_deck_ready)
-        self._onDeckCacheReady.connect(self._on_on_deck_cache_ready,
-                                       Qt.ConnectionType.QueuedConnection)
+        self._allCachesReady.connect(self._on_all_caches_ready)
         self._availabilityReady.connect(self._on_availability_ready)
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
@@ -637,9 +634,16 @@ class PlexLibrary(QObject):
 
         # Timeline reporter is driven via _on_mpv_process_finished (above)
 
+        # One-time migration: move old cache files to new plex_cache/ layout
+        self._migrate_cache_dirs()
+
         # Load My List from file and populate model
         items = self._load_my_list()
         self._rebuild_my_list_model(items)
+
+        # Populate models from disk cache immediately (dedicated thread, no network I/O).
+        # Uses _cache_executor so it is never queued behind network calls in _executor.
+        self._cache_executor.submit(self._worker_load_all_caches)
 
     def set_wid(self, wid: int) -> None:
         """Pass the Qt native window handle to the MPV player.
@@ -2007,11 +2011,6 @@ class PlexLibrary(QObject):
             self._machineIdentifierReady.emit(machine_id)
 
         if is_available:
-            # Emit cached libraries immediately for instant display, then fetch from network
-            cached_libraries = self._load_libraries_cache()
-            if cached_libraries:
-                self._librariesReady.emit(cached_libraries)
-
             try:
                 libraries = client.get_libraries()
                 self._librariesReady.emit(libraries)
@@ -2022,11 +2021,6 @@ class PlexLibrary(QObject):
             # Managed/restricted users' tokens get 401 from the server, so we
             # can't fetch their on-deck data.  Skip for restricted users.
             if not self._content_rating_filter:
-                # Emit cached on-deck immediately for instant display
-                cached_ondeck = self._load_ondeck_cache()
-                if cached_ondeck:
-                    self._onDeckCacheReady.emit(cached_ondeck)
-
                 try:
                     on_deck_raw = client.get_on_deck()
                     self._onDeckReady.emit(on_deck_raw)
@@ -2035,6 +2029,36 @@ class PlexLibrary(QObject):
             else:
                 # Clear any stale on-deck data from the previous user
                 self._onDeckReady.emit([])
+
+    def _worker_load_all_caches(self) -> None:
+        """Worker: read all Plex metadata caches from disk.
+
+        Runs on _executor thread. No network I/O — disk reads only.
+        Emits _allCachesReady with a dict of all cached data.
+        """
+        state = self._load_state_cache()
+
+        libraries = self._load_libraries_cache()
+        ondeck    = self._load_ondeck_cache()
+
+        movies = None
+        last_movie_section = state.get("last_movie_section", "")
+        if last_movie_section:
+            movies = self._load_movies_cache(last_movie_section)
+
+        shows = None
+        last_show_section = state.get("last_show_section", "")
+        if last_show_section:
+            shows = self._load_shows_cache(last_show_section)
+
+        self._allCachesReady.emit({
+            "libraries": libraries or [],
+            "ondeck":    ondeck    or [],
+            "movies":    movies    or [],
+            "shows":     shows     or [],
+            "movie_section": last_movie_section,
+            "show_section":  last_show_section,
+        })
 
     def _worker_load_section(
         self,
@@ -2054,16 +2078,8 @@ class PlexLibrary(QObject):
             # Load all artists at once — most music libraries have <500 artists
             page_size = 9999
         elif section_type == "movie":
-            # Try loading from cache first for instant display
-            cached = self._load_movies_cache(section_key)
-            if cached:
-                self._moviesCacheReady.emit(cached)
             page_size = _PAGE_SIZE
         elif section_type == "show":
-            # Try loading from cache first for instant display
-            cached = self._load_shows_cache(section_key)
-            if cached:
-                self._showsCacheReady.emit(cached)
             page_size = _PAGE_SIZE
         else:
             page_size = _PAGE_SIZE
@@ -2264,6 +2280,7 @@ class PlexLibrary(QObject):
             self.moviesModelChanged.emit()
             # Save first page to disk cache for instant load on next launch
             self._save_movies_cache(self._current_section_key, movies)
+            self._save_state_cache("last_movie_section", self._current_section_key)
         else:
             # Subsequent pages — append
             self._movies_model.append_movies(movies)
@@ -2290,6 +2307,7 @@ class PlexLibrary(QObject):
             self.showsModelChanged.emit()
             # Save first page to disk cache for instant load on next launch
             self._save_shows_cache(self._current_section_key, shows)
+            self._save_state_cache("last_show_section", self._current_section_key)
         else:
             # Subsequent pages — append
             self._shows_model.append_shows(shows)
@@ -2375,6 +2393,33 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, item["thumb_path"], "ondeck", i
                     )
 
+    def _on_all_caches_ready(self, data: object) -> None:
+        """Main thread: populate models from disk cache data."""
+        libraries = data.get("libraries", [])
+        if libraries:
+            self._libraries_model.set_items(libraries)
+            self.librariesModelChanged.emit()
+
+        ondeck = data.get("ondeck", [])
+        if ondeck:
+            self._on_deck_model.set_items(ondeck)
+            self.onDeckModelChanged.emit()
+
+        movies = data.get("movies", [])
+        if movies:
+            self._movies_model.set_movies(movies)
+            self._current_section_key  = data.get("movie_section", "")
+            self._current_section_type = "movie"
+            self.moviesModelChanged.emit()
+
+        shows = data.get("shows", [])
+        if shows:
+            self._shows_model.set_shows(shows)
+            if not movies:   # don't overwrite if movies already set section
+                self._current_section_key  = data.get("show_section", "")
+                self._current_section_type = "show"
+            self.showsModelChanged.emit()
+
     def _on_poster_ready(self, model_type: str, row: int, file_url: str) -> None:
         """Update the poster_local field in the appropriate model."""
         if model_type == "movie":
@@ -2398,9 +2443,75 @@ class PlexLibrary(QObject):
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _state_cache_path(self) -> Path:
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PLEX_CACHE_DIR / "state.json"
+
+    def _save_state_cache(self, key: str, value: str) -> None:
+        """Update one key in state.json (worker thread safe — atomic read-modify-write)."""
+        path = self._state_cache_path()
+        try:
+            state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except Exception:
+            state = {}
+        state[key] = value
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+    def _load_state_cache(self) -> dict:
+        path = self._state_cache_path()
+        if not path.exists():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    def _migrate_cache_dirs(self) -> None:
+        """One-time migration: move old cache files to new plex_cache/ layout."""
+        import shutil
+
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+        # poster_cache/ → plex_cache/posters/
+        old_poster_dir = CONFIG_DIR / "poster_cache"
+        new_poster_dir = _PLEX_CACHE_DIR / "posters"
+        if old_poster_dir.exists() and not new_poster_dir.exists():
+            shutil.move(str(old_poster_dir), str(new_poster_dir))
+        elif old_poster_dir.exists() and new_poster_dir.exists():
+            # Both exist — move individual files, skip conflicts
+            for f in old_poster_dir.iterdir():
+                dest = new_poster_dir / f.name
+                if not dest.exists():
+                    shutil.move(str(f), str(dest))
+            try:
+                old_poster_dir.rmdir()  # remove if now empty
+            except OSError:
+                pass
+
+        # plex_mylist.json → plex_cache/plex_mylist.json
+        old_mylist = CONFIG_DIR / "plex_mylist.json"
+        new_mylist = _PLEX_CACHE_DIR / "plex_mylist.json"
+        if old_mylist.exists() and not new_mylist.exists():
+            shutil.move(str(old_mylist), str(new_mylist))
+
+        # livetv_cache/ → plex_cache/guide/
+        old_guide_dir = CONFIG_DIR / "livetv_cache"
+        new_guide_dir = _PLEX_CACHE_DIR / "guide"
+        if old_guide_dir.exists() and not new_guide_dir.exists():
+            shutil.move(str(old_guide_dir), str(new_guide_dir))
+        elif old_guide_dir.exists() and new_guide_dir.exists():
+            for f in old_guide_dir.iterdir():
+                dest = new_guide_dir / f.name
+                if not dest.exists():
+                    shutil.move(str(f), str(dest))
+            try:
+                old_guide_dir.rmdir()
+            except OSError:
+                pass
+
     def _load_my_list(self) -> list[dict]:
         """Load My List items from the JSON persistence file."""
-        path = CONFIG_DIR / "plex_mylist.json"
+        path = _PLEX_CACHE_DIR / "plex_mylist.json"
         try:
             with open(path) as f:
                 return json.load(f)
@@ -2409,7 +2520,7 @@ class PlexLibrary(QObject):
 
     def _save_my_list(self, items: list[dict]) -> None:
         """Persist My List items to the JSON file."""
-        path = CONFIG_DIR / "plex_mylist.json"
+        path = _PLEX_CACHE_DIR / "plex_mylist.json"
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w") as f:
@@ -2435,10 +2546,9 @@ class PlexLibrary(QObject):
 
     def _artists_cache_path(self) -> Path:
         """Return the path to the artist list cache file, scoped by section key."""
-        cache_dir = CONFIG_DIR / "poster_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         section_key = self._current_section_key or "default"
-        return cache_dir / f"artists_cache_{section_key}.json"
+        return _PLEX_CACHE_DIR / f"artists_cache_{section_key}.json"
 
     def _save_artists_cache(self, artists: list) -> None:
         """Serialize the artist list to a JSON cache file (called from worker thread)."""
@@ -2483,41 +2593,14 @@ class PlexLibrary(QObject):
             logger.warning("Failed to load artists cache", exc_info=True)
             return None
 
-    def _on_movies_cache_ready(self, movies: list) -> None:
-        """Called on main thread with PlexMovie objects from disk cache.
-
-        Always replaces the model (does not affect pagination counters).
-        The subsequent network fetch via _on_movies_ready will replace again.
-        """
-        self._movies_model.set_movies(movies)
-        self.moviesModelChanged.emit()
-
-    def _on_shows_cache_ready(self, shows: list) -> None:
-        """Called on main thread with PlexShow objects from disk cache.
-
-        Always replaces the model (does not affect pagination counters).
-        The subsequent network fetch via _on_shows_ready will replace again.
-        """
-        self._shows_model.set_shows(shows)
-        self.showsModelChanged.emit()
-
-    def _on_on_deck_cache_ready(self, items: list) -> None:
-        """Called on main thread with pre-processed on-deck items from disk cache.
-
-        Skips the raw API parsing step — items are already in the processed dict format.
-        """
-        self._on_deck_model.set_items(items)
-        self.onDeckModelChanged.emit()
-
     # ------------------------------------------------------------------
     # Disk cache helpers — libraries
     # ------------------------------------------------------------------
 
     def _libraries_cache_path(self) -> Path:
         """Return the path to the library list cache file."""
-        cache_dir = CONFIG_DIR / "poster_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / "libraries_cache.json"
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PLEX_CACHE_DIR / "libraries_cache.json"
 
     def _save_libraries_cache(self, libraries: list) -> None:
         """Serialize the library list to a JSON cache file (called from worker thread)."""
@@ -2547,9 +2630,8 @@ class PlexLibrary(QObject):
 
     def _ondeck_cache_path(self) -> Path:
         """Return the path to the on-deck cache file."""
-        cache_dir = CONFIG_DIR / "poster_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / "ondeck_cache.json"
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PLEX_CACHE_DIR / "ondeck_cache.json"
 
     def _save_ondeck_cache(self, items: list) -> None:
         """Serialize the processed on-deck items to a JSON cache file.
@@ -2583,9 +2665,8 @@ class PlexLibrary(QObject):
 
     def _movies_cache_path(self, section_key: str) -> Path:
         """Return the path to the movies cache file for the given section key."""
-        cache_dir = CONFIG_DIR / "poster_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / f"movies_cache_{section_key}.json"
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PLEX_CACHE_DIR / f"movies_cache_{section_key}.json"
 
     def _save_movies_cache(self, section_key: str, movies: list) -> None:
         """Serialize the movie list to a JSON cache file (called from worker thread)."""
@@ -2658,9 +2739,8 @@ class PlexLibrary(QObject):
 
     def _shows_cache_path(self, section_key: str) -> Path:
         """Return the path to the shows cache file for the given section key."""
-        cache_dir = CONFIG_DIR / "poster_cache"
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        return cache_dir / f"shows_cache_{section_key}.json"
+        _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PLEX_CACHE_DIR / f"shows_cache_{section_key}.json"
 
     def _save_shows_cache(self, section_key: str, shows: list) -> None:
         """Serialize the show list to a JSON cache file (called from worker thread)."""
