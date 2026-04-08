@@ -83,6 +83,7 @@ FocusScope {
 
         anchors {
             top: headerBar.bottom
+            topMargin: root.vpx(16)
             left: parent.left
             right: parent.right
             bottom: parent.bottom

@@ -129,6 +129,7 @@ FocusScope {
             left: parent.left
             right: parent.right
             bottom: parent.bottom
+            topMargin: root.vpx(16)
             leftMargin: root.vpx(32)
             rightMargin: root.vpx(32)
             bottomMargin: root.vpx(32)
