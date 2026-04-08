@@ -123,7 +123,7 @@ FocusScope {
         Row {
             anchors {
                 right: parent.right
-                rightMargin: root.vpx(140)
+                rightMargin: root.vpx(16)
                 verticalCenter: parent.verticalCenter
             }
             spacing: root.vpx(16)
