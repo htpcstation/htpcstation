@@ -96,6 +96,11 @@ class _DeviceHandler(QObject):
         self._axis_info: dict[int, tuple[int, int]] = {}
         self._cache_axis_info()
 
+        # Set to True after the first _on_readable call completes.
+        # Prevents setGamepadInput() from firing on buffered events that are
+        # queued from the moment the device fd is opened.
+        self._ready: bool = False
+
         # Socket notifier to wake up when the device fd has data
         self._notifier = QSocketNotifier(
             device.fd, QSocketNotifier.Type.Read, self
@@ -132,6 +137,8 @@ class _DeviceHandler(QObject):
             log.info("Gamepad disconnected: %s", self._device.path)
             self._cleanup()
             self._manager._remove_device(self._device.path)
+        finally:
+            self._ready = True  # mark ready after first read regardless of outcome
 
     def _handle_event(self, event: object) -> None:
         if not _EVDEV_AVAILABLE:
@@ -370,8 +377,11 @@ class _DeviceHandler(QObject):
         window = self._manager.window
         if window is None:
             return
-        # Notify input source tracker that this is gamepad input
-        if event_type == QEvent.Type.KeyPress and self._manager.keys is not None:
+        # Notify input source tracker that this is gamepad input.
+        # Guard with _ready to skip buffered events from device open.
+        if (event_type == QEvent.Type.KeyPress
+                and self._manager.keys is not None
+                and self._ready):
             self._manager.keys.setGamepadInput()
         event = QKeyEvent(event_type, qt_key, Qt.KeyboardModifier.NoModifier)
         QCoreApplication.sendEvent(window, event)
@@ -436,6 +446,8 @@ class _DeviceHandler(QObject):
         """Release all held keys, stop all timers, and close the device."""
         self._release_all_keys()
         self._notifier.setEnabled(False)
+        self._notifier.activated.disconnect(self._on_readable)
+        self._notifier.deleteLater()
         try:
             self._device.close()
         except Exception:
@@ -651,4 +663,6 @@ class GamepadManager(QObject):
 
     def _remove_device(self, path: str) -> None:
         """Called by a _DeviceHandler when its device disconnects."""
-        self._handlers.pop(path, None)
+        handler = self._handlers.pop(path, None)
+        if handler is not None:
+            handler.deleteLater()
