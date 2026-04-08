@@ -78,9 +78,16 @@ ASSETS_DIR = APP_DIR / "assets"
 
 
 def main() -> None:
+    import argparse
     import logging
+
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--debug", action="store_true")
+    args, remaining = parser.parse_known_args()
+    sys.argv = [sys.argv[0]] + remaining   # strip --debug before Qt sees it
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG if args.debug else logging.ERROR,
         format="%(levelname)s %(name)s: %(message)s",
     )
 
