@@ -1847,7 +1847,7 @@ class PlexLibrary(QObject):
         """
         if self._client is None:
             return ""
-        return self._client.get_poster_url(media_key)
+        return self._client.get_authenticated_url(media_key)
 
     @Slot(str, str, str, str, int)
     def getLyrics(

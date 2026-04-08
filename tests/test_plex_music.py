@@ -828,14 +828,14 @@ class TestGetTrackStreamUrl:
     def test_returns_correct_url_with_token(self) -> None:
         lib = _make_lib()
         mock_client = MagicMock()
-        mock_client.get_poster_url.return_value = (
+        mock_client.get_authenticated_url.return_value = (
             "http://server:32400/library/parts/12345/file.flac?X-Plex-Token=mytoken"
         )
         lib._client = mock_client
 
         result = lib.getTrackStreamUrl("/library/parts/12345/file.flac")
 
-        mock_client.get_poster_url.assert_called_once_with(
+        mock_client.get_authenticated_url.assert_called_once_with(
             "/library/parts/12345/file.flac"
         )
         assert result == "http://server:32400/library/parts/12345/file.flac?X-Plex-Token=mytoken"
@@ -1469,11 +1469,12 @@ class TestSaveArtistsCache:
         lib._current_section_key = "3"
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             artists = _make_artists(2)
             lib._save_artists_cache(artists)
 
-            cache_path = tmp_path / "poster_cache" / "artists_cache_3.json"
+            cache_path = tmp_path / "plex_cache" / "artists_cache_3.json"
             assert cache_path.exists()
 
             data = _json.loads(cache_path.read_text(encoding="utf-8"))
@@ -1487,6 +1488,8 @@ class TestSaveArtistsCache:
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
     def test_writes_empty_list_for_no_artists(self, tmp_path) -> None:
         """_save_artists_cache writes an empty JSON array when given no artists."""
@@ -1497,15 +1500,18 @@ class TestSaveArtistsCache:
         lib._current_section_key = "3"
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             lib._save_artists_cache([])
 
-            cache_path = tmp_path / "poster_cache" / "artists_cache_3.json"
+            cache_path = tmp_path / "plex_cache" / "artists_cache_3.json"
             data = _json.loads(cache_path.read_text(encoding="utf-8"))
             assert data == []
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
     def test_does_not_raise_on_write_error(self, tmp_path) -> None:
         """_save_artists_cache silently swallows write errors."""
@@ -1515,16 +1521,19 @@ class TestSaveArtistsCache:
         lib._current_section_key = "3"
 
         # Point to a path that cannot be written (parent is a file, not a dir)
-        blocker = tmp_path / "poster_cache"
+        blocker = tmp_path / "plex_cache"
         blocker.write_text("not a dir")
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             # Should not raise
             lib._save_artists_cache(_make_artists(1))
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
 
 class TestLoadArtistsCache:
@@ -1536,7 +1545,7 @@ class TestLoadArtistsCache:
         lib = _make_lib()
         lib._current_section_key = "3"
 
-        cache_dir = tmp_path / "poster_cache"
+        cache_dir = tmp_path / "plex_cache"
         cache_dir.mkdir(parents=True)
         cache_path = cache_dir / "artists_cache_3.json"
         cache_path.write_text(
@@ -1554,11 +1563,14 @@ class TestLoadArtistsCache:
         )
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             result = lib._load_artists_cache()
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert result is not None
         assert len(result) == 1
@@ -1579,11 +1591,14 @@ class TestLoadArtistsCache:
         lib._current_section_key = "3"
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             result = lib._load_artists_cache()
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert result is None
 
@@ -1594,17 +1609,20 @@ class TestLoadArtistsCache:
         lib = _make_lib()
         lib._current_section_key = "3"
 
-        cache_dir = tmp_path / "poster_cache"
+        cache_dir = tmp_path / "plex_cache"
         cache_dir.mkdir(parents=True)
         cache_path = cache_dir / "artists_cache_3.json"
         cache_path.write_text("not valid json {{{{", encoding="utf-8")
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             result = lib._load_artists_cache()
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert result is None
 
@@ -1616,7 +1634,7 @@ class TestLoadArtistsCache:
         lib = _make_lib()
         lib._current_section_key = "3"
 
-        cache_dir = tmp_path / "poster_cache"
+        cache_dir = tmp_path / "plex_cache"
         cache_dir.mkdir(parents=True)
         cache_path = cache_dir / "artists_cache_3.json"
         # Only rating_key and title present
@@ -1626,11 +1644,14 @@ class TestLoadArtistsCache:
         )
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             result = lib._load_artists_cache()
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert result is not None
         assert len(result) == 1
@@ -2081,8 +2102,8 @@ class TestWorkerLoadSectionArtistCache:
 
         lib = self._make_lib_with_section("3")
 
-        # Write a cache file under tmp_path (which will be CONFIG_DIR)
-        cache_dir = tmp_path / "poster_cache"
+        # Write a cache file under tmp_path (which will be _PLEX_CACHE_DIR)
+        cache_dir = tmp_path / "plex_cache"
         cache_dir.mkdir(parents=True)
         cache_path = cache_dir / "artists_cache_3.json"
         cache_path.write_text(
@@ -2102,11 +2123,14 @@ class TestWorkerLoadSectionArtistCache:
         lib._artistsReady.connect(lambda artists, total: emitted.append(list(artists)))
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             lib._worker_load_section(mock_client, "3", "artist")
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert len(emitted) == 2, f"Expected 2 emissions, got {len(emitted)}"
         # First emission is from cache
@@ -2128,11 +2152,14 @@ class TestWorkerLoadSectionArtistCache:
         lib._artistsReady.connect(lambda artists, total: emitted.append(list(artists)))
 
         plex_lib_module.CONFIG_DIR = tmp_path
+        plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
         try:
             lib._worker_load_section(mock_client, "3", "artist")
         finally:
             import backend.config as config_module
             plex_lib_module.CONFIG_DIR = config_module.CONFIG_DIR
+            import backend.plex_library as _plm
+            _plm._PLEX_CACHE_DIR = config_module.CONFIG_DIR / "plex_cache"
 
         assert len(emitted) == 1, f"Expected 1 emission, got {len(emitted)}"
         assert emitted[0][0].title == "Fresh Artist"

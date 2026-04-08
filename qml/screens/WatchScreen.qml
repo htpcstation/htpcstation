@@ -421,7 +421,6 @@ FocusScope {
         _routeFocus()
         // Lazy refresh: silently re-fetch section content when entering a content view
         if (currentView === "content"
-                && settings && settings.lazyRefreshPlex
                 && selectedSectionKey !== ""
                 && selectedLibraryType !== "mylist"
                 && selectedLibraryType !== "livetv") {

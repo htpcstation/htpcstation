@@ -287,6 +287,13 @@ class PlexClient:
         url = f"{self._server_url}{part_key}?X-Plex-Token={self._token}"
         return (url, view_offset)
 
+    def get_authenticated_url(self, path: str) -> str:
+        """Build a plain authenticated URL for any Plex path (not a poster).
+
+        Used for audio stream URLs, direct media access, etc.
+        """
+        return f"{self._server_url}{path}?X-Plex-Token={self._token}"
+
     def get_poster_url(self, thumb_path: str, width: int = 400) -> str:
         """Build an authenticated, server-resized poster URL.
 

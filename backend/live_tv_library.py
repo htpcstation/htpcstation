@@ -36,7 +36,8 @@ from backend.mpv_launcher import LibMpvPlayer
 
 logger = logging.getLogger(__name__)
 
-_CACHE_DIR = CONFIG_DIR / "livetv_cache"
+_PLEX_CACHE_DIR = CONFIG_DIR / "plex_cache"
+_CACHE_DIR = _PLEX_CACHE_DIR / "guide"
 
 
 # ---------------------------------------------------------------------------

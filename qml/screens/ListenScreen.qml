@@ -307,7 +307,6 @@ FocusScope {
     onCurrentViewChanged: {
         // Lazy refresh: silently re-fetch section content when entering artists or recently added
         if ((currentView === "artists" || currentView === "recentlyadded")
-                && settings && settings.lazyRefreshPlex
                 && listenScreen._musicSectionKey !== "") {
             plex.selectLibrary(listenScreen._musicSectionKey)
         }

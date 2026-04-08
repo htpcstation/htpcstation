@@ -49,7 +49,7 @@ def _make_plex_account_mock():
 
 
 def _make_lib(tmp_path: Path, browser_launcher=None):
-    """Create a PlexLibrary with CONFIG_DIR redirected to tmp_path.
+    """Create a PlexLibrary with CONFIG_DIR and _PLEX_CACHE_DIR redirected to tmp_path.
 
     Uses monkeypatching at import time so _load_my_list / _save_my_list
     never touch the real ~/.config/htpcstation directory.
@@ -58,8 +58,11 @@ def _make_lib(tmp_path: Path, browser_launcher=None):
     from backend.plex_library import PlexLibrary
     from backend.config import Config
 
-    # Redirect CONFIG_DIR in plex_library before instantiation
+    # Redirect CONFIG_DIR and _PLEX_CACHE_DIR in plex_library before instantiation.
+    # _PLEX_CACHE_DIR is computed at module load time from CONFIG_DIR, so both
+    # must be patched to keep paths consistent.
     plex_lib_module.CONFIG_DIR = tmp_path
+    plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
 
     with patch("backend.plex_library.PlexClient"), \
          patch("backend.plex_library.PlexAccount", _make_plex_account_mock()):
@@ -74,11 +77,13 @@ def _make_lib(tmp_path: Path, browser_launcher=None):
 
 @pytest.fixture(autouse=True)
 def _restore_config_dir():
-    """Restore backend.plex_library.CONFIG_DIR after each test."""
+    """Restore backend.plex_library.CONFIG_DIR and _PLEX_CACHE_DIR after each test."""
     import backend.plex_library as m
-    original = m.CONFIG_DIR
+    original_config_dir = m.CONFIG_DIR
+    original_plex_cache_dir = m._PLEX_CACHE_DIR
     yield
-    m.CONFIG_DIR = original
+    m.CONFIG_DIR = original_config_dir
+    m._PLEX_CACHE_DIR = original_plex_cache_dir
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +132,7 @@ class TestToggleMyList:
         lib = _make_lib(tmp_path)
         lib.toggleMyList("999", "Oppenheimer", "movie", "/poster.jpg", "")
 
-        mylist_file = tmp_path / "plex_mylist.json"
+        mylist_file = tmp_path / "plex_cache" / "plex_mylist.json"
         assert mylist_file.exists()
         data = json.loads(mylist_file.read_text())
         assert len(data) == 1
@@ -532,7 +537,9 @@ class TestLoadOnInit:
 
     def test_model_populated_from_existing_file(self, tmp_path: Path) -> None:
         """PlexLibrary loads My List from file during __init__."""
-        mylist_file = tmp_path / "plex_mylist.json"
+        mylist_dir = tmp_path / "plex_cache"
+        mylist_dir.mkdir(parents=True, exist_ok=True)
+        mylist_file = mylist_dir / "plex_mylist.json"
         mylist_file.write_text(
             json.dumps([
                 {
@@ -563,7 +570,9 @@ class TestLoadOnInit:
 
     def test_model_empty_when_file_is_corrupt(self, tmp_path: Path) -> None:
         """PlexLibrary starts with an empty My List when the file is corrupt JSON."""
-        mylist_file = tmp_path / "plex_mylist.json"
+        mylist_dir = tmp_path / "plex_cache"
+        mylist_dir.mkdir(parents=True, exist_ok=True)
+        mylist_file = mylist_dir / "plex_mylist.json"
         mylist_file.write_text("not valid json", encoding="utf-8")
 
         lib = _make_lib(tmp_path)
@@ -573,7 +582,9 @@ class TestLoadOnInit:
         """Items loaded from file have the correct data in the model."""
         from backend.plex_library import PlexOnDeckModel
 
-        mylist_file = tmp_path / "plex_mylist.json"
+        mylist_dir = tmp_path / "plex_cache"
+        mylist_dir.mkdir(parents=True, exist_ok=True)
+        mylist_file = mylist_dir / "plex_mylist.json"
         mylist_file.write_text(
             json.dumps([
                 {
