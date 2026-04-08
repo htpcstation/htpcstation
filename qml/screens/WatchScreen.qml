@@ -10,7 +10,7 @@ import "../components"
 //   "detail"    — movie detail view (PlexMovieDetail) or show detail (PlexShowDetail)
 //
 // Focus flow:
-//   Enter WatchScreen → libraryList gets focus (after plex.refresh())
+//   Enter WatchScreen → libraryList gets focus (populated from cache on startup)
 //   Up/Down           — navigate library list
 //   A (Return)        — select library → switch to "content" view
 //   B (Escape)        — from "libraries": emit back() to return to tab bar
@@ -59,10 +59,6 @@ FocusScope {
 
     // True while a fetchMovie() call is in-flight (result not yet received).
     property bool _movieLoading: false
-
-    // Track whether we have already called plex.refresh() to avoid re-fetching
-    // every time the user navigates back to this tab.
-    property bool _refreshed: false
 
     // True while a manual Refresh is in-flight (set false when libraries data arrives).
     property bool _refreshing: false
@@ -436,13 +432,9 @@ FocusScope {
     onActiveFocusChanged: {
         if (activeFocus) {
             _contentFocused = false   // reset; _routeFocus will set correctly
-            // Refresh from cache first — avoids loading screen when data is already available
-            if (plex) _libraryEntries = _getVideoLibraries()
-            if (_libraryEntries.length === 0 && !_refreshed) {
-                _refreshed = true
-                _availabilityKnown = false
-                plex.refresh()
-            }
+            // Refresh from cache if libraries are already loaded.
+            if (plex && plex.librariesModel && plex.librariesModel.count > 0)
+                _libraryEntries = _getVideoLibraries()
             if (_resumeDialogVisible) {
                 resumeDialog.forceActiveFocus()
                 return
@@ -523,7 +515,7 @@ FocusScope {
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            visible: watchScreen._refreshed
+            visible: watchScreen._refreshing
                      && watchScreen._libraryEntries.length === 0
                      && !watchScreen._availabilityKnown
         }
@@ -1102,8 +1094,11 @@ FocusScope {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
         }
-        // Populate from cached model immediately — no network call needed
-        if (plex) _libraryEntries = _getVideoLibraries()
+        // Populate from cached model if libraries are already loaded.
+        // If the async cache worker hasn't finished yet, _libraryEntries will
+        // be updated by onLibrariesModelChanged / onOnDeckModelChanged when it does.
+        if (plex && plex.librariesModel && plex.librariesModel.count > 0)
+            _libraryEntries = _getVideoLibraries()
     }
 
     // ── Resume dialog overlay (declared last for highest z-order) ─────────────
