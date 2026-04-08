@@ -13,6 +13,7 @@ locale.setlocale(locale.LC_NUMERIC, "C")
 # Stderr filter is disabled for debugging.  To re-enable, uncomment the
 # _start_stderr_filter() call below.
 os.environ.setdefault("LIBVA_MESSAGING_LEVEL", "0")
+os.environ.setdefault("VDPAU_DRIVER", "va_gl")
 
 # import re
 # import threading

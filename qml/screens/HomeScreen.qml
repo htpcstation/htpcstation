@@ -364,7 +364,9 @@ FocusScope {
                 Image {
                     id: buttonImage
                     anchors.fill: parent
-                    source: settings ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png" : ""
+                    source: (settings && index < homeScreen.tabSlugs.length && homeScreen.tabSlugs[index])
+                        ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png"
+                        : ""
                     fillMode: Image.PreserveAspectFit
                     visible: buttonImage.status === Image.Ready
                 }
