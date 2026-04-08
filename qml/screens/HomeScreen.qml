@@ -400,7 +400,33 @@ FocusScope {
         }
     }
 
-    // ── Clock display ─────────────────────────────────────────────────────────
+    // ── Content area ─────────────────────────────────────────────────────────
+    Item {
+        anchors.fill: parent
+        visible: !homeScreen._launcherVisible
+
+        Loader {
+            id: contentLoader
+            width: parent.width
+            height: parent.height
+            asynchronous: false
+            source: ""
+
+            // When the loaded item changes, wire up its back() signal.
+            onLoaded: {
+                if (item) {
+                    item.back.connect(returnFocusToTabBar)
+                    // Forward showControllerMapping if the loaded screen has it
+                    // (SettingsScreen emits this to open the mapping dialog).
+                    if (item.showControllerMapping !== undefined) {
+                        item.showControllerMapping.connect(homeScreen.showControllerMapping)
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Clock display — declared after content area so it renders on top ────────
     ClockDisplay {
         id: clockDisplay
         anchors {
@@ -438,32 +464,6 @@ FocusScope {
             right: networkIndicator.left
             rightMargin: root.vpx(12)
             verticalCenter: clockDisplay.verticalCenter
-        }
-    }
-
-    // ── Content area ─────────────────────────────────────────────────────────
-    Item {
-        anchors.fill: parent
-        visible: !homeScreen._launcherVisible
-
-        Loader {
-            id: contentLoader
-            width: parent.width
-            height: parent.height
-            asynchronous: false
-            source: ""
-
-            // When the loaded item changes, wire up its back() signal.
-            onLoaded: {
-                if (item) {
-                    item.back.connect(returnFocusToTabBar)
-                    // Forward showControllerMapping if the loaded screen has it
-                    // (SettingsScreen emits this to open the mapping dialog).
-                    if (item.showControllerMapping !== undefined) {
-                        item.showControllerMapping.connect(homeScreen.showControllerMapping)
-                    }
-                }
-            }
         }
     }
 
