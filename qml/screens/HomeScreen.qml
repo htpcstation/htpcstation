@@ -406,8 +406,8 @@ FocusScope {
         anchors {
             right: parent.right
             rightMargin: root.vpx(16)
-            top: parent.top
-            topMargin: root.vpx(16)
+            verticalCenter: parent.top
+            verticalCenterOffset: root.vpx(28)
         }
     }
 
