@@ -506,7 +506,7 @@ FocusScope {
                 bottomMargin: root.vpx(20)
             }
             visible: mappingDialog._state !== "complete"
-            text: keys.useGamepadLabels ? "Start+Select  —  Cancel" : "Esc  —  Cancel"
+            text: keys && keys.useGamepadLabels ? "Start+Select  —  Cancel" : "Esc  —  Cancel"
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
             color: Theme.colorTextDim
