@@ -258,11 +258,51 @@ FocusScope {
         }
     }
 
+    // ── Toast notification (shown after favorite toggle from any sub-view) ────
+    Rectangle {
+        id: toastBar
+
+        anchors {
+            horizontalCenter: parent.horizontalCenter
+            bottom: parent.bottom
+            bottomMargin: root.vpx(64)
+        }
+        width: toastBarText.implicitWidth + root.vpx(32)
+        height: root.vpx(40)
+        color: Theme.colorOverlay
+        radius: root.vpx(8)
+        opacity: 0.0
+        visible: opacity > 0
+        // Render above all sub-views
+        z: 100
+
+        Text {
+            id: toastBarText
+            anchors.centerIn: parent
+            color: Theme.colorOverlayText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+
+        Timer {
+            id: toastBarTimer
+            interval: 2000
+            repeat: false
+            onTriggered: toastBar.opacity = 0.0
+        }
+    }
+
     // ── Wire library.favoriteToggled → toast notification ────────────────────
     Connections {
         target: library
         function onFavoriteToggled(isFavorite) {
-            gameDetailView.showFavoriteToast(isFavorite)
+            toastBarText.text = isFavorite ? "★ Added to Favorites" : "Removed from Favorites"
+            toastBar.opacity = 1.0
+            toastBarTimer.restart()
         }
     }
 

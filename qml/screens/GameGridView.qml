@@ -108,6 +108,13 @@ FocusScope {
             }
 
             Text {
+                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
                 text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "F2  Sort"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -151,6 +158,9 @@ FocusScope {
             if (keys.isContext2(event)) {
                 event.accepted = true
                 sortOverlay.open()
+            } else if (keys.isContext1(event)) {
+                event.accepted = true
+                if (library) library.toggleFavorite(gameGrid.currentIndex)
             } else if (keys.isAccept(event)) {
                 event.accepted = true
                 gameGridView.gameSelected(gameGrid.currentIndex)
