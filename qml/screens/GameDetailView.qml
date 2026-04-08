@@ -67,7 +67,7 @@ FocusScope {
         } else if (keys.isCancel(event)) {
             event.accepted = true
             gameDetailView.back()
-        } else if (event.key === Qt.Key_F1) {
+        } else if (keys.isContext1(event)) {
             // X button (context1 / F1)
             event.accepted = true
             gameDetailView.toggleFavorite()

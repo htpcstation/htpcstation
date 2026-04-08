@@ -174,6 +174,13 @@ FocusScope {
             }
 
             Text {
+                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+            }
+
+            Text {
                 text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "F2  Sort"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
