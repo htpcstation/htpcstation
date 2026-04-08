@@ -296,7 +296,7 @@ FocusScope {
     Image {
         id: launcherBackground
         anchors.fill: parent
-        source: settings ? settings.themeDir + "home-background.png" : ""
+        source: settings ? settings.themeDir + "homescreen/home-background.png" : ""
         fillMode: Image.PreserveAspectCrop
         visible: homeScreen._launcherVisible
     }
@@ -364,7 +364,7 @@ FocusScope {
                 Image {
                     id: buttonImage
                     anchors.fill: parent
-                    source: settings ? settings.themeDir + homeScreen.tabSlugs[index] + "-button.png" : ""
+                    source: settings ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png" : ""
                     fillMode: Image.PreserveAspectFit
                     visible: buttonImage.status === Image.Ready
                 }
