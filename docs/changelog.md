@@ -4,6 +4,16 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP33 — Homescreen Theme System V1
+
+Task briefs: `misc/coding-team/homescreen-themes/`
+
+- 001: `Config.theme_name` + `SettingsManager.themeName`/`themeDir` (21 new tests)
+- 002: `HomeScreen.qml` rewritten as two-level launcher with theme image buttons
+- 003: Docs update
+
+---
+
 ## Checkpoint History
 
 | CP | Summary | Task briefs |

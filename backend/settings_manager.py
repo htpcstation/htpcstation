@@ -80,6 +80,7 @@ class SettingsManager(QObject):
     listenViewModeChanged = Signal()
     showMoonlightTabChanged = Signal()
     tabVisibilityChanged = Signal()
+    themeNameChanged = Signal()
 
     def __init__(
         self,
@@ -90,6 +91,7 @@ class SettingsManager(QObject):
         moonlight_library: object = None,
         gamepad_manager: object = None,
         keys: object = None,
+        app_dir: Path = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -100,6 +102,7 @@ class SettingsManager(QObject):
         self._moonlight_library = moonlight_library
         self._gamepad_manager = gamepad_manager
         self._keys = keys
+        self._app_dir: Path = app_dir if app_dir is not None else Path(__file__).parent.parent
         self._oauth_timer: Optional[QTimer] = None
         self._oauth_pin_id: Optional[int] = None
         self._oauth_poll_count: int = 0
@@ -205,6 +208,12 @@ class SettingsManager(QObject):
 
     def _get_show_listen_tab(self) -> bool:
         return self._config.show_listen_tab
+
+    def _get_theme_name(self) -> str:
+        return self._config.theme_name
+
+    def _get_theme_dir(self) -> str:
+        return "file://" + str(self._app_dir / "themes" / self._config.theme_name) + "/"
 
     # ------------------------------------------------------------------
     # Q_PROPERTYs
@@ -369,6 +378,16 @@ class SettingsManager(QObject):
         bool,
         fget=_get_show_listen_tab,
         notify=tabVisibilityChanged,
+    )
+    themeName = Property(
+        str,
+        fget=_get_theme_name,
+        notify=themeNameChanged,
+    )
+    themeDir = Property(
+        str,
+        fget=_get_theme_dir,
+        notify=themeNameChanged,
     )
 
     # ------------------------------------------------------------------

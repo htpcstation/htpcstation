@@ -71,8 +71,9 @@ from backend.plex_library import PlexLibrary
 from backend.settings_manager import SettingsManager
 from backend.steam_library import SteamLibrary
 
-QML_DIR = Path(__file__).parent / "qml"
-ASSETS_DIR = Path(__file__).parent / "assets"
+APP_DIR = Path(__file__).parent
+QML_DIR = APP_DIR / "qml"
+ASSETS_DIR = APP_DIR / "assets"
 
 
 def main() -> None:
@@ -140,7 +141,7 @@ def main() -> None:
     settings_manager = SettingsManager(
         config, library, plex_library, browser_launcher,
         moonlight_library=moonlight, gamepad_manager=gamepad_manager,
-        keys=keys,
+        keys=keys, app_dir=APP_DIR,
     )
     # Initialize button layout from config
     keys.setButtonLayout(config.button_layout)

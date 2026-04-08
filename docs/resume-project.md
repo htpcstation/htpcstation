@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 32)
+# HTPC Station — Resume Document (Checkpoint 33)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -22,18 +22,15 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,910 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,931 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
-**What's new since CP31:**
-- M6→V2: RetroArch hotkey config V2. All 12 hotkey rows interactive (tap to assign, hold 3s to clear). Rewind settings (enable/buffer/granularity). Duplicate button prevention. Hotkeys: Save/Load State, Fast Forward (Toggle/Hold), Rewind, Open Menu, Screenshot, Show FPS, Next/Prev Save Slot, Pause Toggle, Exit Emulator.
-- M8-A: `backend/sdl_resolver.py` — ctypes SDL wrapper, probes libSDL2/libSDL3 at import, resolves evdev events to SDL records via GameControllerDB. Works on any distro.
-- M8-B: Dual-record controller mapping. Every entry stores `evdev` half (Qt key injection) and `sdl` half (RetroArch cfg, browser extension). Co-firing event collection for dual-reporting devices (D-input triggers). `saveControllerMapping` resolves SDL records at save time (before `stopRawMode`).
-- M8-C: Dual-record hotkey assignment. `HOTKEY_CFG_KEYS` triple keys per action (`_btn`/`_axis`/`_hat`). `build_hotkey_cfg` writes correct key type. `ModifierCaptureDialog` handles buttons, axes, hats. Face button labels honour standard/alternate layout with cardinal positions (e.g. "A (East)", "X (North)").
-- M8-D: Controller mapping wizard improvements: Start+Select cancel, cancel hint adapts to gamepad/keyboard, `getControllerActionEvdevCodes` slot. Hold-to-skip WIP (records immediately on press for dual-reporting triggers — fix pending).
-
-**Known issue (fix next session):** Hold-to-skip in controller mapping wizard records immediately on press for dual-reporting inputs (triggers fire axis event first, which starts hold timer, then button event hits `else` branch and calls `_recordInput`). Fix: button events when `_holdSkipCode !== -1` should be ignored.
+**What's new since CP32:**
+- Theme system V1: `themes/<name>/` directory, `home-background.png` + `*-button.png` per tab.
+- `Config.theme_name` + `SettingsManager.themeName` / `themeDir` properties.
+- `HomeScreen` rewritten as two-level launcher: background image + centered image buttons; tab content only loads on A-press; B returns to launcher and destroys the tab screen (fixes Plex eager-load slowness).
+- `tabSlugs` added alongside `tabNames`/`tabSources`; Settings tab unified into `_allTabs` loop.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

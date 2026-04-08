@@ -4,16 +4,15 @@ import ".."
 import "../components"
 import "."
 
-// Home screen with top-level section navigation (Games / Watch / Settings).
+// Home screen with two-level launcher UI.
 //
 // Focus flow:
-//   App start → HomeScreen → tabBar → first tab (Games) has activeFocus
-//   Left/Right  — move between tabs
-//   LB/RB       — move between tabs (works even when focus is in content area)
-//   A (Return)  — move focus into content area
-//   B (Escape)  — return focus to tab bar (emitted by child screens via back())
+//   App start → HomeScreen → buttonRow → first button has activeFocus
+//   Left/Right  — move between launcher buttons
+//   A (Return)  — activate tab: load content, hide launcher
+//   B (Escape)  — return from tab content to launcher (emitted by child screens via back())
 //   Start/F10   — emit requestQuit() to open the quit dialog
-//   Escape on tab bar — emit requestQuit() to open the quit dialog
+//   X button    — global play/pause when music is playing/paused
 FocusScope {
     id: homeScreen
 
@@ -26,16 +25,14 @@ FocusScope {
     // Emitted when SettingsScreen requests the controller mapping dialog.
     signal showControllerMapping()
 
-    // Index of the currently selected (displayed) tab.
-    property int currentTab: 0
-
-    // All possible tabs (Settings is always last and always visible)
+    // All possible tabs (Settings is always visible — setting === null)
     readonly property var _allTabs: [
-        { name: "Retro Games", source: "RetroGamesScreen.qml",  setting: "showRetroGamesTab" },
-        { name: "PC Games",    source: "PcGamesScreen.qml",     setting: "showPcGamesTab" },
-        { name: "Moonlight",   source: "MoonlightScreen.qml",   setting: "showMoonlightTab" },
-        { name: "Plex Media",  source: "WatchScreen.qml",       setting: "showWatchTab" },
-        { name: "Plex Music",  source: "ListenScreen.qml",      setting: "showListenTab" },
+        { name: "Retro Games", source: "RetroGamesScreen.qml", setting: "showRetroGamesTab", slug: "retrogames" },
+        { name: "PC Games",    source: "PcGamesScreen.qml",    setting: "showPcGamesTab",    slug: "pcgames"    },
+        { name: "Moonlight",   source: "MoonlightScreen.qml",  setting: "showMoonlightTab",  slug: "moonlight"  },
+        { name: "Plex Media",  source: "WatchScreen.qml",      setting: "showWatchTab",       slug: "plexmedia"  },
+        { name: "Plex Music",  source: "ListenScreen.qml",     setting: "showListenTab",      slug: "plexmusic"  },
+        { name: "Settings",    source: "SettingsScreen.qml",   setting: null,                 slug: "settings"   },
     ]
 
     // Tab visibility — built once on startup from saved settings.
@@ -46,27 +43,31 @@ FocusScope {
     // which freezes the UI.
     property var tabNames:   []
     property var tabSources: []
+    property var tabSlugs:   []
+
+    // Launcher state
+    property bool _launcherVisible: true   // true = show launcher, false = show tab content
+    property int  _activeTab: -1           // index into tabNames of the loaded tab (-1 = none)
+    property int  _lastFocusedButton: 0    // which button had focus before entering a tab
 
     function _initTabs() {
         var names = []
         var sources = []
+        var slugs = []
         var allTabs = _allTabs
         for (var i = 0; i < allTabs.length; i++) {
-            var show = !settings || settings[allTabs[i].setting]
+            var tab = allTabs[i]
+            var show = tab.setting === null || !settings || settings[tab.setting]
             if (show) {
-                names.push(allTabs[i].name)
-                sources.push(allTabs[i].source)
+                names.push(tab.name)
+                sources.push(tab.source)
+                slugs.push(tab.slug)
             }
         }
-        names.push("Settings")
-        sources.push("SettingsScreen.qml")
         tabNames = names
         tabSources = sources
+        tabSlugs = slugs
     }
-
-    // Set to true when LB/RB is pressed while focus is in the content area,
-    // so onLoaded can give focus to the newly loaded content item.
-    property bool _focusContentOnLoad: false
 
     // ── MPV running state ─────────────────────────────────────────────────────
     // True while an MPV process is active (used to gate the subtitle overlay).
@@ -278,8 +279,6 @@ FocusScope {
 
     // Intercept Start and X button (isContext1) at the HomeScreen level.
     // Also intercept X button (isContext1) for global play/pause when music is loaded.
-    // Also intercept Y button (isContext2) to show subtitle overlay when MPV is running
-    // on the Watch tab.
     Keys.onPressed: (event) => {
         if (keys.isMenu(event)) {
             event.accepted = true
@@ -293,102 +292,110 @@ FocusScope {
         }
     }
 
-    // Trigger slide-in animation whenever the tab changes.
-    onCurrentTabChanged: {
-        contentLoader.x = contentArea.width
-        slideInAnimation.start()
+    // ── Launcher background ───────────────────────────────────────────────────
+    Image {
+        id: launcherBackground
+        anchors.fill: parent
+        source: settings ? settings.themeDir + "home-background.png" : ""
+        fillMode: Image.PreserveAspectCrop
+        visible: homeScreen._launcherVisible
     }
 
-    // ── Tab bar ──────────────────────────────────────────────────────────────
+    // ── Launcher button row ───────────────────────────────────────────────────
     Row {
-        id: tabBar
-        anchors {
-            top: parent.top
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(56)
-        spacing: root.vpx(8)
+        id: buttonRow
+        anchors.centerIn: parent
+        spacing: root.vpx(24)
+        visible: homeScreen._launcherVisible
+        focus: homeScreen._launcherVisible
 
-        focus: true
+        property int _buttonSize: {
+            var count = homeScreen.tabNames.length
+            if (count === 0) return root.vpx(200)
+            var computed = (parent.width * 0.80 - spacing * (count - 1)) / count
+            return Math.min(Math.round(computed), root.vpx(200))
+        }
 
         Repeater {
-            id: tabRepeater
+            id: buttonRepeater
             model: homeScreen.tabNames
 
-            // Each tab is a FocusScope so it can own the focus ring.
             FocusScope {
-                id: tabItem
+                id: buttonItem
 
-                readonly property int tabIndex: index
-                readonly property bool isSelected: homeScreen.currentTab === index
+                readonly property int buttonIndex: index
 
-                width: root.vpx(140)
-                height: tabBar.height
+                width: buttonRow._buttonSize
+                height: buttonRow._buttonSize
 
-                // Navigate between tabs with Left/Right.
                 Keys.onPressed: (event) => {
                     if (event.key === Qt.Key_Left) {
                         event.accepted = true
-                        if (homeScreen.currentTab > 0) {
-                            homeScreen.currentTab--
-                            tabRepeater.itemAt(homeScreen.currentTab).forceActiveFocus()
+                        if (index > 0) {
+                            buttonRepeater.itemAt(index - 1).forceActiveFocus()
                         }
                     } else if (event.key === Qt.Key_Right) {
                         event.accepted = true
-                        if (homeScreen.currentTab < homeScreen.tabNames.length - 1) {
-                            homeScreen.currentTab++
-                            tabRepeater.itemAt(homeScreen.currentTab).forceActiveFocus()
+                        if (index < homeScreen.tabNames.length - 1) {
+                            buttonRepeater.itemAt(index + 1).forceActiveFocus()
                         }
+                    } else if (event.key === Qt.Key_Up) {
+                        event.accepted = true
+                        // do nothing
                     } else if (event.key === Qt.Key_Down) {
                         event.accepted = true
-                        if (contentLoader.item) {
-                            contentLoader.item.forceActiveFocus()
-                        }
+                        // do nothing
                     } else if (keys.isAccept(event)) {
                         event.accepted = true
-                        // Move focus into the content area.
-                        if (contentLoader.item) {
-                            contentLoader.item.forceActiveFocus()
-                        }
+                        homeScreen._lastFocusedButton = index
+                        homeScreen._activeTab = index
+                        contentLoader.source = homeScreen.tabSources[index]
+                        homeScreen._launcherVisible = false
+                        Qt.callLater(function() {
+                            if (contentLoader.item) contentLoader.item.forceActiveFocus()
+                        })
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        // Escape on the tab bar → open quit dialog.
-                        homeScreen.requestQuit()
+                        // do nothing — Start still handles quit at HomeScreen level
                     }
                 }
 
-                // Tab label
-                Text {
-                    id: tabLabel
-                    anchors {
-                        horizontalCenter: parent.horizontalCenter
-                        verticalCenter: parent.verticalCenter
-                        verticalCenterOffset: -root.vpx(4)
-                    }
-                    text: modelData
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeBody)
-                    color: tabItem.activeFocus ? Theme.colorText : Theme.colorTextDim
+                // Button image
+                Image {
+                    id: buttonImage
+                    anchors.fill: parent
+                    source: settings ? settings.themeDir + homeScreen.tabSlugs[index] + "-button.png" : ""
+                    fillMode: Image.PreserveAspectFit
+                    visible: buttonImage.status === Image.Ready
                 }
 
-                // Active-tab underline indicator
+                // Fallback when image is not ready
                 Rectangle {
-                    anchors {
-                        bottom: parent.bottom
-                        horizontalCenter: parent.horizontalCenter
-                    }
-                    width: tabLabel.width + root.vpx(8)
-                    height: root.vpx(3)
-                    color: Theme.colorTabUnderline
-                    visible: tabItem.isSelected
+                    anchors.fill: parent
+                    color: Theme.colorSurface
+                    visible: buttonImage.status !== Image.Ready
 
-                    Behavior on width {
-                        NumberAnimation { duration: Theme.animDurationFast }
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                        color: Theme.colorText
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        width: parent.width - root.vpx(8)
                     }
                 }
 
-                FocusRing {}
+                // Focus ring
+                Rectangle {
+                    anchors.fill: parent
+                    color: "transparent"
+                    border.color: Theme.colorAccent
+                    border.width: root.vpx(4)
+                    radius: root.vpx(6)
+                    visible: buttonItem.activeFocus
+                }
             }
         }
     }
@@ -399,7 +406,8 @@ FocusScope {
         anchors {
             right: parent.right
             rightMargin: root.vpx(16)
-            verticalCenter: tabBar.verticalCenter
+            top: parent.top
+            topMargin: root.vpx(16)
         }
     }
 
@@ -409,7 +417,7 @@ FocusScope {
         anchors {
             right: clockDisplay.left
             rightMargin: root.vpx(12)
-            verticalCenter: tabBar.verticalCenter
+            verticalCenter: clockDisplay.verticalCenter
         }
         online: networkMonitor ? networkMonitor.online : true
         visible: settings ? settings.showNetworkIndicator : true
@@ -429,43 +437,23 @@ FocusScope {
         anchors {
             right: networkIndicator.left
             rightMargin: root.vpx(12)
-            verticalCenter: tabBar.verticalCenter
+            verticalCenter: clockDisplay.verticalCenter
         }
-    }
-
-    // Thin separator line below the tab bar
-    Rectangle {
-        id: separator
-        anchors {
-            top: tabBar.bottom
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(1)
-        color: Theme.colorTextDim
-        opacity: 0.3
     }
 
     // ── Content area ─────────────────────────────────────────────────────────
     Item {
-        id: contentArea
-        anchors {
-            top: separator.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        clip: true
+        anchors.fill: parent
+        visible: !homeScreen._launcherVisible
 
         Loader {
             id: contentLoader
             width: parent.width
             height: parent.height
             asynchronous: false
-            source: homeScreen.tabSources[homeScreen.currentTab]
+            source: ""
 
-            // When the loaded item changes, wire up its back() signal and
-            // give focus to the new content if LB/RB was pressed from content.
+            // When the loaded item changes, wire up its back() signal.
             onLoaded: {
                 if (item) {
                     item.back.connect(returnFocusToTabBar)
@@ -474,38 +462,29 @@ FocusScope {
                     if (item.showControllerMapping !== undefined) {
                         item.showControllerMapping.connect(homeScreen.showControllerMapping)
                     }
-                    if (homeScreen._focusContentOnLoad) {
-                        homeScreen._focusContentOnLoad = false
-                        item.forceActiveFocus()
-                    }
                 }
             }
-        }
-
-        // Slide-in animation: slides the loader from off-screen right to x=0.
-        NumberAnimation {
-            id: slideInAnimation
-            target: contentLoader
-            property: "x"
-            to: 0
-            duration: Theme.animDurationNormal
-            easing.type: Easing.OutQuad
         }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function returnFocusToTabBar() {
-        var item = tabRepeater.itemAt(homeScreen.currentTab)
-        if (item) item.forceActiveFocus()
+        contentLoader.source = ""
+        homeScreen._launcherVisible = true
+        homeScreen._activeTab = -1
+        Qt.callLater(function() {
+            var btn = buttonRepeater.itemAt(homeScreen._lastFocusedButton)
+            if (btn) btn.forceActiveFocus()
+        })
     }
 
-    // On startup, build tab arrays and give focus to the first tab.
+    // On startup, build tab arrays and give focus to the first button.
     Component.onCompleted: {
         _initTabs()
         Qt.callLater(function() {
-            var item = tabRepeater.itemAt(0)
-            if (item) item.forceActiveFocus()
+            var btn = buttonRepeater.itemAt(0)
+            if (btn) btn.forceActiveFocus()
         })
     }
 

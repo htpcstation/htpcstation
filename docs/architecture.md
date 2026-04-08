@@ -103,8 +103,11 @@ htpcstation/
       SettingTextInput.qml
       SettingToggle.qml
     screens/
-      HomeScreen.qml                   # Tab bar, content loader, MediaPlayer + AudioOutput,
-                                       # global X play/pause, MPV running state, subtitle overlay trigger
+      HomeScreen.qml                   # Two-level launcher: Level 1 = background image + centered image
+                                        # buttons (theme-driven); Level 2 = tab content loaded on demand.
+                                        # Tab content destroyed on back() to prevent eager network calls.
+                                        # MediaPlayer + AudioOutput, global X play/pause, MPV running state,
+                                        # subtitle overlay trigger
       RetroGamesScreen.qml             # System list + game grid + detail (3-state)
       GameGridView.qml
       GameDetailView.qml
@@ -181,11 +184,14 @@ htpcstation/
 ## Architecture Notes
 
 ### Theme System
-- Two-layer structure: `_palette` vars (internal, only these change between themes) → semantic tokens (what QML files use)
-- Current palette: dark only. Future palette swap = change `_palette` vars only.
-- `colorPrimary` = alias for `colorAccent`, `colorSecondary` = alias for `colorSurface` — kept for backward compat, rename in 4b/4c
-- Never reference `_palette` vars directly from QML files
-- 4b/4c will: rename aliases, add theme switcher in Settings, do visual polish pass
+- Themes live in `themes/<name>/` relative to the app root.
+- Active theme set via `Config.theme_name` (default: `"default"`), persisted in `config.json` under `"ui"`.
+- `SettingsManager.themeName` (str) and `themeDir` (str, `file://` URL ending in `/`) expose the theme to QML.
+- `APP_DIR = Path(__file__).parent` defined in `main.py`; passed to `SettingsManager` as `app_dir`.
+- Theme assets for the homescreen: `home-background.png` (full-screen background), `<slug>-button.png` per tab (slugs: `retrogames`, `pcgames`, `moonlight`, `plexmedia`, `plexmusic`, `settings`).
+- Fallback: if a button image fails to load (`Image.status !== Image.Ready`), a plain rectangle + text label is shown.
+- Color palette swap (future 4b/4c work) is separate from the image theme system.
+- Two-layer token structure (Theme.qml): `_palette` vars (internal, only these change between color themes) → semantic tokens (what QML files use). Never reference `_palette` vars directly from QML files.
 
 ### QML Focus Management
 - Every screen/component is a `FocusScope` with `enabled: focus`
@@ -306,7 +312,7 @@ htpcstation/
   "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
-  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid" },
+  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid", "theme_name": "default" },
   "tabs": { "show_retro_games": true, "show_pc_games": true, "show_moonlight": true, "show_watch": true, "show_listen": true },
   "hotkey_modifier_evdev": 316,
   "hotkey_modifier_sdl": {"type": "button", "sdl_button": 5, "label": "Guide"},
@@ -336,6 +342,7 @@ htpcstation/
 - **PySide6 custom signals in `Connections`** — May not work. Use reactive property bindings or imperative code instead.
 - **Missing `}` in SettingsScreen handler chain** — Silently breaks the entire Settings tab with no console error.
 - **Stderr filter hides QML errors** — Disable `_start_stderr_filter()` in `main.py` when debugging QML.
+- **`HomeScreen` tab content is loaded on demand** — `Loader.source` starts as `""`. Set it imperatively on A-press; clear it in `returnFocusToTabBar()` to destroy the screen and stop network calls. Do not bind `Loader.source` to any property.
 
 ### Plex
 - **Managed user tokens get 401 from server** — Always use admin token for server API calls. User token only for browser deep links.

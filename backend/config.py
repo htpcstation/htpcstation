@@ -415,6 +415,8 @@ class Config:
         self._moonlight_view_mode: str = "grid"
         self._watch_view_mode: str = "grid"
         self._listen_view_mode: str = "grid"
+        # Theme
+        self._theme_name: str = "default"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -579,6 +581,19 @@ class Config:
     def listen_view_mode(self) -> str:
         """Persisted view mode for the Listen screen. Either 'grid' or 'list'."""
         return self._listen_view_mode
+
+    @property
+    def theme_name(self) -> str:
+        """Active UI theme name. Defaults to 'default'."""
+        return self._theme_name
+
+    def set_theme_name(self, name: str) -> None:
+        """Set the active theme name and persist the config."""
+        if not isinstance(name, str) or not name.strip():
+            logger.warning("set_theme_name: invalid value %r — ignored", name)
+            return
+        self._theme_name = name.strip()
+        self.save()
 
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
@@ -900,6 +915,7 @@ class Config:
                 "moonlight_view_mode": self._moonlight_view_mode,
                 "watch_view_mode": self._watch_view_mode,
                 "listen_view_mode": self._listen_view_mode,
+                "theme_name": self._theme_name,
             },
             "sort_preferences": {
                 "retro_games": self._sort_retro_games,
@@ -1079,6 +1095,8 @@ class Config:
             self._watch_view_mode = raw_watch_view_mode if raw_watch_view_mode in ("grid", "list") else "grid"
             raw_listen_view_mode = ui.get("listen_view_mode", "grid")
             self._listen_view_mode = raw_listen_view_mode if raw_listen_view_mode in ("grid", "list") else "grid"
+            raw_theme_name = ui.get("theme_name", "default").strip()
+            self._theme_name = raw_theme_name if raw_theme_name else "default"
 
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})
