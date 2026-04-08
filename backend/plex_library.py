@@ -495,7 +495,7 @@ class PlexLibrary(QObject):
     playlistTracksReady = Signal(str, "QVariant")  # (rating_key, list of track dicts)
 
     # Internal signals used to marshal results from worker threads to main thread
-    _librariesReady = Signal(list)
+    _librariesReady = Signal(list, bool)  # (libraries, from_cache)
     _moviesReady = Signal(list, int)   # (movies, total_size)
     _showsReady = Signal(list, int)    # (shows, total_size)
     _onDeckReady = Signal(list)
@@ -2017,7 +2017,7 @@ class PlexLibrary(QObject):
         if is_available:
             try:
                 libraries = client.get_libraries()
-                self._librariesReady.emit(libraries)
+                self._librariesReady.emit(libraries, False)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("PlexLibrary: failed to fetch libraries: %s", exc)
 
@@ -2044,7 +2044,7 @@ class PlexLibrary(QObject):
         # Libraries first — this is what WatchScreen needs to show the list.
         libraries = self._load_libraries_cache()
         if libraries:
-            self._librariesReady.emit(libraries)
+            self._librariesReady.emit(libraries, True)
 
         # On-deck second — adds the Continue Watching entry.
         ondeck = self._load_ondeck_cache()
@@ -2273,10 +2273,11 @@ class PlexLibrary(QObject):
         self._machine_identifier = machine_id
         logger.debug("PlexLibrary: cached machineIdentifier=%s", machine_id)
 
-    def _on_libraries_ready(self, libraries: list) -> None:
+    def _on_libraries_ready(self, libraries: list, from_cache: bool = False) -> None:
         self._libraries_model.set_items(libraries)
         self.librariesModelChanged.emit()
-        self._save_libraries_cache(libraries)
+        if not from_cache:
+            self._save_libraries_cache(libraries)
 
     def _on_movies_ready(self, movies: list, total: int) -> None:
         self._loading_more = False
