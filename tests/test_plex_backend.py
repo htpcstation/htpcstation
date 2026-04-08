@@ -2424,9 +2424,10 @@ class TestSelectLibraryResetsSortFilter:
             lib = PlexLibrary(config)
         return lib
 
-    def test_select_library_preserves_sort(self) -> None:
-        """selectLibrary no longer resets sort/filter — sort persists across library switches."""
+    def test_select_library_preserves_sort_when_same_section(self) -> None:
+        """selectLibrary preserves sort/genre when re-entering the same section."""
         lib = self._make_lib()
+        lib._current_section_key = "4"   # already in this section
         lib._current_sort = "titleSort:asc"
         lib._current_genre = "42"
         lib._libraries_model.set_items([
@@ -2439,6 +2440,23 @@ class TestSelectLibraryResetsSortFilter:
 
         assert lib._current_sort == "titleSort:asc"
         assert lib._current_genre == "42"
+
+    def test_select_library_resets_sort_when_switching_section(self) -> None:
+        """selectLibrary resets sort/genre when switching to a different section."""
+        lib = self._make_lib()
+        lib._current_section_key = "3"   # was in a different section
+        lib._current_sort = "titleSort:asc"
+        lib._current_genre = "42"
+        lib._libraries_model.set_items([
+            {"title": "Movies", "type": "movie", "key": "4"},
+        ])
+
+        lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
+
+        lib.selectLibrary("4")
+
+        assert lib._current_sort == ""
+        assert lib._current_genre == ""
 
     def test_select_library_ondeck_does_not_reset_sort(self) -> None:
         """selectLibrary('_ondeck') must not reset sort/filter state."""

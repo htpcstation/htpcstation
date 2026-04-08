@@ -847,6 +847,11 @@ class PlexLibrary(QObject):
                 section_title = item.get("title", "")
                 break
 
+        # Preserve sort/genre when re-entering the same section; reset when switching.
+        if section_key != self._current_section_key:
+            self._current_sort = ""
+            self._current_genre = ""
+
         self._current_section_key = section_key
         self._current_section_type = section_type
         self._movies_total = 0
@@ -857,7 +862,9 @@ class PlexLibrary(QObject):
         self.currentLibraryChanged.emit(section_title)
 
         client = self._client
-        self._executor.submit(self._worker_load_section, client, section_key, section_type)
+        sort = self._current_sort
+        genre = self._current_genre
+        self._executor.submit(self._worker_load_section, client, section_key, section_type, sort, genre)
 
     @Slot()
     def loadMoreMovies(self) -> None:
