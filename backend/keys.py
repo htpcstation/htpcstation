@@ -142,16 +142,16 @@ class Keys(QObject):
         """Context action 1 — north button (standard) or west button (alternate)."""
         code = _key_code(event)
         if self._button_layout == "alternate":
-            return code == Qt.Key.Key_F2  # west button
-        return code == Qt.Key.Key_F1  # north button
+            return code == Qt.Key.Key_2  # west button
+        return code == Qt.Key.Key_1  # north button
 
     @Slot(QJSValue, result=bool)
     def isContext2(self, event: QJSValue) -> bool:
         """Context action 2 — west button (standard) or north button (alternate)."""
         code = _key_code(event)
         if self._button_layout == "alternate":
-            return code == Qt.Key.Key_F1  # north button
-        return code == Qt.Key.Key_F2  # west button
+            return code == Qt.Key.Key_1  # north button
+        return code == Qt.Key.Key_2  # west button
 
     # ------------------------------------------------------------------
     # Menu

@@ -10,7 +10,7 @@ import "../helpers/JumpHelper.js" as JumpHelper
 //   Arrow keys navigate the grid natively.
 //   A (Return) on a cell → emits artistSelected(ratingKey).
 //   B (Escape) → emits back() so ListenScreen can return to the menu.
-//   Y (F2)     → opens the sort/view overlay panel.
+//   Y (2)      → opens the sort/view overlay panel.
 FocusScope {
     id: plexArtistGrid
 
@@ -111,7 +111,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "F2  Sort"
+                text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -432,7 +432,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / F2  Close"
+                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

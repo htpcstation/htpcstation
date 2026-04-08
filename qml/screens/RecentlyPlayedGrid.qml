@@ -102,7 +102,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  View" : "F2  View"
+                text: keys.useGamepadLabels ? keys.context2Label + "  View" : "2  View"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -389,7 +389,7 @@ FocusScope {
                 }
                 text: keys.useGamepadLabels
                       ? keys.cancelLabel + " / " + keys.context2Label + "  Close"
-                      : "Esc / F2  Close"
+                      : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

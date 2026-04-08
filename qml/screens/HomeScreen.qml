@@ -471,7 +471,7 @@ FocusScope {
     Text {
         id: playPauseHint
         visible: homeScreen.nowPlayingTrack !== ""
-        text: keys.useGamepadLabels ? "[" + keys.context1Label + "]" : "[F1]"
+        text: keys.useGamepadLabels ? "[" + keys.context1Label + "]" : "[1]"
         color: Theme.colorTextDim
         font.family: Theme.fontFamily
         font.pixelSize: root.vpx(Theme.fontSizeSmall)

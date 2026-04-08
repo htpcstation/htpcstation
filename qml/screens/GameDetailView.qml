@@ -8,7 +8,7 @@ import "../components"
 // Focus flow:
 //   Gains focus when RetroGamesScreen switches to "detail" view.
 //   A (Return)  → emit launch()
-//   X (F1)      → emit toggleFavorite()
+//   X (1)       → emit toggleFavorite()
 //   B (Escape)  → emit back()
 //   Up/Down     → scroll description if it overflows
 FocusScope {
@@ -23,7 +23,7 @@ FocusScope {
     // Emitted when the user presses A / Return to launch the game.
     signal launch()
 
-    // Emitted when the user presses X / F1 to toggle the favorite flag.
+    // Emitted when the user presses X / 1 to toggle the favorite flag.
     signal toggleFavorite()
 
     // Emitted when the user presses Left/Right to navigate to prev/next game.
@@ -68,7 +68,7 @@ FocusScope {
             event.accepted = true
             gameDetailView.back()
         } else if (keys.isContext1(event)) {
-            // X button (context1 / F1)
+            // X button (context1 / 1)
             event.accepted = true
             gameDetailView.toggleFavorite()
         } else if (event.key === Qt.Key_Left) {
@@ -168,7 +168,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

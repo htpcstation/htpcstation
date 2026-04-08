@@ -11,7 +11,7 @@ import "../helpers/JumpHelper.js" as JumpHelper
 //   Up/Down navigate the list natively.
 //   A (Return)  → emits showSelected(ratingKey)
 //   B (Escape)  → emits back()
-//   Y (F2)      → opens the sort/filter/view overlay panel
+//   Y (2)       → opens the sort/filter/view overlay panel
 FocusScope {
     id: showListView
 
@@ -137,14 +137,14 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
+                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -568,7 +568,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / F2  Close"
+                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

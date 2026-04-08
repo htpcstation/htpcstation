@@ -179,7 +179,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -190,7 +190,7 @@ FocusScope {
                     var watchLabel = showDetailView._viewCount > 0 ? "Mark Unwatched" : "Mark Watched"
                     return keys.useGamepadLabels
                         ? keys.context2Label + "  " + watchLabel
-                        : "F2  " + watchLabel
+                        : "2  " + watchLabel
                 }
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily

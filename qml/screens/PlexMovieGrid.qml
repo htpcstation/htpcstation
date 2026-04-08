@@ -10,7 +10,7 @@ import "../helpers/JumpHelper.js" as JumpHelper
 //   Arrow keys navigate the grid natively.
 //   A (Return) on a cell → emits movieSelected(ratingKey).
 //   B (Escape) → emits back() so WatchScreen can return to the library list.
-//   Y (F2)     → opens the sort/filter overlay panel.
+//   Y (2)      → opens the sort/filter overlay panel.
 //
 // Infinite scroll:
 //   When the focused index approaches the end of the loaded list,
@@ -139,14 +139,14 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "F1  My List"
+                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "F2  Sort / Filter"
+                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -508,7 +508,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / F2  Close"
+                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

@@ -15,7 +15,7 @@ import "../helpers/JumpHelper.js" as JumpHelper
 //   Up/Down navigate the list natively.
 //   A (Return)  → emits gameSelected(index)
 //   B (Escape)  → emits back()
-//   Y (F2)      → opens the view overlay panel
+//   Y (2)       → opens the view overlay panel
 FocusScope {
     id: recentlyPlayedList
 
@@ -136,7 +136,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  View" : "F2  View"
+                text: keys.useGamepadLabels ? keys.context2Label + "  View" : "2  View"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -465,7 +465,7 @@ FocusScope {
                 }
                 text: keys.useGamepadLabels
                       ? keys.cancelLabel + " / " + keys.context2Label + "  Close"
-                      : "Esc / F2  Close"
+                      : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

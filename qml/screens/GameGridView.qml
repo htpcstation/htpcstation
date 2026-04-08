@@ -10,7 +10,7 @@ import "../helpers/JumpHelper.js" as JumpHelper
 //   Arrow keys navigate the grid natively.
 //   A (Return) on a cell → emits gameSelected(index) (task 009 will connect to it).
 //   B (Escape) → emits back() so RetroGamesScreen can return to the system list.
-//   Y (F2)     → opens the sort overlay panel.
+//   Y (2)      → opens the sort overlay panel.
 FocusScope {
     id: gameGridView
 
@@ -108,14 +108,14 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "F1  Favorite"
+                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "F2  Sort"
+                text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -386,7 +386,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / F2  Close"
+                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
