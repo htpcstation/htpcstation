@@ -287,13 +287,26 @@ class PlexClient:
         url = f"{self._server_url}{part_key}?X-Plex-Token={self._token}"
         return (url, view_offset)
 
-    def get_poster_url(self, thumb_path: str) -> str:
-        """Build full authenticated poster URL from a thumb path.
+    def get_poster_url(self, thumb_path: str, width: int = 400) -> str:
+        """Build an authenticated, server-resized poster URL.
+
+        Uses Plex's /photo/:/transcode endpoint to request a JPEG resized to
+        *width* pixels wide (aspect ratio preserved). This keeps cached files
+        small (~30–60 KB) rather than storing full-resolution artwork (500 KB+).
 
         Example thumb_path: '/library/metadata/126522/thumb/1771639193'
-        Returns: http://<server>:32400<thumb_path>?X-Plex-Token=<token>
         """
-        return f"{self._server_url}{thumb_path}?X-Plex-Token={self._token}"
+        from urllib.parse import quote
+        thumb_url = f"{self._server_url}{thumb_path}?X-Plex-Token={self._token}"
+        return (
+            f"{self._server_url}/photo/:/transcode"
+            f"?url={quote(thumb_url, safe='')}"
+            f"&width={width}"
+            f"&height={width * 2}"   # tall enough for any poster aspect ratio
+            f"&minSize=1"
+            f"&upscale=0"
+            f"&X-Plex-Token={self._token}"
+        )
 
     def create_play_queue(self, rating_key: str, machine_identifier: str) -> dict:
         """POST /playQueues — register upcoming playback with the server.
