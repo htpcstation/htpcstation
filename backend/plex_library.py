@@ -542,10 +542,8 @@ class PlexLibrary(QObject):
         self._shows_loaded: int = 0
         self._shows_loading_more: bool = False
         self._machine_identifier: str = ""
-        self._current_sort: str = ""   # Plex API sort param for movies, e.g. 'titleSort:asc'
-        self._current_genre: str = ""  # genre key for movies (integer as string)
-        self._shows_sort: str = ""     # Plex API sort param for shows
-        self._shows_genre: str = ""    # genre key for shows (integer as string)
+        self._section_sort: dict[str, str] = {}   # sort param per section key
+        self._section_genre: dict[str, str] = {}  # genre filter per section key
         self._content_rating_filter: str = ""  # comma-separated allowed ratings for restricted users
         self._cached_content_rating_filter: str = ""  # cached alongside user token
 
@@ -847,11 +845,6 @@ class PlexLibrary(QObject):
                 section_title = item.get("title", "")
                 break
 
-        # Preserve sort/genre when re-entering the same section; reset when switching.
-        if section_key != self._current_section_key:
-            self._current_sort = ""
-            self._current_genre = ""
-
         self._current_section_key = section_key
         self._current_section_type = section_type
         self._movies_total = 0
@@ -862,8 +855,8 @@ class PlexLibrary(QObject):
         self.currentLibraryChanged.emit(section_title)
 
         client = self._client
-        sort = self._current_sort
-        genre = self._current_genre
+        sort = self._section_sort.get(section_key, "")
+        genre = self._section_genre.get(section_key, "")
         self._executor.submit(self._worker_load_section, client, section_key, section_type, sort, genre)
 
     @Slot()
@@ -879,8 +872,8 @@ class PlexLibrary(QObject):
         client = self._client
         section_key = self._current_section_key
         start = self._movies_loaded
-        sort = self._current_sort
-        genre = self._current_genre
+        sort = self._section_sort.get(section_key, "")
+        genre = self._section_genre.get(section_key, "")
         self._executor.submit(
             self._worker_load_more_movies, client, section_key, start, sort, genre
         )
@@ -906,13 +899,14 @@ class PlexLibrary(QObject):
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         api_sort = self._SORT_MAP.get(sort_key, "")
-        self._current_sort = api_sort
+        self._section_sort[self._current_section_key] = api_sort
+        self._save_sort_state()
         self._movies_total = 0
         self._movies_loaded = 0
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
-        genre = self._current_genre
+        genre = self._section_genre.get(section_key, "")
         self._executor.submit(
             self._worker_load_section, client, section_key, section_type,
             api_sort, genre
@@ -925,13 +919,14 @@ class PlexLibrary(QObject):
             return
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
-        self._current_genre = genre_key
+        self._section_genre[self._current_section_key] = genre_key
+        self._save_sort_state()
         self._movies_total = 0
         self._movies_loaded = 0
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
-        sort = self._current_sort
+        sort = self._section_sort.get(section_key, "")
         self._executor.submit(
             self._worker_load_section, client, section_key, section_type,
             sort, genre_key
@@ -950,8 +945,8 @@ class PlexLibrary(QObject):
         client = self._client
         section_key = self._current_section_key
         start = self._shows_loaded
-        sort = self._shows_sort
-        genre = self._shows_genre
+        sort = self._section_sort.get(section_key, "")
+        genre = self._section_genre.get(section_key, "")
         self._executor.submit(
             self._worker_load_more_shows, client, section_key, start, sort, genre
         )
@@ -967,13 +962,14 @@ class PlexLibrary(QObject):
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         api_sort = self._SORT_MAP.get(sort_key, "")
-        self._shows_sort = api_sort
+        self._section_sort[self._current_section_key] = api_sort
+        self._save_sort_state()
         self._shows_total = 0
         self._shows_loaded = 0
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
-        genre = self._shows_genre
+        genre = self._section_genre.get(section_key, "")
         self._executor.submit(
             self._worker_load_section, client, section_key, section_type,
             api_sort, genre
@@ -1001,13 +997,14 @@ class PlexLibrary(QObject):
             return
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
-        self._shows_genre = genre_key
+        self._section_genre[self._current_section_key] = genre_key
+        self._save_sort_state()
         self._shows_total = 0
         self._shows_loaded = 0
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
-        sort = self._shows_sort
+        sort = self._section_sort.get(section_key, "")
         self._executor.submit(
             self._worker_load_section, client, section_key, section_type,
             sort, genre_key
@@ -2048,6 +2045,15 @@ class PlexLibrary(QObject):
         Movies and shows are loaded lazily in _worker_load_section when the
         user enters a specific library.
         """
+        # Restore sort/genre state first so lazy fetches use the correct sort.
+        state = self._load_state_cache()
+        section_sort = state.get("section_sort", {})
+        section_genre = state.get("section_genre", {})
+        if section_sort:
+            self._section_sort.update(section_sort)
+        if section_genre:
+            self._section_genre.update(section_genre)
+
         libraries = self._load_libraries_cache()
         if libraries:
             self._librariesReady.emit(libraries, True)
@@ -2451,6 +2457,17 @@ class PlexLibrary(QObject):
         except Exception:
             state = {}
         state[key] = value
+        path.write_text(json.dumps(state), encoding="utf-8")
+
+    def _save_sort_state(self) -> None:
+        """Persist _section_sort and _section_genre to state.json."""
+        path = self._state_cache_path()
+        try:
+            state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except Exception:
+            state = {}
+        state["section_sort"] = self._section_sort
+        state["section_genre"] = self._section_genre
         path.write_text(json.dumps(state), encoding="utf-8")
 
     def _load_state_cache(self) -> dict:

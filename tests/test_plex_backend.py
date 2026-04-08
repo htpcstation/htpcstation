@@ -2152,7 +2152,7 @@ class TestSortMovies:
 
         lib.sortMovies("az")
 
-        assert lib._current_sort == "titleSort:asc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "titleSort:asc"
         assert len(submitted) == 1
         # sort param passed to worker
         assert "titleSort:asc" in submitted[0][1]
@@ -2167,7 +2167,7 @@ class TestSortMovies:
 
         lib.sortMovies("za")
 
-        assert lib._current_sort == "titleSort:desc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "titleSort:desc"
 
     def test_sort_recent_maps_to_correct_api_param(self) -> None:
         lib = self._make_lib()
@@ -2179,7 +2179,7 @@ class TestSortMovies:
 
         lib.sortMovies("recent")
 
-        assert lib._current_sort == "addedAt:desc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "addedAt:desc"
 
     def test_sort_year_desc_maps_to_correct_api_param(self) -> None:
         lib = self._make_lib()
@@ -2191,7 +2191,7 @@ class TestSortMovies:
 
         lib.sortMovies("year_desc")
 
-        assert lib._current_sort == "year:desc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "year:desc"
 
     def test_sort_rating_maps_to_correct_api_param(self) -> None:
         lib = self._make_lib()
@@ -2203,7 +2203,7 @@ class TestSortMovies:
 
         lib.sortMovies("rating")
 
-        assert lib._current_sort == "audienceRating:desc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "audienceRating:desc"
 
     def test_sort_resets_pagination(self) -> None:
         """sortMovies resets _movies_loaded and _movies_total."""
@@ -2276,7 +2276,7 @@ class TestFilterByGenre:
 
         lib.filterByGenre("42")
 
-        assert lib._current_genre == "42"
+        assert lib._section_genre.get(lib._current_section_key, "") == "42"
 
     def test_filter_passes_genre_to_worker(self) -> None:
         lib = self._make_lib()
@@ -2295,13 +2295,13 @@ class TestFilterByGenre:
         lib = self._make_lib()
         lib._current_section_key = "4"
         lib._current_section_type = "movie"
-        lib._current_genre = "42"
+        lib._section_genre[lib._current_section_key] = "42"
 
         lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
 
         lib.filterByGenre("")
 
-        assert lib._current_genre == ""
+        assert lib._section_genre.get(lib._current_section_key, "") == ""
 
     def test_filter_resets_pagination(self) -> None:
         lib = self._make_lib()
@@ -2428,8 +2428,8 @@ class TestSelectLibraryResetsSortFilter:
         """selectLibrary preserves sort/genre when re-entering the same section."""
         lib = self._make_lib()
         lib._current_section_key = "4"   # already in this section
-        lib._current_sort = "titleSort:asc"
-        lib._current_genre = "42"
+        lib._section_sort[lib._current_section_key] = "titleSort:asc"
+        lib._section_genre[lib._current_section_key] = "42"
         lib._libraries_model.set_items([
             {"title": "Movies", "type": "movie", "key": "4"},
         ])
@@ -2438,15 +2438,15 @@ class TestSelectLibraryResetsSortFilter:
 
         lib.selectLibrary("4")
 
-        assert lib._current_sort == "titleSort:asc"
-        assert lib._current_genre == "42"
+        assert lib._section_sort.get(lib._current_section_key, "") == "titleSort:asc"
+        assert lib._section_genre.get(lib._current_section_key, "") == "42"
 
     def test_select_library_resets_sort_when_switching_section(self) -> None:
         """selectLibrary resets sort/genre when switching to a different section."""
         lib = self._make_lib()
         lib._current_section_key = "3"   # was in a different section
-        lib._current_sort = "titleSort:asc"
-        lib._current_genre = "42"
+        lib._section_sort[lib._current_section_key] = "titleSort:asc"
+        lib._section_genre[lib._current_section_key] = "42"
         lib._libraries_model.set_items([
             {"title": "Movies", "type": "movie", "key": "4"},
         ])
@@ -2455,20 +2455,20 @@ class TestSelectLibraryResetsSortFilter:
 
         lib.selectLibrary("4")
 
-        assert lib._current_sort == ""
-        assert lib._current_genre == ""
+        assert lib._section_sort.get(lib._current_section_key, "") == ""
+        assert lib._section_genre.get(lib._current_section_key, "") == ""
 
     def test_select_library_ondeck_does_not_reset_sort(self) -> None:
-        """selectLibrary('_ondeck') must not reset sort/filter state."""
+        """selectLibrary('_ondeck') must not affect other sections' sort/filter state."""
         lib = self._make_lib()
-        lib._current_sort = "titleSort:asc"
-        lib._current_genre = "42"
+        lib._section_sort["4"] = "titleSort:asc"
+        lib._section_genre["4"] = "42"
 
         lib.selectLibrary("_ondeck")
 
-        # _ondeck early-returns before resetting sort/filter
-        assert lib._current_sort == "titleSort:asc"
-        assert lib._current_genre == "42"
+        # _ondeck early-returns — other sections' sort/filter must be untouched
+        assert lib._section_sort.get("4", "") == "titleSort:asc"
+        assert lib._section_genre.get("4", "") == "42"
 
 
 # ---------------------------------------------------------------------------
@@ -2499,8 +2499,8 @@ class TestLoadMoreMoviesPassesSortFilter:
         lib._movies_total = 200
         lib._movies_loaded = 50
         lib._current_section_key = "4"
-        lib._current_sort = "addedAt:desc"
-        lib._current_genre = "7"
+        lib._section_sort[lib._current_section_key] = "addedAt:desc"
+        lib._section_genre[lib._current_section_key] = "7"
 
         submitted: list = []
         lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]
@@ -3698,7 +3698,7 @@ class TestSortShows:
 
         lib.sortShows("az")
 
-        assert lib._shows_sort == "titleSort:asc"
+        assert lib._section_sort.get(lib._current_section_key, "") == "titleSort:asc"
         assert len(submitted) == 1
         assert "titleSort:asc" in submitted[0][1]
 
@@ -3755,19 +3755,19 @@ class TestSortShows:
 
         assert len(submitted) == 0
 
-    def test_sort_uses_shows_sort_state_not_movies(self) -> None:
-        """sortShows updates _shows_sort, not _current_sort (movies)."""
+    def test_sort_shows_does_not_affect_movies_section(self) -> None:
+        """sortShows only updates the current section's sort, not other sections."""
         lib = self._make_lib()
         lib._current_section_key = "3"
         lib._current_section_type = "show"
-        lib._current_sort = "addedAt:desc"  # movie sort should be untouched
+        lib._section_sort["4"] = "addedAt:desc"  # movies section sort should be untouched
 
         lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
 
         lib.sortShows("rating")
 
-        assert lib._shows_sort == "audienceRating:desc"
-        assert lib._current_sort == "addedAt:desc"  # unchanged
+        assert lib._section_sort.get("3", "") == "audienceRating:desc"
+        assert lib._section_sort.get("4", "") == "addedAt:desc"  # movies section unchanged
 
 
 # ---------------------------------------------------------------------------
@@ -3802,7 +3802,7 @@ class TestFilterShowsByGenre:
 
         lib.filterShowsByGenre("42")
 
-        assert lib._shows_genre == "42"
+        assert lib._section_genre.get(lib._current_section_key, "") == "42"
 
     def test_filter_passes_genre_to_worker(self) -> None:
         lib = self._make_lib()
@@ -3821,13 +3821,13 @@ class TestFilterShowsByGenre:
         lib = self._make_lib()
         lib._current_section_key = "3"
         lib._current_section_type = "show"
-        lib._shows_genre = "42"
+        lib._section_genre[lib._current_section_key] = "42"
 
         lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
 
         lib.filterShowsByGenre("")
 
-        assert lib._shows_genre == ""
+        assert lib._section_genre.get(lib._current_section_key, "") == ""
 
     def test_filter_resets_show_pagination(self) -> None:
         lib = self._make_lib()
@@ -3870,19 +3870,19 @@ class TestFilterShowsByGenre:
 
         assert len(submitted) == 0
 
-    def test_filter_uses_shows_genre_state_not_movies(self) -> None:
-        """filterShowsByGenre updates _shows_genre, not _current_genre (movies)."""
+    def test_filter_shows_does_not_affect_movies_section(self) -> None:
+        """filterShowsByGenre only updates the current section's genre, not other sections."""
         lib = self._make_lib()
         lib._current_section_key = "3"
         lib._current_section_type = "show"
-        lib._current_genre = "99"  # movie genre should be untouched
+        lib._section_genre["4"] = "99"  # movies section genre should be untouched
 
         lib._executor.submit = lambda fn, *args, **kwargs: None  # type: ignore[method-assign]
 
         lib.filterShowsByGenre("42")
 
-        assert lib._shows_genre == "42"
-        assert lib._current_genre == "99"  # unchanged
+        assert lib._section_genre.get("3", "") == "42"
+        assert lib._section_genre.get("4", "") == "99"  # movies section unchanged
 
 
 # ---------------------------------------------------------------------------
@@ -3913,8 +3913,8 @@ class TestLoadMoreShowsPassesSortFilter:
         lib._shows_total = 200
         lib._shows_loaded = 50
         lib._current_section_key = "3"
-        lib._shows_sort = "addedAt:desc"
-        lib._shows_genre = "7"
+        lib._section_sort[lib._current_section_key] = "addedAt:desc"
+        lib._section_genre[lib._current_section_key] = "7"
 
         submitted: list = []
         lib._executor.submit = lambda fn, *args, **kwargs: submitted.append((fn, args))  # type: ignore[method-assign]

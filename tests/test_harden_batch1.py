@@ -48,15 +48,17 @@ def _make_plex_account_mock():
 
 def _make_lib(tmp_path: Path):
     """Return a PlexLibrary with CONFIG_DIR and _PLEX_CACHE_DIR redirected to tmp_path."""
-    import backend.plex_library as plex_lib_module
     from backend.plex_library import PlexLibrary
     from backend.config import Config
 
-    plex_lib_module.CONFIG_DIR = tmp_path
-    plex_lib_module._PLEX_CACHE_DIR = tmp_path / "plex_cache"
+    plex_cache = tmp_path / "plex_cache"
+    plex_cache.mkdir(parents=True, exist_ok=True)
 
     with patch("backend.plex_library.PlexClient"), \
-         patch("backend.plex_library.PlexAccount", _make_plex_account_mock()):
+         patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+         patch("backend.plex_library.CONFIG_DIR", tmp_path), \
+         patch("backend.plex_library._PLEX_CACHE_DIR", plex_cache), \
+         patch("backend.plex_library._POSTER_CACHE_DIR", plex_cache / "posters"):
         config = MagicMock(spec=Config)
         config.plex_server_id = "server123"
         config.plex_token = "tok"
@@ -68,13 +70,8 @@ def _make_lib(tmp_path: Path):
 
 @pytest.fixture(autouse=True)
 def _restore_config_dir():
-    """Restore backend.plex_library.CONFIG_DIR and _PLEX_CACHE_DIR after each test."""
-    import backend.plex_library as m
-    original_config_dir = m.CONFIG_DIR
-    original_plex_cache_dir = m._PLEX_CACHE_DIR
+    """Kept for backward compatibility; isolation is now handled by conftest.py."""
     yield
-    m.CONFIG_DIR = original_config_dir
-    m._PLEX_CACHE_DIR = original_plex_cache_dir
 
 
 def _make_config(tmp_path: Path):

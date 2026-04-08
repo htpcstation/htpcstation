@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 34)
+# HTPC Station — Resume Document (Checkpoint 35)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -22,19 +22,18 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **1,958 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,017 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
-**What's new since CP33:**
-- **Unified hint layout:** All third-level and detail screens now use a 28px `statusBar` sub-header for button hints (right-aligned, `rightMargin: 16px`). No more footer `actionBar` anywhere in the codebase.
-- **Keyboard shortcuts:** Context1/Context2 changed from F1/F2 to 1/2 (easier on compact HTPC remote keyboards).
-- **Play/pause indicator:** ▶/■ symbol shown next to now playing track name in the global header; switches with playback state.
-- **Global play/pause hint:** Now Playing screen shows `[X]`/`[1] Play/Pause` hint in its hint bar.
-- **Gamepad disconnect fix:** `_cleanup()` now disconnects the QSocketNotifier signal and calls `deleteLater()` — eliminates segfault on gamepad unplug.
-- **Hint label flash fix:** `_ready` flag in `_DeviceHandler` suppresses `setGamepadInput()` during the first read (buffered kernel events on device open).
-- **Navigation fixes:** Removed Up-arrow back navigation from all screens (old launcher pattern). Fixed settings screen Up-at-top exiting to homescreen.
-- **Layout:** 16px top padding added below header on all second-level screens.
+**What's new since CP34:**
+- **Plex cache system:** All content (libraries, on-deck, movies, shows, artists) cached to `~/.config/htpcstation/plex_cache/`. Loads instantly on cold boot without network calls.
+- **Poster optimisation:** Downloads via Plex `/photo/:/transcode` at 400px wide — ~10–20× smaller than full-res (896MB → ~50MB for 1366 posters).
+- **Lazy fetch:** `plex.selectLibrary()` called unconditionally on every library entry; sort/genre state preserved per section key and persisted across restarts.
+- **Sort bug fix:** Switching between libraries no longer resets the other library's sort state. Sort is keyed per section, not shared globally.
+- **Async ListenScreen:** All view transitions (artist detail, album, playlists, recently added) are non-blocking — no more main-thread HTTP calls.
+- **Manual Refresh button:** Added to Plex Media and Plex Music second-level screens.
+- **Test isolation:** `conftest.py` autouse fixture redirects all cache I/O to `tmp_path`. Real user cache is never touched during test runs. Removed one-time migration test.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

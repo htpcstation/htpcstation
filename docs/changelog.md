@@ -4,6 +4,22 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP35 — Plex cache, performance, and test isolation
+
+Task briefs: `misc/coding-team/plex-cache-refresh/`, `misc/coding-team/test-suite-cleanup/`
+
+- Cache-first Plex loading: libraries, on-deck, movies, shows all cached to `plex_cache/` and loaded at startup without network calls
+- All Plex cache files consolidated under `~/.config/htpcstation/plex_cache/` (posters, guide, mylist, metadata)
+- Poster downloads use Plex `/photo/:/transcode` at 400px — ~10–20× smaller files (896MB → ~50MB)
+- Lazy fetch (plex.selectLibrary) now unconditional on all library entry; toggle removed from Settings
+- Sort/genre state persisted per section key across app restarts
+- Sort state bug fixed: switching between libraries no longer resets the other library's sort
+- Async ListenScreen view transitions (fetchArtistDetail, fetchAlbumDetail, etc.) — no more main-thread blocking
+- Manual Refresh button added to Plex Media and Plex Music second-level screens
+- Test isolation: `conftest.py` autouse fixture redirects all cache I/O to `tmp_path`; real user cache never touched during test runs. 2017 tests passing.
+
+---
+
 ## CP34 — UI Layout Refresh: Sub-header hints, keyboard shortcuts, gamepad fixes
 
 Task briefs: `misc/coding-team/subheader-hints/`

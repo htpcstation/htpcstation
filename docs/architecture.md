@@ -56,12 +56,17 @@ htpcstation/
                                        # get_metadata(include_markers=True), get_markers()
     plex_library.py                    # PlexLibrary QObject: threaded data loading, models, sort/filter,
                                        # music slots, server/user management, MPV/browser launch,
-                                       # My List (plex_mylist.json), subtitle IPC slots,
+                                       # My List (plex_cache/plex_mylist.json), subtitle IPC slots,
                                        # timeline reporter wiring, track persistence, skip intro markers,
-                                       # fetchStreamInfo async, streamInfoReady signal
+                                       # fetchStreamInfo async, streamInfoReady signal.
+                                       # Disk cache: libraries/ondeck/movies/shows/artists all cached to
+                                       # plex_cache/ and loaded at startup via _worker_load_all_caches
+                                       # (_cache_executor, dedicated thread). Sort/genre state persisted
+                                       # per section key in plex_cache/state.json.
     plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode, PlexArtist,
                                        # PlexAlbum, PlexTrack dataclasses
-    poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames
+    poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames.
+                                       # Downloads via /photo/:/transcode at 400px wide (server-side resize).
     retroarch_config.py                # read_cfg/write_cfg, HOTKEY_CFG_KEYS (triple keys per action:
                                        # _btn/_axis/_hat), build_hotkey_cfg() writes correct key type
                                        # from SDL record type (button/axis/hat)
@@ -168,18 +173,25 @@ htpcstation/
     test_network_monitor.py            # 13 tests
     test_pc_games_favorites.py         # 58 tests
     test_plex_account.py               # 45 tests
-    test_plex_backend.py               # 191 tests
+    test_plex_backend.py               # ~600 tests (disk cache, sort/filter, async workers, models)
+    test_plex_music.py                 # ~200 tests (artist/album/track/playlist async fetch)
     test_plex_mylist.py                # 36 tests
     test_plex_stream.py                # 15 tests
     test_plex_client.py                # 11 tests (identity headers, timeline, track persistence)
     test_plex_timeline.py              # 10 tests (PlexTimelineReporter lifecycle + push interface)
-    test_settings_backend.py           # 99 tests
+    test_harden_batch1.py              # ~80 tests (hardening batch)
+    test_settings_backend.py           # ~200 tests
     test_steam.py                      # 95 tests
     test_video_snap.py                 # 5 tests
     test_browser_launch.py             # 31 tests
     test_keys.py                       # 17 tests (key code changes: 1/2 replace F1/F2)
     test_gamepad_disconnect.py         # 10 tests (disconnect crash fix, hint flash fix)
 ```
+
+**Test isolation:** `tests/conftest.py` has an autouse fixture `isolate_plex_cache` that
+patches `_PLEX_CACHE_DIR`, `_POSTER_CACHE_DIR`, and `_CACHE_DIR` (live TV) to `tmp_path`
+for every test, and stubs `_migrate_cache_dirs` to a no-op. Tests never touch
+`~/.config/htpcstation/` at runtime.
 
 ---
 
@@ -412,6 +424,14 @@ Button hint conventions:
 - **`_mpvLaunchReady` carries 6 args** — `(url, title, start_ms, duration_ms, part_id, intro_end_ms)`. All test mocks must match this signature.
 - **`processStarted` fires from `wait_until_playing()`, not from process start** — The signal is emitted when the first frame is ready. `processFinished` fires from the `end_file` event callback. Both are marshalled to the main thread via `QMetaObject.invokeMethod`.
 - **python-mpv callbacks run on the mpv event thread** — Never call Qt UI methods directly from a property observer or event callback. Always use `QMetaObject.invokeMethod` with `QueuedConnection`.
+
+### Plex Cache
+- **`_PLEX_CACHE_DIR` and `_POSTER_CACHE_DIR` are module-level constants** — Computed at import time from `CONFIG_DIR`. Patching `CONFIG_DIR` after import has no effect on them. Always patch the constants directly: `patch("backend.plex_library._PLEX_CACHE_DIR", ...)`.
+- **Startup cache load is async** — `_worker_load_all_caches` runs on `_cache_executor` (dedicated single-thread pool). It emits `_librariesReady` and `_onDeckCacheReady` which are delivered via `AutoConnection` (queued to main thread). WatchScreen's `Connections` block handles `onLibrariesModelChanged` — do not call `_getVideoLibraries()` before this fires or you get only the hardcoded Live TV entry.
+- **Sort/genre state is per section key** — `_section_sort: dict[str, str]` and `_section_genre: dict[str, str]` keyed by Plex section key (e.g. `"4"`). Persisted to `plex_cache/state.json` on every sort/filter change. Loaded at startup in `_worker_load_all_caches`. Do not use a single shared `_current_sort` field.
+- **`selectLibrary()` passes current sort** — Lazy fetch on section entry uses `_section_sort.get(section_key, "")` so the user's sort is preserved across navigation.
+- **Poster downloads use `/photo/:/transcode`** — `get_poster_url()` routes through Plex's server-side resize endpoint at 400px wide. `get_authenticated_url()` is for non-poster paths (track streams, etc.) and returns a plain authenticated URL.
+- **`_save_sort_state()` is called on the main thread** — It does a read-modify-write on `state.json`. Fast local disk write; acceptable on main thread.
 
 ### Plex API
 - **Plex cloud EPG `channelGridKey` filter is broken** — The `/{epg_key}/grid` endpoint ignores `channelGridKey` and returns the same full dataset regardless. Use HDHomeRun guide API instead.
