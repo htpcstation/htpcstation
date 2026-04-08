@@ -496,8 +496,11 @@ class PlexLibrary(QObject):
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list)
     _moviesReady = Signal(list, int)   # (movies, total_size)
+    _moviesCacheReady = Signal(list)   # PlexMovie list from disk cache (always replaces)
     _showsReady = Signal(list, int)    # (shows, total_size)
+    _showsCacheReady = Signal(list)    # PlexShow list from disk cache (always replaces)
     _onDeckReady = Signal(list)
+    _onDeckCacheReady = Signal(list)   # pre-processed on-deck items from disk cache
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
@@ -583,8 +586,14 @@ class PlexLibrary(QObject):
         # Connect internal signals (worker -> main thread)
         self._librariesReady.connect(self._on_libraries_ready)
         self._moviesReady.connect(self._on_movies_ready)
+        self._moviesCacheReady.connect(self._on_movies_cache_ready,
+                                       Qt.ConnectionType.QueuedConnection)
         self._showsReady.connect(self._on_shows_ready)
+        self._showsCacheReady.connect(self._on_shows_cache_ready,
+                                      Qt.ConnectionType.QueuedConnection)
         self._onDeckReady.connect(self._on_on_deck_ready)
+        self._onDeckCacheReady.connect(self._on_on_deck_cache_ready,
+                                       Qt.ConnectionType.QueuedConnection)
         self._availabilityReady.connect(self._on_availability_ready)
         self._posterReady.connect(self._on_poster_ready)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready)
@@ -1998,6 +2007,11 @@ class PlexLibrary(QObject):
             self._machineIdentifierReady.emit(machine_id)
 
         if is_available:
+            # Emit cached libraries immediately for instant display, then fetch from network
+            cached_libraries = self._load_libraries_cache()
+            if cached_libraries:
+                self._librariesReady.emit(cached_libraries)
+
             try:
                 libraries = client.get_libraries()
                 self._librariesReady.emit(libraries)
@@ -2008,6 +2022,11 @@ class PlexLibrary(QObject):
             # Managed/restricted users' tokens get 401 from the server, so we
             # can't fetch their on-deck data.  Skip for restricted users.
             if not self._content_rating_filter:
+                # Emit cached on-deck immediately for instant display
+                cached_ondeck = self._load_ondeck_cache()
+                if cached_ondeck:
+                    self._onDeckCacheReady.emit(cached_ondeck)
+
                 try:
                     on_deck_raw = client.get_on_deck()
                     self._onDeckReady.emit(on_deck_raw)
@@ -2034,6 +2053,18 @@ class PlexLibrary(QObject):
 
             # Load all artists at once — most music libraries have <500 artists
             page_size = 9999
+        elif section_type == "movie":
+            # Try loading from cache first for instant display
+            cached = self._load_movies_cache(section_key)
+            if cached:
+                self._moviesCacheReady.emit(cached)
+            page_size = _PAGE_SIZE
+        elif section_type == "show":
+            # Try loading from cache first for instant display
+            cached = self._load_shows_cache(section_key)
+            if cached:
+                self._showsCacheReady.emit(cached)
+            page_size = _PAGE_SIZE
         else:
             page_size = _PAGE_SIZE
 
@@ -2223,6 +2254,7 @@ class PlexLibrary(QObject):
     def _on_libraries_ready(self, libraries: list) -> None:
         self._libraries_model.set_items(libraries)
         self.librariesModelChanged.emit()
+        self._save_libraries_cache(libraries)
 
     def _on_movies_ready(self, movies: list, total: int) -> None:
         self._loading_more = False
@@ -2230,6 +2262,8 @@ class PlexLibrary(QObject):
             # First page — replace model
             self._movies_model.set_movies(movies)
             self.moviesModelChanged.emit()
+            # Save first page to disk cache for instant load on next launch
+            self._save_movies_cache(self._current_section_key, movies)
         else:
             # Subsequent pages — append
             self._movies_model.append_movies(movies)
@@ -2254,6 +2288,8 @@ class PlexLibrary(QObject):
             # First page — replace model
             self._shows_model.set_shows(shows)
             self.showsModelChanged.emit()
+            # Save first page to disk cache for instant load on next launch
+            self._save_shows_cache(self._current_section_key, shows)
         else:
             # Subsequent pages — append
             self._shows_model.append_shows(shows)
@@ -2326,6 +2362,9 @@ class PlexLibrary(QObject):
             })
         self._on_deck_model.set_items(items)
         self.onDeckModelChanged.emit()
+
+        # Save processed items to disk cache for instant load on next launch
+        self._save_ondeck_cache(items)
 
         # Download only missing posters
         client = self._client
@@ -2442,6 +2481,244 @@ class PlexLibrary(QObject):
             return artists
         except Exception:
             logger.warning("Failed to load artists cache", exc_info=True)
+            return None
+
+    def _on_movies_cache_ready(self, movies: list) -> None:
+        """Called on main thread with PlexMovie objects from disk cache.
+
+        Always replaces the model (does not affect pagination counters).
+        The subsequent network fetch via _on_movies_ready will replace again.
+        """
+        self._movies_model.set_movies(movies)
+        self.moviesModelChanged.emit()
+
+    def _on_shows_cache_ready(self, shows: list) -> None:
+        """Called on main thread with PlexShow objects from disk cache.
+
+        Always replaces the model (does not affect pagination counters).
+        The subsequent network fetch via _on_shows_ready will replace again.
+        """
+        self._shows_model.set_shows(shows)
+        self.showsModelChanged.emit()
+
+    def _on_on_deck_cache_ready(self, items: list) -> None:
+        """Called on main thread with pre-processed on-deck items from disk cache.
+
+        Skips the raw API parsing step — items are already in the processed dict format.
+        """
+        self._on_deck_model.set_items(items)
+        self.onDeckModelChanged.emit()
+
+    # ------------------------------------------------------------------
+    # Disk cache helpers — libraries
+    # ------------------------------------------------------------------
+
+    def _libraries_cache_path(self) -> Path:
+        """Return the path to the library list cache file."""
+        cache_dir = CONFIG_DIR / "poster_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "libraries_cache.json"
+
+    def _save_libraries_cache(self, libraries: list) -> None:
+        """Serialize the library list to a JSON cache file (called from worker thread)."""
+        try:
+            path = self._libraries_cache_path()
+            path.write_text(json.dumps(libraries), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save libraries cache", exc_info=True)
+
+    def _load_libraries_cache(self) -> list | None:
+        """Load the library list from the JSON cache file (called from worker thread).
+
+        Returns a list of library dicts, or None if the cache is missing or corrupt.
+        """
+        path = self._libraries_cache_path()
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Failed to load libraries cache", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # Disk cache helpers — on-deck
+    # ------------------------------------------------------------------
+
+    def _ondeck_cache_path(self) -> Path:
+        """Return the path to the on-deck cache file."""
+        cache_dir = CONFIG_DIR / "poster_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / "ondeck_cache.json"
+
+    def _save_ondeck_cache(self, items: list) -> None:
+        """Serialize the processed on-deck items to a JSON cache file.
+
+        Items must already be in the processed dict format (not raw API dicts).
+        Called from the main thread (inside _on_on_deck_ready).
+        """
+        try:
+            path = self._ondeck_cache_path()
+            path.write_text(json.dumps(items), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save on-deck cache", exc_info=True)
+
+    def _load_ondeck_cache(self) -> list | None:
+        """Load the processed on-deck items from the JSON cache file (called from worker thread).
+
+        Returns a list of processed item dicts, or None if the cache is missing or corrupt.
+        """
+        path = self._ondeck_cache_path()
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("Failed to load on-deck cache", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # Disk cache helpers — movies
+    # ------------------------------------------------------------------
+
+    def _movies_cache_path(self, section_key: str) -> Path:
+        """Return the path to the movies cache file for the given section key."""
+        cache_dir = CONFIG_DIR / "poster_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / f"movies_cache_{section_key}.json"
+
+    def _save_movies_cache(self, section_key: str, movies: list) -> None:
+        """Serialize the movie list to a JSON cache file (called from worker thread)."""
+        try:
+            data = []
+            for m in movies:
+                data.append({
+                    "rating_key": m.rating_key,
+                    "title": m.title,
+                    "year": m.year,
+                    "summary": m.summary,
+                    "content_rating": m.content_rating,
+                    "audience_rating": m.audience_rating,
+                    "duration_ms": m.duration_ms,
+                    "studio": m.studio,
+                    "tagline": m.tagline,
+                    "thumb_path": m.thumb_path,
+                    "art_path": m.art_path,
+                    "genres": m.genres,
+                    "directors": m.directors,
+                    "cast": m.cast,
+                    "added_at": m.added_at,
+                    "view_offset": m.view_offset,
+                    "poster_local": m.poster_local,
+                })
+            path = self._movies_cache_path(section_key)
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save movies cache", exc_info=True)
+
+    def _load_movies_cache(self, section_key: str) -> list | None:
+        """Load the movie list from the JSON cache file (called from worker thread).
+
+        Returns a list of PlexMovie objects, or None if the cache is missing or corrupt.
+        """
+        path = self._movies_cache_path(section_key)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            movies = []
+            for item in data:
+                movies.append(PlexMovie(
+                    rating_key=item.get("rating_key", ""),
+                    title=item.get("title", ""),
+                    year=item.get("year", 0),
+                    summary=item.get("summary", ""),
+                    content_rating=item.get("content_rating", ""),
+                    audience_rating=item.get("audience_rating", 0.0),
+                    duration_ms=item.get("duration_ms", 0),
+                    studio=item.get("studio", ""),
+                    tagline=item.get("tagline", ""),
+                    thumb_path=item.get("thumb_path", ""),
+                    art_path=item.get("art_path", ""),
+                    genres=item.get("genres", []),
+                    directors=item.get("directors", []),
+                    cast=item.get("cast", []),
+                    added_at=item.get("added_at", 0),
+                    view_offset=item.get("view_offset", 0),
+                    poster_local=item.get("poster_local", ""),
+                ))
+            return movies
+        except Exception:
+            logger.warning("Failed to load movies cache", exc_info=True)
+            return None
+
+    # ------------------------------------------------------------------
+    # Disk cache helpers — shows
+    # ------------------------------------------------------------------
+
+    def _shows_cache_path(self, section_key: str) -> Path:
+        """Return the path to the shows cache file for the given section key."""
+        cache_dir = CONFIG_DIR / "poster_cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir / f"shows_cache_{section_key}.json"
+
+    def _save_shows_cache(self, section_key: str, shows: list) -> None:
+        """Serialize the show list to a JSON cache file (called from worker thread)."""
+        try:
+            data = []
+            for s in shows:
+                data.append({
+                    "rating_key": s.rating_key,
+                    "title": s.title,
+                    "year": s.year,
+                    "summary": s.summary,
+                    "content_rating": s.content_rating,
+                    "audience_rating": s.audience_rating,
+                    "thumb_path": s.thumb_path,
+                    "art_path": s.art_path,
+                    "genres": s.genres,
+                    "cast": s.cast,
+                    "child_count": s.child_count,
+                    "leaf_count": s.leaf_count,
+                    "viewed_leaf_count": s.viewed_leaf_count,
+                    "poster_local": s.poster_local,
+                })
+            path = self._shows_cache_path(section_key)
+            path.write_text(json.dumps(data), encoding="utf-8")
+        except Exception:
+            logger.warning("Failed to save shows cache", exc_info=True)
+
+    def _load_shows_cache(self, section_key: str) -> list | None:
+        """Load the show list from the JSON cache file (called from worker thread).
+
+        Returns a list of PlexShow objects, or None if the cache is missing or corrupt.
+        """
+        path = self._shows_cache_path(section_key)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            shows = []
+            for item in data:
+                shows.append(PlexShow(
+                    rating_key=item.get("rating_key", ""),
+                    title=item.get("title", ""),
+                    year=item.get("year", 0),
+                    summary=item.get("summary", ""),
+                    content_rating=item.get("content_rating", ""),
+                    audience_rating=item.get("audience_rating", 0.0),
+                    thumb_path=item.get("thumb_path", ""),
+                    art_path=item.get("art_path", ""),
+                    genres=item.get("genres", []),
+                    cast=item.get("cast", []),
+                    child_count=item.get("child_count", 0),
+                    leaf_count=item.get("leaf_count", 0),
+                    viewed_leaf_count=item.get("viewed_leaf_count", 0),
+                    poster_local=item.get("poster_local", ""),
+                ))
+            return shows
+        except Exception:
+            logger.warning("Failed to load shows cache", exc_info=True)
             return None
 
     def _resolve_server_url(self) -> Optional[str]:
