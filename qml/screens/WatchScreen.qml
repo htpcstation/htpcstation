@@ -432,9 +432,10 @@ FocusScope {
     onActiveFocusChanged: {
         if (activeFocus) {
             _contentFocused = false   // reset; _routeFocus will set correctly
-            // Refresh from cache if libraries are already loaded.
-            if (plex && plex.librariesModel && plex.librariesModel.count > 0)
-                _libraryEntries = _getVideoLibraries()
+            // Defer by one event loop tick so any pending cache signals are processed first.
+            Qt.callLater(function() {
+                if (plex) watchScreen._libraryEntries = watchScreen._getVideoLibraries()
+            })
             if (_resumeDialogVisible) {
                 resumeDialog.forceActiveFocus()
                 return
@@ -1094,11 +1095,11 @@ FocusScope {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
         }
-        // Populate from cached model if libraries are already loaded.
-        // If the async cache worker hasn't finished yet, _libraryEntries will
-        // be updated by onLibrariesModelChanged / onOnDeckModelChanged when it does.
-        if (plex && plex.librariesModel && plex.librariesModel.count > 0)
-            _libraryEntries = _getVideoLibraries()
+        // Defer by one event loop tick so any pending cache signals
+        // (QueuedConnection from _worker_load_all_caches) are processed first.
+        Qt.callLater(function() {
+            if (plex) watchScreen._libraryEntries = watchScreen._getVideoLibraries()
+        })
     }
 
     // ── Resume dialog overlay (declared last for highest z-order) ─────────────
