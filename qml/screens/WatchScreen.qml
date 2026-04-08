@@ -436,6 +436,8 @@ FocusScope {
     onActiveFocusChanged: {
         if (activeFocus) {
             _contentFocused = false   // reset; _routeFocus will set correctly
+            // Refresh from cache first — avoids loading screen when data is already available
+            if (plex) _libraryEntries = _getVideoLibraries()
             if (_libraryEntries.length === 0 && !_refreshed) {
                 _refreshed = true
                 _availabilityKnown = false
@@ -1100,6 +1102,8 @@ FocusScope {
         if (settings) {
             _viewMode = settings.watchViewMode || "grid"
         }
+        // Populate from cached model immediately — no network call needed
+        if (plex) _libraryEntries = _getVideoLibraries()
     }
 
     // ── Resume dialog overlay (declared last for highest z-order) ─────────────
