@@ -941,16 +941,8 @@ FocusScope {
         if (settings) {
             var savedSort = settings.sortPlexMovies
             var savedGenre = settings.filterPlexMovieGenre
-            if (savedSort) {
-                _currentSort = savedSort
-                _loading = true
-                plex.sortMovies(savedSort)
-            }
-            if (savedGenre) {
-                _currentGenreKey = savedGenre
-                _loading = true
-                plex.filterByGenre(savedGenre)
-            }
+            if (savedSort) _currentSort = savedSort
+            if (savedGenre) _currentGenreKey = savedGenre
             // Do NOT overwrite _viewMode — it is bound from WatchScreen.
         }
     }

@@ -878,16 +878,8 @@ FocusScope {
         if (settings) {
             var savedSort = settings.sortPlexShows
             var savedGenre = settings.filterPlexShowGenre
-            if (savedSort) {
-                _currentSort = savedSort
-                _loading = true
-                plex.sortShows(savedSort)
-            }
-            if (savedGenre) {
-                _currentGenreKey = savedGenre
-                _loading = true
-                plex.filterShowsByGenre(savedGenre)
-            }
+            if (savedSort) _currentSort = savedSort
+            if (savedGenre) _currentGenreKey = savedGenre
         }
     }
 }
