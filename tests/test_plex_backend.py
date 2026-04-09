@@ -76,16 +76,20 @@ def _flush_setup(lib):
     """Wait for any pending _worker_setup to complete and deliver _setupReady.
 
     Must be called while patches are still active (inside the ``with`` block).
-    Drains the executor and processes Qt events repeatedly to ensure all
-    chained work (_worker_setup → _on_setup_ready → _worker_refresh →
-    signal delivery) completes before the test exits.
+    Shuts down the executor, processes all queued Qt events, then recreates
+    the executor for any subsequent work. This guarantees all chained async
+    work is fully drained.
     """
     from PySide6.QtCore import QCoreApplication
-    # Three rounds: _worker_setup, _worker_refresh (submitted by _on_setup_ready),
-    # and any final signal delivery.
+    from concurrent.futures import ThreadPoolExecutor
+    # Shutdown waits for all submitted tasks (including _worker_setup and any
+    # _worker_refresh submitted by _on_setup_ready) to complete.
+    lib._executor.shutdown(wait=True)
+    # Process all queued Qt signals (QueuedConnection deliveries).
     for _ in range(3):
-        lib._executor.submit(lambda: None).result()
         QCoreApplication.processEvents()
+    # Recreate the executor so subsequent test code can submit work.
+    lib._executor = ThreadPoolExecutor(max_workers=2)
 
 
 # ---------------------------------------------------------------------------
@@ -2421,8 +2425,9 @@ class TestFetchGenres:
         received = []
         lib.genresReady.connect(lambda sk, g: received.append((sk, g)))
         lib.fetchGenres()
-        lib._executor.submit(lambda: None).result()
-        QCoreApplication.processEvents()
+        for _ in range(3):
+            lib._executor.submit(lambda: None).result()
+            QCoreApplication.processEvents()
 
         assert len(received) == 1
         assert received[0][0] == "4"

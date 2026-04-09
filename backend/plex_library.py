@@ -2939,6 +2939,46 @@ class PlexLibrary(QObject):
         except Exception:
             return False
 
+    def _probe_all_urls(self, urls: list[str], timeout: float = 3.0) -> str | None:
+        """Probe all URLs in parallel, return the highest-priority reachable one.
+
+        Submits all probes simultaneously via a temporary thread pool.
+        Waits for all to complete (up to timeout), then returns the
+        reachable URL with the lowest index (highest priority). Returns
+        None if all probes fail.
+
+        On local network, all probes complete in <100ms — the local URL
+        wins by priority. On external network, the local URL times out
+        while the remote URL responds — remote wins by being the only
+        reachable one.
+        """
+        if not urls:
+            return None
+
+        def _probe(url: str) -> bool:
+            return self._probe_server_url(url, timeout)
+
+        with ThreadPoolExecutor(max_workers=len(urls)) as pool:
+            future_to_idx = {
+                pool.submit(_probe, url): i for i, url in enumerate(urls)
+            }
+            results = [False] * len(urls)
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    results[idx] = future.result()
+                except Exception:
+                    pass
+
+        # Return the highest-priority (lowest index) reachable URL
+        for i, reachable in enumerate(results):
+            if reachable:
+                logger.info("PlexLibrary: best reachable URL: %s", urls[i])
+                return urls[i]
+
+        logger.warning("PlexLibrary: all server URLs unreachable")
+        return None
+
     def _worker_setup(self, refresh_after: bool = False) -> None:
         """Worker thread: resolve server, probe, switch user. Emits _setupReady.
 
@@ -2969,21 +3009,10 @@ class PlexLibrary(QObject):
             if best_url != self._config.plex_server_url:
                 self._config.set_plex_server_url(best_url)
 
-            # Probe the best URL; fall through to alternatives if unreachable
-            if not self._probe_server_url(server_url):
-                logger.info(
-                    "PlexLibrary: primary URL %s unreachable, trying alternatives",
-                    server_url,
-                )
-                for alt_url in all_urls:
-                    if alt_url == server_url:
-                        continue
-                    if self._probe_server_url(alt_url):
-                        logger.info("PlexLibrary: using alternative URL %s", alt_url)
-                        server_url = alt_url
-                        break
-                else:
-                    logger.warning("PlexLibrary: all server URLs unreachable")
+            # Probe all URLs in parallel — use the first that responds.
+            # On local network, local URL wins in <100ms. On external network,
+            # remote URL wins while local is still timing out.
+            server_url = self._probe_all_urls(all_urls) or server_url
         else:
             server_url = self._config.plex_server_url
             if server_url:
