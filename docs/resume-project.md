@@ -1,4 +1,4 @@
-# HTPC Station — Resume Document (Checkpoint 35)
+# HTPC Station — Resume Document (Checkpoint 36)
 
 > Hand this file to a fresh agent to resume development.
 > Deep reference (architecture, full gotchas, gamepad controls): `docs/architecture.md`
@@ -22,18 +22,23 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,017 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,043 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
-**What's new since CP34:**
-- **Plex cache system:** All content (libraries, on-deck, movies, shows, artists) cached to `~/.config/htpcstation/plex_cache/`. Loads instantly on cold boot without network calls.
-- **Poster optimisation:** Downloads via Plex `/photo/:/transcode` at 400px wide — ~10–20× smaller than full-res (896MB → ~50MB for 1366 posters).
-- **Lazy fetch:** `plex.selectLibrary()` called unconditionally on every library entry; sort/genre state preserved per section key and persisted across restarts.
-- **Sort bug fix:** Switching between libraries no longer resets the other library's sort state. Sort is keyed per section, not shared globally.
-- **Async ListenScreen:** All view transitions (artist detail, album, playlists, recently added) are non-blocking — no more main-thread HTTP calls.
-- **Manual Refresh button:** Added to Plex Media and Plex Music second-level screens.
-- **Test isolation:** `conftest.py` autouse fixture redirects all cache I/O to `tmp_path`. Real user cache is never touched during test runs. Removed one-time migration test.
+**What's new since CP35:**
+- **UI Redesign (Tasks 006–009):**
+  - Theme foundation: neutral dark palette (`#111111`/`#1c1c1c`/`#2a2a2a`), Liberation Sans font, runtime-overridable accent + focus ring colors (persisted to `config.json` `ui` section), rounder focus rings (radius 4→10).
+  - Focus scale animation: 1.05× scale with 120ms OutCubic ease on all focusable delegates (22 QML files). Grid delegates use `z:1` when focused. Theme tokens: `focusScale`, `focusScaleDuration`.
+  - ListView/GridView highlight centering: `ApplyRange` with `preferredHighlightBegin/End` at 35%/65% across 28 list/grid views (23 QML files). Focused item stays in center third.
+  - Tab transition opacity fade: 80ms fade out/in on tab enter/exit (replaced hard-cut `_launcherVisible` toggle). Home icon row repositioned to top-quarter.
+- **Plex cache fix — cross-thread signals (Task 010):** Root cause of cache not displaying: all 11 `ThreadPoolExecutor` worker signals were connected with `AutoConnection` (behaves as `DirectConnection` for non-QThread threads in PySide6). Slots ran on worker thread; QML never received model-changed signals. Fixed by adding `QueuedConnection` to all 11 connections.
+- **Loading spinner fix (Task 011):** `PlexMovieGrid/List` and `PlexShowGrid/List` called `plex.sortMovies()`/`plex.filterByGenre()` in `Component.onCompleted` — silently dropped because `_current_section_key` was empty. Left `_loading=true` permanently. Removed the redundant calls; `selectLibrary()` already applies saved sort/genre.
+- **Cache-first offline display + unified toast errors (Task 012):** Network failure no longer blocks browsing cached libraries. `sectionLoadFailed` signal emitted on network exception; `_worker_refresh` pre-emits cached libraries/on-deck. Error banners removed from WatchScreen and ListenScreen — all errors route to toast. `plexError` now delivered cross-thread via `QMetaObject.invokeMethod` trampoline. ListenScreen gained toast infrastructure.
+- **Gamepad suppression for all external launchers (Task 004):** `setMpvActive` renamed to `setExternalAppActive` in `gamepad.py`. Wired to all four launchers (emulators, browser, Moonlight, MPV) — prevents stuck-scroll bug from auto-repeat timers firing into restored UI.
+- **WatchScreen inline refresh (Task 005):** Refresh row moved into `libraryList` as last sentinel entry (matches ListenScreen pattern). Removed standalone `refreshItem`, manual focus wiring, and 96px bottom margin.
+
+**Known issue:** Plex offline cache may still not display correctly in all scenarios — needs further investigation and testing.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

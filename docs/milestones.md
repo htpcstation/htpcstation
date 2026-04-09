@@ -168,7 +168,7 @@ Consumer routing:
 | RetroArch config V4 — full Batocera parity | Shader presets, integer scaling, run-ahead, netplay defaults |
 | On-screen keyboard | Prerequisite for first-run wizard (text input without physical keyboard) |
 | First-run setup wizard | Guided config for new installs |
-| UI Refresh 4b/4c — token replacement + theme switcher | High blast radius; do after tab restructure is stable |
+| UI Refresh 4b/4c — theme switcher + palette presets | Theme foundation shipped (CP36: neutral palette, runtime accent/focus ring colors, Liberation Sans). Remaining: preset palette picker UI, user-facing theme switcher in Settings. |
 | Plex search | New navigation flow |
 | Moonlight rich metadata | Deferred from original roadmap |
 | XInput controller support | M8 done — needs real-device test + any per-device quirk fixes |

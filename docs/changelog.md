@@ -4,6 +4,23 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP36 — UI Redesign + Plex cache/offline fixes
+
+Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-context-button-keycodes/` (004–005, 010–012)
+
+- Theme foundation: neutral palette (#111111/#1c1c1c/#2a2a2a), Liberation Sans, runtime accent/focus ring colors, rounder focus rings (radius 10)
+- Focus scale animation (1.05×, 120ms OutCubic) on all focusable delegates across 22 QML files
+- ListView/GridView highlight centering (ApplyRange 35%–65%) across 28 views in 23 QML files
+- Tab transition 80ms opacity fade (replaced hard-cut _launcherVisible); home icon row repositioned
+- Cross-thread signal fix: all 11 PlexLibrary worker signals now use QueuedConnection — root cause of cached data not displaying
+- Removed broken sort/filter network calls from PlexMovie/Show Grid/List Component.onCompleted (fixed permanent loading spinner)
+- Cache-first offline: sectionLoadFailed signal, _worker_refresh pre-emits cache, plexError cross-thread trampoline, unified toast errors (error banners removed)
+- Gamepad suppression wired to all external launchers (setMpvActive → setExternalAppActive); fixes stuck-scroll bug
+- WatchScreen Refresh moved inline as last ListView sentinel entry (matches ListenScreen pattern)
+- 2,043 tests passing (was 2,017)
+
+---
+
 ## CP35 — Plex cache, performance, and test isolation
 
 Task briefs: `misc/coding-team/plex-cache-refresh/`, `misc/coding-team/test-suite-cleanup/`
@@ -82,3 +99,7 @@ Task briefs: `misc/coding-team/homescreen-themes/`
 | 30 | M6: RetroArch hotkey configuration V1 — modifier capture dialog, hotkey mapping, apply to retroarch.cfg | `m6-retroarch-hotkeys/` (001–003) |
 | 31 | Fix: modifier capture dialog focus not restored after first use (FocusScope needs focused child) | — |
 | 32 | M6→V2: all 12 hotkey rows interactive (tap to assign, hold 3s to clear), rewind settings, duplicate prevention, face button cardinal labels. M8-A/B/C/D: `sdl_resolver.py` ctypes SDL wrapper, dual-record controller mapping (evdev+SDL), dual-record hotkey assignment, mapping wizard Start+Select cancel + hold-to-skip (WIP) | `retroarch-config-v2/` (001–007), `m8-sdl-input/` (008-A–008-D) |
+| 33 | Homescreen Theme System V1 | `homescreen-themes/` (001–003) |
+| 34 | UI Layout Refresh: sub-header hints, keyboard shortcuts, gamepad fixes | `subheader-hints/` |
+| 35 | Plex cache, performance, and test isolation | `plex-cache-refresh/`, `test-suite-cleanup/` |
+| 36 | UI Redesign (theme, animations, fades) + Plex cache/offline fixes | `ui-redesign/` (006–009), `fix-context-button-keycodes/` (004–005, 010–012) |

@@ -91,11 +91,15 @@ htpcstation/
                                        # auto-user-select, auto-play, auto-expand mini player (~900 lines)
   qml/
     main.qml                           # ApplicationWindow, vpx(), QuitDialog
-    Theme.qml                          # Singleton: two-layer token system — _palette vars (dark palette,
-                                       # only these change between themes) + semantic tokens (colorAccent,
+    Theme.qml                          # Singleton: two-layer token system — _palette vars (neutral dark:
+                                       # #111111/#1c1c1c/#2a2a2a) + semantic tokens (colorAccent,
                                        # colorSurface, colorOverlay, colorBadgeSteam, etc.). colorPrimary
                                        # and colorSecondary kept as aliases. No hardcoded hex in any other
-                                       # QML file.
+                                       # QML file. fontFamily: Liberation Sans. colorAccent and
+                                       # colorFocusRing are settings-driven (runtime-overridable,
+                                       # persisted to config.json ui section). focusScale (1.05) and
+                                       # focusScaleDuration (120ms) tokens for delegate animations.
+                                       # focusRingRadius: 10. animDurationFast: 80ms (tab fades).
     qmldir                             # Singleton registration
     components/
       ClockDisplay.qml
@@ -112,7 +116,8 @@ htpcstation/
                                         # buttons (theme-driven); Level 2 = tab content loaded on demand.
                                         # Tab content destroyed on back() to prevent eager network calls.
                                         # MediaPlayer + AudioOutput, global X play/pause, MPV running state,
-                                        # subtitle overlay trigger
+                                        # subtitle overlay trigger. 80ms opacity fade on tab enter/exit.
+                                        # Home icon row at height/4 (25% from top).
       RetroGamesScreen.qml             # System list + game grid + detail (3-state)
       GameGridView.qml
       GameDetailView.qml
@@ -186,6 +191,7 @@ htpcstation/
     test_browser_launch.py             # 31 tests
     test_keys.py                       # 17 tests (key code changes: 1/2 replace F1/F2)
     test_gamepad_disconnect.py         # 10 tests (disconnect crash fix, hint flash fix)
+    test_theme_config.py               # ~226 tests (theme palette, accent/focus ring colors, config persistence)
 ```
 
 **Test isolation:** `tests/conftest.py` has an autouse fixture `isolate_plex_cache` that
@@ -240,7 +246,7 @@ Button hint conventions:
 - Steam game discovery is synchronous (small local ACF file reads)
 - Live TV: HDHomeRun `discover.json` sequential (fast, local), then `lineup.json` + guide API parallel (2 workers)
 - `PlexTimelineReporter`: dedicated daemon `threading.Thread` (not executor) — fires every 10s, reads MPV position via IPC
-- All internal signals that cross thread boundaries use `Qt.ConnectionType.QueuedConnection`
+- All internal signals that cross thread boundaries use explicit `Qt.ConnectionType.QueuedConnection` — required because `ThreadPoolExecutor` threads are not `QThread` subclasses, so PySide6 `AutoConnection` defaults to `DirectConnection` (not queued)
 
 ### Process Lifecycle
 - **Emulators/Browser/Moonlight:** `processStarted` → `window.hide()`, `processFinished` → `window.showFullScreen()` + `raise_()` + `requestActivate()`
@@ -344,7 +350,7 @@ Button hint conventions:
   "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
-  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid", "theme_name": "default" },
+  "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid", "theme_name": "default", "accent_color": "#e94560", "focus_ring_color": "#e94560" },
   "tabs": { "show_retro_games": true, "show_pc_games": true, "show_moonlight": true, "show_watch": true, "show_listen": true },
   "hotkey_modifier_evdev": 316,
   "hotkey_modifier_sdl": {"type": "button", "sdl_button": 5, "label": "Guide"},
@@ -374,6 +380,8 @@ Button hint conventions:
 - **PySide6 custom signals in `Connections`** — May not work. Use reactive property bindings or imperative code instead.
 - **Missing `}` in SettingsScreen handler chain** — Silently breaks the entire Settings tab with no console error.
 - **Stderr filter hides QML errors** — Disable `_start_stderr_filter()` in `main.py` when debugging QML.
+- **Focus scale must target inner content, not delegate root** — Applying `scale` to a `FocusScope` delegate root inside a `clip: true` ListView/GridView clips the scaled item at its original bounds. Apply scale to the inner card `Rectangle` instead. Grid delegates need `z: activeFocus ? 1 : 0` so focused items render above neighbours. Use `Theme.focusScale` and `Theme.focusScaleDuration` tokens.
+- **ListView/GridView highlight centering** — All list/grid views use `highlightRangeMode: ApplyRange` with `preferredHighlightBegin: height * 0.35` and `preferredHighlightEnd: height * 0.65`. Use `ApplyRange` (not `StrictlyEnforceRange`) so short lists still allow focus at edges. Add these three properties to any new ListView/GridView.
 - **`HomeScreen` tab content is loaded on demand** — `Loader.source` starts as `""`. Set it imperatively on A-press; clear it in `returnFocusToTabBar()` to destroy the screen and stop network calls. Do not bind `Loader.source` to any property.
 
 ### Plex
@@ -427,7 +435,10 @@ Button hint conventions:
 
 ### Plex Cache
 - **`_PLEX_CACHE_DIR` and `_POSTER_CACHE_DIR` are module-level constants** — Computed at import time from `CONFIG_DIR`. Patching `CONFIG_DIR` after import has no effect on them. Always patch the constants directly: `patch("backend.plex_library._PLEX_CACHE_DIR", ...)`.
-- **Startup cache load is async** — `_worker_load_all_caches` runs on `_cache_executor` (dedicated single-thread pool). It emits `_librariesReady` and `_onDeckCacheReady` which are delivered via `AutoConnection` (queued to main thread). WatchScreen's `Connections` block handles `onLibrariesModelChanged` — do not call `_getVideoLibraries()` before this fires or you get only the hardcoded Live TV entry.
+- **Startup cache load is async** — `_worker_load_all_caches` runs on `_cache_executor` (dedicated single-thread pool). It emits `_librariesReady` and `_onDeckCacheReady` which are delivered via `QueuedConnection` (queued to main thread). WatchScreen's `Connections` block handles `onLibrariesModelChanged` — do not call `_getVideoLibraries()` before this fires or you get only the hardcoded Live TV entry.
+- **All worker signal connections must use `QueuedConnection`** — PySide6 `AutoConnection` from a Python `ThreadPoolExecutor` thread behaves as `DirectConnection` (not `QueuedConnection`), because executor threads are not `QThread` subclasses. The slot runs on the worker thread, and QML observers never fire. All 11 worker signals in `PlexLibrary.__init__` are connected with explicit `Qt.ConnectionType.QueuedConnection`.
+- **`sectionLoadFailed` signal** — Emitted by `_worker_load_section` when the network call fails after cache has already been emitted. QML uses this to clear `_loading` flags so cached data is visible (not covered by the loading spinner). WatchScreen shows a "Network unavailable" toast on this signal.
+- **`plexError` cross-thread delivery** — `_on_plex_error` runs on the worker thread (via `set_error_callback`). It uses `QMetaObject.invokeMethod` with `QueuedConnection` via a `_emit_plex_error` trampoline slot to ensure delivery on the main thread.
 - **Sort/genre state is per section key** — `_section_sort: dict[str, str]` and `_section_genre: dict[str, str]` keyed by Plex section key (e.g. `"4"`). Persisted to `plex_cache/state.json` on every sort/filter change. Loaded at startup in `_worker_load_all_caches`. Do not use a single shared `_current_sort` field.
 - **`selectLibrary()` passes current sort** — Lazy fetch on section entry uses `_section_sort.get(section_key, "")` so the user's sort is preserved across navigation.
 - **Poster downloads use `/photo/:/transcode`** — `get_poster_url()` routes through Plex's server-side resize endpoint at 400px wide. `get_authenticated_url()` is for non-poster paths (track streams, etc.) and returns a plain authenticated URL.
