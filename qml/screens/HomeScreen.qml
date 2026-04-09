@@ -50,6 +50,10 @@ FocusScope {
     property int  _activeTab: -1           // index into tabNames of the loaded tab (-1 = none)
     property int  _lastFocusedButton: 0    // which button had focus before entering a tab
 
+    // Opacity properties for tab transition fade animation
+    property real _launcherOpacity: 1.0
+    property real _contentOpacity:  0.0
+
     function _initTabs() {
         var names = []
         var sources = []
@@ -299,6 +303,8 @@ FocusScope {
         source: settings ? settings.themeDir + "homescreen/home-background.png" : ""
         fillMode: Image.PreserveAspectCrop
         visible: homeScreen._launcherVisible
+        opacity: homeScreen._launcherOpacity
+        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
     }
 
     // ── Launcher button row ───────────────────────────────────────────────────
@@ -308,6 +314,8 @@ FocusScope {
         spacing: root.vpx(24)
         visible: homeScreen._launcherVisible
         focus: homeScreen._launcherVisible
+        opacity: homeScreen._launcherOpacity
+        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
 
         property int _buttonSize: {
             var count = homeScreen.tabNames.length
@@ -355,10 +363,8 @@ FocusScope {
                         homeScreen._lastFocusedButton = index
                         homeScreen._activeTab = index
                         contentLoader.source = homeScreen.tabSources[index]
-                        homeScreen._launcherVisible = false
-                        Qt.callLater(function() {
-                            if (contentLoader.item) contentLoader.item.forceActiveFocus()
-                        })
+                        homeScreen._launcherOpacity = 0.0   // start fade-out
+                        tabEnterTimer.restart()
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
                         // do nothing — Start still handles quit at HomeScreen level
@@ -411,6 +417,8 @@ FocusScope {
     Item {
         anchors.fill: parent
         visible: !homeScreen._launcherVisible
+        opacity: homeScreen._contentOpacity
+        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
 
         Loader {
             id: contentLoader
@@ -492,13 +500,37 @@ FocusScope {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     function returnFocusToTabBar() {
-        contentLoader.source = ""
-        homeScreen._launcherVisible = true
-        homeScreen._activeTab = -1
-        Qt.callLater(function() {
-            var btn = buttonRepeater.itemAt(homeScreen._lastFocusedButton)
-            if (btn) btn.forceActiveFocus()
-        })
+        homeScreen._contentOpacity = 0.0   // start fade-out
+        tabExitTimer.restart()
+    }
+
+    Timer {
+        id: tabEnterTimer
+        interval: Theme.animDurationFast   // 150ms — matches fade duration
+        onTriggered: {
+            if (homeScreen._activeTab === -1) return   // guard: rapid B then A
+            homeScreen._contentOpacity = 0.0
+            homeScreen._launcherVisible = false
+            homeScreen._contentOpacity = 1.0   // fade in content
+            Qt.callLater(function() {
+                if (contentLoader.item) contentLoader.item.forceActiveFocus()
+            })
+        }
+    }
+
+    Timer {
+        id: tabExitTimer
+        interval: Theme.animDurationFast   // 150ms
+        onTriggered: {
+            contentLoader.source = ""
+            homeScreen._activeTab = -1
+            homeScreen._launcherOpacity = 1.0   // reset before making visible
+            homeScreen._launcherVisible = true
+            Qt.callLater(function() {
+                var btn = buttonRepeater.itemAt(homeScreen._lastFocusedButton)
+                if (btn) btn.forceActiveFocus()
+            })
+        }
     }
 
     // On startup, build tab arrays and give focus to the first button.
