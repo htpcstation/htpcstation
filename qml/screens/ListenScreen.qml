@@ -387,6 +387,9 @@ FocusScope {
         focus: false
         keyNavigationEnabled: true
         highlightMoveDuration: Theme.animDurationFast
+        highlightRangeMode:      ListView.ApplyRange
+        preferredHighlightBegin: height * 0.35
+        preferredHighlightEnd:   height * 0.65
 
         model: {
             var items = []
@@ -592,6 +595,9 @@ FocusScope {
             focus: false
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             // When true, the Play All button in the header is focused
             // instead of a track row.
@@ -1682,6 +1688,9 @@ FocusScope {
             focus: false
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Down) {
@@ -1919,6 +1928,9 @@ FocusScope {
             focus: false
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Down) {
@@ -2106,6 +2118,9 @@ FocusScope {
             focus: false
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             // When true, the Play All button in the header is focused
             // instead of a track row.
@@ -2501,6 +2516,9 @@ FocusScope {
             focus: false
             keyNavigationEnabled: false
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
                 if (event.key === Qt.Key_Down) {

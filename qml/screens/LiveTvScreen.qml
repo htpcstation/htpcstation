@@ -188,6 +188,9 @@ FocusScope {
         clip: true
         focus: true
         highlightMoveDuration: Theme.animDurationFast
+        highlightRangeMode:      ListView.ApplyRange
+        preferredHighlightBegin: height * 0.35
+        preferredHighlightEnd:   height * 0.65
 
         Keys.onPressed: (event) => {
             if (keys.isCancel(event)) {

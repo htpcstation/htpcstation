@@ -551,6 +551,9 @@ FocusScope {
             keyNavigationEnabled: true
             focus: true
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             // Use the JS array built from plex.getLibraryList().
             model: watchScreen._libraryEntries

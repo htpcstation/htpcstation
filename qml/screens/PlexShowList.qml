@@ -321,6 +321,9 @@ FocusScope {
 
             // Smooth highlight movement
             highlightMoveDuration: Theme.animDurationFast
+            highlightRangeMode:      ListView.ApplyRange
+            preferredHighlightBegin: height * 0.35
+            preferredHighlightEnd:   height * 0.65
 
             // ── Infinite scroll ──────────────────────────────────────────────
             onCurrentIndexChanged: {

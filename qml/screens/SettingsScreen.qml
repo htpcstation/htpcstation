@@ -267,6 +267,9 @@ FocusScope {
         focus: true
         keyNavigationEnabled: false  // We handle Up/Down manually to skip headers
         highlightMoveDuration: Theme.animDurationFast
+        highlightRangeMode:      ListView.ApplyRange
+        preferredHighlightBegin: height * 0.35
+        preferredHighlightEnd:   height * 0.65
 
         // Track whether any child is in edit/adjust mode
         property bool _childEditing: false
