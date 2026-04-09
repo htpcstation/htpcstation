@@ -248,6 +248,39 @@ class TestSettingsManagerThemeProperties:
 
 
 # ---------------------------------------------------------------------------
+# SettingsManager.themeAvailable
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsManagerThemeAvailable:
+    def test_theme_available_false_when_dir_missing(self, tmp_path: Path) -> None:
+        """themeAvailable returns False when the theme directory does not exist."""
+        app_dir = tmp_path / "app"
+        app_dir.mkdir()
+        manager, _ = _make_manager(tmp_path, app_dir=app_dir)
+        # themes/default does not exist
+        assert manager.themeAvailable is False
+
+    def test_theme_available_true_when_dir_exists(self, tmp_path: Path) -> None:
+        """themeAvailable returns True when the theme directory exists on disk."""
+        app_dir = tmp_path / "app"
+        (app_dir / "themes" / "default").mkdir(parents=True)
+        manager, _ = _make_manager(tmp_path, app_dir=app_dir)
+        assert manager.themeAvailable is True
+
+    def test_theme_available_reflects_custom_theme(self, tmp_path: Path) -> None:
+        """themeAvailable checks the directory for the current theme_name."""
+        app_dir = tmp_path / "app"
+        (app_dir / "themes" / "neon").mkdir(parents=True)
+        manager, config = _make_manager(tmp_path, app_dir=app_dir)
+        config._theme_name = "neon"
+        assert manager.themeAvailable is True
+        # A different theme that doesn't exist
+        config._theme_name = "missing"
+        assert manager.themeAvailable is False
+
+
+# ---------------------------------------------------------------------------
 # Config.accent_color / focus_ring_color — defaults
 # ---------------------------------------------------------------------------
 

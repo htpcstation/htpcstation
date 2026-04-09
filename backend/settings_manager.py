@@ -223,6 +223,9 @@ class SettingsManager(QObject):
     def _get_theme_dir(self) -> str:
         return "file://" + str(self._app_dir / "themes" / self._config.theme_name) + "/"
 
+    def _get_theme_available(self) -> bool:
+        return (self._app_dir / "themes" / self._config.theme_name).is_dir()
+
     # ------------------------------------------------------------------
     # Q_PROPERTYs
     # ------------------------------------------------------------------
@@ -395,6 +398,11 @@ class SettingsManager(QObject):
     themeDir = Property(
         str,
         fget=_get_theme_dir,
+        notify=themeNameChanged,
+    )
+    themeAvailable = Property(
+        bool,
+        fget=_get_theme_available,
         notify=themeNameChanged,
     )
     accentColor = Property(str, fget=_get_accent_color, notify=accentColorChanged)

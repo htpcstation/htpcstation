@@ -300,7 +300,7 @@ FocusScope {
     Image {
         id: launcherBackground
         anchors.fill: parent
-        source: settings ? settings.themeDir + "homescreen/home-background.png" : ""
+        source: (settings && settings.themeAvailable) ? settings.themeDir + "homescreen/home-background.png" : ""
         fillMode: Image.PreserveAspectCrop
         visible: homeScreen._launcherVisible
         opacity: homeScreen._launcherOpacity
@@ -377,7 +377,7 @@ FocusScope {
                 Image {
                     id: buttonImage
                     anchors.fill: parent
-                    source: (settings && index < homeScreen.tabSlugs.length && homeScreen.tabSlugs[index])
+                    source: (settings && settings.themeAvailable && index < homeScreen.tabSlugs.length && homeScreen.tabSlugs[index])
                         ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png"
                         : ""
                     fillMode: Image.PreserveAspectFit
