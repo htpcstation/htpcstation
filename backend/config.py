@@ -376,6 +376,7 @@ class Config:
         # Plex Media Server configuration
         self._plex_token: Optional[str] = None
         self._plex_server_id: Optional[str] = None
+        self._plex_server_url: str = ""
         self._plex_user_id: Optional[int] = None
         self._plex_client_id: str = ""
         # Browser configuration
@@ -462,6 +463,11 @@ class Config:
     def plex_server_id(self) -> Optional[str]:
         """Plex server machine identifier (clientIdentifier). None if not selected."""
         return self._plex_server_id
+
+    @property
+    def plex_server_url(self) -> str:
+        """Last-known Plex server URL, cached for offline startup."""
+        return self._plex_server_url
 
     @property
     def plex_user_id(self) -> Optional[int]:
@@ -640,6 +646,11 @@ class Config:
     def set_plex_server_id(self, server_id: str) -> None:
         """Set the Plex server machine identifier and persist the config."""
         self._plex_server_id = server_id if server_id else None
+        self.save()
+
+    def set_plex_server_url(self, url: str) -> None:
+        """Cache the last-known server URL and persist the config."""
+        self._plex_server_url = url.strip()
         self.save()
 
     def set_plex_user_id(self, user_id: int) -> None:
@@ -924,6 +935,7 @@ class Config:
             "plex": {
                 "token": self._plex_token or "",
                 "server_id": self._plex_server_id or "",
+                "server_url": self._plex_server_url,
                 "user_id": self._plex_user_id or 0,
                 "client_id": self._plex_client_id,
                 "music_library_key": self._music_library_key,
@@ -1091,7 +1103,7 @@ class Config:
             if player in ("mpv", "browser"):
                 self._plex_player = player
             self._auto_skip_intro = bool(plex.get("auto_skip_intro", False))
-            # Backward compatibility: old configs may have server_url — ignore it gracefully
+            self._plex_server_url = plex.get("server_url", "")
 
         # browser section
         browser = raw.get("browser", {})

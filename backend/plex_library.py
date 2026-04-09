@@ -818,9 +818,6 @@ class PlexLibrary(QObject):
     @Slot(str)
     def selectLibrary(self, section_key: str) -> None:
         """Load items for a library section identified by *section_key*."""
-        if self._client is None:
-            return
-
         # On-deck data is already loaded in onDeckModel from refresh().
         # There is no /library/sections/_ondeck/all endpoint — return early.
         if section_key == "_ondeck":
@@ -856,6 +853,30 @@ class PlexLibrary(QObject):
         self._shows_loaded = 0
         self._current_library = section_title
         self.currentLibraryChanged.emit(section_title)
+
+        # Cache-first: emit cached data immediately for instant display.
+        # Network fetch (below) will backfill if client is available.
+        if section_type == "movie":
+            cached = self._load_movies_cache(section_key)
+            if cached:
+                self._resolve_cached_posters(cached)
+                self._on_movies_cache_ready(cached, section_key)
+        elif section_type == "show":
+            cached = self._load_shows_cache(section_key)
+            if cached:
+                self._resolve_cached_posters(cached)
+                self._on_shows_cache_ready(cached, section_key)
+        elif section_type == "artist":
+            cached = self._load_artists_cache()
+            if cached:
+                self._resolve_cached_posters(cached)
+                self._on_artists_ready(cached, len(cached))
+
+        if self._client is None:
+            # No server connection — show cached data only (loaded above).
+            # Emit sectionLoadFailed so QML shows offline toast.
+            self.sectionLoadFailed.emit()
+            return
 
         client = self._client
         sort = self._section_sort.get(section_key, "")
@@ -2093,23 +2114,8 @@ class PlexLibrary(QObject):
     ) -> None:
         """Worker: load all items for a library section."""
         if section_type == "artist":
-            # Try loading from cache first for instant display
-            cached = self._load_artists_cache()
-            if cached:
-                self._artistsReady.emit(cached, len(cached))
-
             # Load all artists at once — most music libraries have <500 artists
             page_size = 9999
-        elif section_type == "movie":
-            cached = self._load_movies_cache(section_key)
-            if cached:
-                self._moviesCacheReady.emit(cached, section_key)
-            page_size = _PAGE_SIZE
-        elif section_type == "show":
-            cached = self._load_shows_cache(section_key)
-            if cached:
-                self._showsCacheReady.emit(cached, section_key)
-            page_size = _PAGE_SIZE
         else:
             page_size = _PAGE_SIZE
 
@@ -2120,6 +2126,12 @@ class PlexLibrary(QObject):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load section %s: %s", section_key, exc)
+            self.sectionLoadFailed.emit()
+            return
+
+        # get_library_items returns ([], 0) on soft failure (e.g. network error
+        # after retries exhausted). Don't overwrite cached data with nothing.
+        if not items and total == 0:
             self.sectionLoadFailed.emit()
             return
 
@@ -2168,6 +2180,10 @@ class PlexLibrary(QObject):
                 section_key, start, _PAGE_SIZE, sort=sort, genre=genre,
                 content_rating=self._content_rating_filter,
             )
+            if not items and total == 0:
+                self._loading_more = False
+                self.sectionLoadFailed.emit()
+                return
             movies = [parse_movie(item) for item in items]
             if self._poster_cache is not None:
                 for movie in movies:
@@ -2194,6 +2210,10 @@ class PlexLibrary(QObject):
                 section_key, start, _PAGE_SIZE, sort=sort, genre=genre,
                 content_rating=self._content_rating_filter,
             )
+            if not items and total == 0:
+                self._shows_loading_more = False
+                self.sectionLoadFailed.emit()
+                return
             shows = [parse_show(item) for item in items]
             if self._poster_cache is not None:
                 for show in shows:
@@ -2309,12 +2329,18 @@ class PlexLibrary(QObject):
             # First page — replace model
             self._movies_model.set_movies(movies)
             self.moviesModelChanged.emit()
-            # Save first page to disk cache for instant load on next launch
-            self._save_movies_cache(self._current_section_key, movies)
             self._save_state_cache("last_movie_section", self._current_section_key)
         else:
             # Subsequent pages — append
             self._movies_model.append_movies(movies)
+
+        # Save every page — merge-by-key preserves existing entries.
+        # Snapshot to dicts on main thread; disk I/O on _cache_executor.
+        section_key = self._current_section_key
+        movie_dicts = [self._movie_to_dict(m) for m in movies]
+        self._cache_executor.submit(
+            self._merge_and_write_movies_cache, section_key, movie_dicts
+        )
 
         self._movies_total = total
         self._movies_loaded += len(movies)
@@ -2336,12 +2362,18 @@ class PlexLibrary(QObject):
             # First page — replace model
             self._shows_model.set_shows(shows)
             self.showsModelChanged.emit()
-            # Save first page to disk cache for instant load on next launch
-            self._save_shows_cache(self._current_section_key, shows)
             self._save_state_cache("last_show_section", self._current_section_key)
         else:
             # Subsequent pages — append
             self._shows_model.append_shows(shows)
+
+        # Save every page — merge-by-key preserves existing entries.
+        # Snapshot to dicts on main thread; disk I/O on _cache_executor.
+        section_key = self._current_section_key
+        show_dicts = [self._show_to_dict(s) for s in shows]
+        self._cache_executor.submit(
+            self._merge_and_write_shows_cache, section_key, show_dicts
+        )
 
         self._shows_total = total
         self._shows_loaded += len(shows)
@@ -2376,8 +2408,12 @@ class PlexLibrary(QObject):
         self._artists_model.set_artists(artists)
         self.artistsModelChanged.emit()
 
-        # Save to cache for instant load on next launch
-        self._save_artists_cache(artists)
+        # Save every page — merge-by-key preserves existing entries.
+        # Snapshot to dicts on main thread; disk I/O on _cache_executor.
+        artist_dicts = [self._artist_to_dict(a) for a in artists]
+        self._cache_executor.submit(
+            self._merge_and_write_artists_cache, artist_dicts
+        )
 
         # Kick off poster downloads only for artists missing a local poster
         client = self._client
@@ -2466,6 +2502,22 @@ class PlexLibrary(QObject):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _resolve_cached_posters(self, items: list) -> None:
+        """Pre-resolve poster_local from disk cache for items missing it.
+
+        Called on the main thread after loading items from cache. The SHA256
+        hash + path construct and exists() checks are ~5ms for 500 items —
+        acceptable for instant cache-first display.
+        """
+        if self._poster_cache is None:
+            return
+        for item in items:
+            thumb = getattr(item, "thumb_path", "") or ""
+            if thumb and not getattr(item, "poster_local", ""):
+                cached_path = self._poster_cache._cache_path(thumb)
+                if cached_path.exists():
+                    item.poster_local = cached_path.as_uri()
 
     def _state_cache_path(self) -> Path:
         _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2585,21 +2637,37 @@ class PlexLibrary(QObject):
         section_key = self._current_section_key or "default"
         return _PLEX_CACHE_DIR / f"artists_cache_{section_key}.json"
 
-    def _save_artists_cache(self, artists: list) -> None:
-        """Serialize the artist list to a JSON cache file (called from worker thread)."""
+    def _artist_to_dict(self, a) -> dict:
+        """Snapshot a PlexArtist to a plain dict (no I/O, safe on main thread)."""
+        return {
+            "rating_key": a.rating_key,
+            "title": a.title,
+            "summary": a.summary,
+            "thumb_path": a.thumb_path,
+            "genre": a.genre,
+            "poster_local": a.poster_local,
+        }
+
+    def _merge_and_write_artists_cache(self, artist_dicts: list) -> None:
+        """Merge artist dicts into existing cache and write (runs on _cache_executor)."""
         try:
-            data = []
-            for a in artists:
-                data.append({
-                    "rating_key": a.rating_key,
-                    "title": a.title,
-                    "summary": a.summary,
-                    "thumb_path": a.thumb_path,
-                    "genre": a.genre,
-                    "poster_local": a.poster_local,
-                })
             path = self._artists_cache_path()
-            path.write_text(json.dumps(data), encoding="utf-8")
+            existing = {}
+            if path.exists():
+                try:
+                    for item in json.loads(path.read_text(encoding="utf-8")):
+                        rk = item.get("rating_key", "")
+                        if rk:
+                            existing[rk] = item
+                except Exception:
+                    pass  # Corrupt cache — start fresh
+
+            for d in artist_dicts:
+                rk = d.get("rating_key", "")
+                if rk:
+                    existing[rk] = d
+
+            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
         except Exception:
             logger.warning("Failed to save artists cache", exc_info=True)
 
@@ -2703,32 +2771,48 @@ class PlexLibrary(QObject):
         _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         return _PLEX_CACHE_DIR / f"movies_cache_{section_key}.json"
 
-    def _save_movies_cache(self, section_key: str, movies: list) -> None:
-        """Serialize the movie list to a JSON cache file (called from worker thread)."""
+    def _movie_to_dict(self, m) -> dict:
+        """Snapshot a PlexMovie to a plain dict (no I/O, safe on main thread)."""
+        return {
+            "rating_key": m.rating_key,
+            "title": m.title,
+            "year": m.year,
+            "summary": m.summary,
+            "content_rating": m.content_rating,
+            "audience_rating": m.audience_rating,
+            "duration_ms": m.duration_ms,
+            "studio": m.studio,
+            "tagline": m.tagline,
+            "thumb_path": m.thumb_path,
+            "art_path": m.art_path,
+            "genres": m.genres,
+            "directors": m.directors,
+            "cast": m.cast,
+            "added_at": m.added_at,
+            "view_offset": m.view_offset,
+            "poster_local": m.poster_local,
+        }
+
+    def _merge_and_write_movies_cache(self, section_key: str, movie_dicts: list) -> None:
+        """Merge movie dicts into existing cache and write (runs on _cache_executor)."""
         try:
-            data = []
-            for m in movies:
-                data.append({
-                    "rating_key": m.rating_key,
-                    "title": m.title,
-                    "year": m.year,
-                    "summary": m.summary,
-                    "content_rating": m.content_rating,
-                    "audience_rating": m.audience_rating,
-                    "duration_ms": m.duration_ms,
-                    "studio": m.studio,
-                    "tagline": m.tagline,
-                    "thumb_path": m.thumb_path,
-                    "art_path": m.art_path,
-                    "genres": m.genres,
-                    "directors": m.directors,
-                    "cast": m.cast,
-                    "added_at": m.added_at,
-                    "view_offset": m.view_offset,
-                    "poster_local": m.poster_local,
-                })
             path = self._movies_cache_path(section_key)
-            path.write_text(json.dumps(data), encoding="utf-8")
+            existing = {}
+            if path.exists():
+                try:
+                    for item in json.loads(path.read_text(encoding="utf-8")):
+                        rk = item.get("rating_key", "")
+                        if rk:
+                            existing[rk] = item
+                except Exception:
+                    pass  # Corrupt cache — start fresh
+
+            for d in movie_dicts:
+                rk = d.get("rating_key", "")
+                if rk:
+                    existing[rk] = d
+
+            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
         except Exception:
             logger.warning("Failed to save movies cache", exc_info=True)
 
@@ -2777,29 +2861,45 @@ class PlexLibrary(QObject):
         _PLEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         return _PLEX_CACHE_DIR / f"shows_cache_{section_key}.json"
 
-    def _save_shows_cache(self, section_key: str, shows: list) -> None:
-        """Serialize the show list to a JSON cache file (called from worker thread)."""
+    def _show_to_dict(self, s) -> dict:
+        """Snapshot a PlexShow to a plain dict (no I/O, safe on main thread)."""
+        return {
+            "rating_key": s.rating_key,
+            "title": s.title,
+            "year": s.year,
+            "summary": s.summary,
+            "content_rating": s.content_rating,
+            "audience_rating": s.audience_rating,
+            "thumb_path": s.thumb_path,
+            "art_path": s.art_path,
+            "genres": s.genres,
+            "cast": s.cast,
+            "child_count": s.child_count,
+            "leaf_count": s.leaf_count,
+            "viewed_leaf_count": s.viewed_leaf_count,
+            "poster_local": s.poster_local,
+        }
+
+    def _merge_and_write_shows_cache(self, section_key: str, show_dicts: list) -> None:
+        """Merge show dicts into existing cache and write (runs on _cache_executor)."""
         try:
-            data = []
-            for s in shows:
-                data.append({
-                    "rating_key": s.rating_key,
-                    "title": s.title,
-                    "year": s.year,
-                    "summary": s.summary,
-                    "content_rating": s.content_rating,
-                    "audience_rating": s.audience_rating,
-                    "thumb_path": s.thumb_path,
-                    "art_path": s.art_path,
-                    "genres": s.genres,
-                    "cast": s.cast,
-                    "child_count": s.child_count,
-                    "leaf_count": s.leaf_count,
-                    "viewed_leaf_count": s.viewed_leaf_count,
-                    "poster_local": s.poster_local,
-                })
             path = self._shows_cache_path(section_key)
-            path.write_text(json.dumps(data), encoding="utf-8")
+            existing = {}
+            if path.exists():
+                try:
+                    for item in json.loads(path.read_text(encoding="utf-8")):
+                        rk = item.get("rating_key", "")
+                        if rk:
+                            existing[rk] = item
+                except Exception:
+                    pass  # Corrupt cache — start fresh
+
+            for d in show_dicts:
+                rk = d.get("rating_key", "")
+                if rk:
+                    existing[rk] = d
+
+            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
         except Exception:
             logger.warning("Failed to save shows cache", exc_info=True)
 
@@ -2907,11 +3007,25 @@ class PlexLibrary(QObject):
 
         self._account = PlexAccount(token)
         server_url = self._resolve_server_url()
-        if not server_url:
-            self._client = None
-            self._server_url = ""
-            logger.info("PlexLibrary: could not resolve server URL")
-            return
+        if server_url:
+            # Cache for offline startup
+            if server_url != self._config.plex_server_url:
+                self._config.set_plex_server_url(server_url)
+        else:
+            server_url = self._config.plex_server_url
+            if server_url:
+                logger.info(
+                    "PlexLibrary: plex.tv unreachable, using cached server URL: %s", server_url
+                )
+                if not self._all_server_urls:
+                    self._all_server_urls = [server_url]
+            else:
+                self._client = None
+                self._server_url = ""
+                logger.info(
+                    "PlexLibrary: could not resolve server URL and no cached URL available"
+                )
+                return
 
         # If a user is selected, switch to get a user-specific token.
         # Cache the result to avoid hammering the API on every refresh().

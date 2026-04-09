@@ -22,7 +22,7 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,043 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,062 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
@@ -37,8 +37,13 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,043 tests pas
 - **Cache-first offline display + unified toast errors (Task 012):** Network failure no longer blocks browsing cached libraries. `sectionLoadFailed` signal emitted on network exception; `_worker_refresh` pre-emits cached libraries/on-deck. Error banners removed from WatchScreen and ListenScreen — all errors route to toast. `plexError` now delivered cross-thread via `QMetaObject.invokeMethod` trampoline. ListenScreen gained toast infrastructure.
 - **Gamepad suppression for all external launchers (Task 004):** `setMpvActive` renamed to `setExternalAppActive` in `gamepad.py`. Wired to all four launchers (emulators, browser, Moonlight, MPV) — prevents stuck-scroll bug from auto-repeat timers firing into restored UI.
 - **WatchScreen inline refresh (Task 005):** Refresh row moved into `libraryList` as last sentinel entry (matches ListenScreen pattern). Removed standalone `refreshItem`, manual focus wiring, and 96px bottom margin.
-
-**Known issue:** Plex offline cache may still not display correctly in all scenarios — needs further investigation and testing.
+- **Plex offline cache overhaul (Tasks 001–003):**
+  - Cached server URL in `config.json` so `PlexClient` can be created even when plex.tv is unreachable (local server is still reachable).
+  - Cache-first `selectLibrary()`: always loads movies/shows/artists from disk cache synchronously, then backfills from network. Works even when `_client is None`.
+  - Incremental merge-by-`rating_key` cache saves: every page merges into existing cache (dict snapshot on main thread, disk I/O on `_cache_executor`). A full cache is never overwritten by a partial load.
+  - Poster pre-resolve: `_resolve_cached_posters()` checks poster disk cache when loading from JSON cache, preventing unnecessary `_poster_executor` submissions.
+  - `sectionLoadFailed` emitted when `_client is None` so QML shows offline toast.
+  - Empty network responses `([], 0)` from `get_library_items` (soft failure after retry exhaustion) no longer overwrite cached models — treated as `sectionLoadFailed` in `_worker_load_section`, `_worker_load_more_movies`, and `_worker_load_more_shows`.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

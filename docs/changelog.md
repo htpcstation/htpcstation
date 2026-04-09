@@ -4,9 +4,9 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
-## CP36 — UI Redesign + Plex cache/offline fixes
+## CP36 — UI Redesign + Plex cache/offline fixes + offline cache overhaul
 
-Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-context-button-keycodes/` (004–005, 010–012)
+Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-context-button-keycodes/` (004–005, 010–012), `misc/coding-team/plex-offline-cache/` (001–003)
 
 - Theme foundation: neutral palette (#111111/#1c1c1c/#2a2a2a), Liberation Sans, runtime accent/focus ring colors, rounder focus rings (radius 10)
 - Focus scale animation (1.05×, 120ms OutCubic) on all focusable delegates across 22 QML files
@@ -17,7 +17,8 @@ Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-
 - Cache-first offline: sectionLoadFailed signal, _worker_refresh pre-emits cache, plexError cross-thread trampoline, unified toast errors (error banners removed)
 - Gamepad suppression wired to all external launchers (setMpvActive → setExternalAppActive); fixes stuck-scroll bug
 - WatchScreen Refresh moved inline as last ListView sentinel entry (matches ListenScreen pattern)
-- 2,043 tests passing (was 2,017)
+- Plex offline cache overhaul: cached server URL for offline client creation, cache-first selectLibrary (synchronous cache load + network backfill), incremental merge-by-rating_key cache saves (every page, never overwrites full cache with partial), poster pre-resolve from disk cache, empty network response ([], 0) guard on all worker functions
+- 2,062 tests passing (was 2,017)
 
 ---
 

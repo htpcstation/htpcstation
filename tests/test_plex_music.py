@@ -1461,7 +1461,7 @@ def _make_artists(n: int = 2) -> list:
 
 class TestSaveArtistsCache:
     def test_writes_valid_json_with_correct_fields(self, tmp_path) -> None:
-        """_save_artists_cache writes a JSON file with all expected fields."""
+        """_merge_and_write_artists_cache writes a JSON file with all expected fields."""
         import json as _json
 
         lib = _make_lib()
@@ -1470,7 +1470,8 @@ class TestSaveArtistsCache:
         # _PLEX_CACHE_DIR is already redirected to tmp_path / "plex_cache"
         # by the isolate_plex_cache autouse fixture in conftest.py
         artists = _make_artists(2)
-        lib._save_artists_cache(artists)
+        artist_dicts = [lib._artist_to_dict(a) for a in artists]
+        lib._merge_and_write_artists_cache(artist_dicts)
 
         cache_path = tmp_path / "plex_cache" / "artists_cache_3.json"
         assert cache_path.exists()
@@ -1485,20 +1486,20 @@ class TestSaveArtistsCache:
         assert data[0]["poster_local"] == "file:///cache/0.jpg"
 
     def test_writes_empty_list_for_no_artists(self, tmp_path) -> None:
-        """_save_artists_cache writes an empty JSON array when given no artists."""
+        """_merge_and_write_artists_cache writes an empty JSON array when given no artists."""
         import json as _json
 
         lib = _make_lib()
         lib._current_section_key = "3"
 
-        lib._save_artists_cache([])
+        lib._merge_and_write_artists_cache([])
 
         cache_path = tmp_path / "plex_cache" / "artists_cache_3.json"
         data = _json.loads(cache_path.read_text(encoding="utf-8"))
         assert data == []
 
     def test_does_not_raise_on_write_error(self, tmp_path, monkeypatch) -> None:
-        """_save_artists_cache silently swallows write errors."""
+        """_merge_and_write_artists_cache silently swallows write errors."""
         lib = _make_lib()
         lib._current_section_key = "3"
 
@@ -1512,7 +1513,8 @@ class TestSaveArtistsCache:
         monkeypatch.setattr("backend.plex_library._PLEX_CACHE_DIR", blocker)
 
         # Should not raise
-        lib._save_artists_cache(_make_artists(1))
+        artists = _make_artists(1)
+        lib._merge_and_write_artists_cache([lib._artist_to_dict(a) for a in artists])
 
 
 class TestLoadArtistsCache:
@@ -2036,8 +2038,12 @@ class TestWorkerLoadSectionArtistCache:
             }
         ]
 
-    def test_emits_artistsReady_twice_when_cache_exists(self, tmp_path) -> None:
-        """When a cache file exists, _artistsReady is emitted once from cache and once from API."""
+    def test_emits_artistsReady_once_from_network_when_cache_exists(self, tmp_path) -> None:
+        """Cache is now loaded in selectLibrary(), not _worker_load_section().
+
+        Even when a cache file exists, _worker_load_section emits _artistsReady
+        exactly once — only from the network result.
+        """
         import json as _json
 
         lib = self._make_lib_with_section("3")
@@ -2065,11 +2071,9 @@ class TestWorkerLoadSectionArtistCache:
 
         lib._worker_load_section(mock_client, "3", "artist")
 
-        assert len(emitted) == 2, f"Expected 2 emissions, got {len(emitted)}"
-        # First emission is from cache
-        assert emitted[0][0].title == "Cached Artist"
-        # Second emission is from API
-        assert emitted[1][0].title == "Fresh Artist"
+        # Only the network emission fires — cache is now loaded in selectLibrary()
+        assert len(emitted) == 1, f"Expected 1 emission, got {len(emitted)}"
+        assert emitted[0][0].title == "Fresh Artist"
 
     def test_emits_artistsReady_once_when_no_cache(self, tmp_path) -> None:
         """When no cache file exists, _artistsReady is emitted only once (from API)."""

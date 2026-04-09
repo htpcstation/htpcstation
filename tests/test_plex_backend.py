@@ -858,8 +858,8 @@ class TestConfigPlexProperties:
         assert saved["plex"]["server_id"] == "srv1"
         assert saved["plex"]["user_id"] == 7
 
-    def test_old_config_with_server_url_does_not_crash(self, tmp_path: Path) -> None:
-        """Backward compat: old config files with server_url field load without error."""
+    def test_config_with_server_url_loads_correctly(self, tmp_path: Path) -> None:
+        """server_url in config is loaded into plex_server_url."""
         from backend.config import Config
 
         config_file = tmp_path / "config.json"
@@ -872,9 +872,9 @@ class TestConfigPlexProperties:
              patch("backend.config.CONFIG_DIR", tmp_path):
             config = Config()
 
-        # Old server_url is ignored; token is still loaded
         assert config.plex_token == "tok"
         assert config.plex_server_id is None
+        assert config.plex_server_url == "http://192.168.0.2:32400"
 
     def test_plex_server_id_and_user_id_persistence(self, tmp_path: Path) -> None:
         """set_plex_server_id and set_plex_user_id persist to config file."""
@@ -892,6 +892,29 @@ class TestConfigPlexProperties:
         saved = json.loads(config_file.read_text(encoding="utf-8"))
         assert saved["plex"]["server_id"] == "machine-abc"
         assert saved["plex"]["user_id"] == 99
+
+    def test_set_plex_server_url_persists(self, tmp_path: Path) -> None:
+        """set_plex_server_url strips whitespace and persists to config file."""
+        from backend.config import Config
+
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps({}), encoding="utf-8")
+
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config = Config()
+            assert config.plex_server_url == ""
+            config.set_plex_server_url("  http://192.168.0.2:32400  ")
+            assert config.plex_server_url == "http://192.168.0.2:32400"
+
+        saved = json.loads(config_file.read_text(encoding="utf-8"))
+        assert saved["plex"]["server_url"] == "http://192.168.0.2:32400"
+
+        # Reload from disk confirms round-trip
+        with patch("backend.config.CONFIG_FILE", config_file), \
+             patch("backend.config.CONFIG_DIR", tmp_path):
+            config2 = Config()
+        assert config2.plex_server_url == "http://192.168.0.2:32400"
 
 
 # ---------------------------------------------------------------------------
@@ -2541,6 +2564,7 @@ class TestResolveServerUrl:
             config.plex_server_id = "server123"
             config.plex_token = "tok"
             config.plex_user_id = None
+            config.plex_server_url = ""
             lib = PlexLibrary(config)
         return lib
 
@@ -4336,6 +4360,141 @@ class TestSetupClientPassesFallbackUrls:
 
 
 # ---------------------------------------------------------------------------
+# PlexLibrary._setup_client — server URL caching (Task 001)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupClientServerUrlCaching:
+    """_setup_client caches the server URL and falls back to cache when offline."""
+
+    def test_resolved_url_is_cached(self) -> None:
+        """When _resolve_server_url succeeds, the URL is persisted via set_plex_server_url."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                ],
+            }
+        ]
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            config.plex_server_url = ""
+            PlexLibrary(config)
+
+        config.set_plex_server_url.assert_called_once_with("http://192.168.0.2:32400")
+
+    def test_cached_url_not_written_when_unchanged(self) -> None:
+        """set_plex_server_url is not called if the resolved URL matches the cached value."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                ],
+            }
+        ]
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            config.plex_server_url = "http://192.168.0.2:32400"
+            PlexLibrary(config)
+
+        config.set_plex_server_url.assert_not_called()
+
+    def test_cached_url_used_when_plex_tv_unreachable(self) -> None:
+        """When _resolve_server_url returns None, the cached URL is used to create a client."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        # get_resources returns empty — simulates plex.tv unreachable
+        mock_account.get_resources.return_value = []
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient") as mock_client_cls, \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            config.plex_server_url = "http://192.168.0.2:32400"
+            lib = PlexLibrary(config)
+
+        # Client should be created using the cached URL
+        mock_client_cls.assert_called_once_with(
+            "http://192.168.0.2:32400", "tok", client_id=config.plex_client_id
+        )
+        assert lib._server_url == "http://192.168.0.2:32400"
+        assert lib._all_server_urls == ["http://192.168.0.2:32400"]
+
+    def test_no_client_when_plex_tv_unreachable_and_no_cache(self) -> None:
+        """When plex.tv is unreachable and no cached URL exists, client is None."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = []
+
+        mock_account_cls = MagicMock()
+        mock_account_cls.return_value = mock_account
+
+        with patch("backend.plex_library.PlexClient") as mock_client_cls, \
+             patch("backend.plex_library.PlexAccount", mock_account_cls), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            config.plex_server_url = ""
+            lib = PlexLibrary(config)
+
+        mock_client_cls.assert_not_called()
+        assert lib._client is None
+        assert lib._server_url == ""
+
+
+# ---------------------------------------------------------------------------
 # PlexLibrary._on_plex_error — triggers reconnect on NETWORK (Task 006)
 # ---------------------------------------------------------------------------
 
@@ -5225,7 +5384,7 @@ class TestOnDeckDiskCache:
 
 
 class TestMoviesDiskCache:
-    """_save_movies_cache / _load_movies_cache round-trip."""
+    """_merge_and_write_movies_cache / _load_movies_cache round-trip."""
 
     def _make_movie(self, rating_key="1", title="Test Movie"):
         from backend.plex_models import PlexMovie
@@ -5249,11 +5408,18 @@ class TestMoviesDiskCache:
             poster_local="file:///tmp/poster.jpg",
         )
 
+    def _save_movies(self, lib, section_key: str, movies: list, cache_dir) -> None:
+        """Helper: snapshot movies to dicts then write cache synchronously."""
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            movie_dicts = [lib._movie_to_dict(m) for m in movies]
+            lib._merge_and_write_movies_cache(section_key, movie_dicts)
+
     def test_save_and_load_round_trip(self, tmp_path: Path) -> None:
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         movies = [self._make_movie("1", "Movie One"), self._make_movie("2", "Movie Two")]
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_movies_cache("4", movies)
+        self._save_movies(lib, "4", movies, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             loaded = lib._load_movies_cache("4")
 
         assert loaded is not None
@@ -5296,11 +5462,12 @@ class TestMoviesDiskCache:
     def test_cache_is_section_key_scoped(self, tmp_path: Path) -> None:
         """Movies caches for different section keys are independent."""
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         movies_4 = [self._make_movie("1", "Movie A")]
         movies_5 = [self._make_movie("2", "Movie B")]
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_movies_cache("4", movies_4)
-            lib._save_movies_cache("5", movies_5)
+        self._save_movies(lib, "4", movies_4, cache_dir)
+        self._save_movies(lib, "5", movies_5, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             loaded_4 = lib._load_movies_cache("4")
             loaded_5 = lib._load_movies_cache("5")
 
@@ -5313,8 +5480,40 @@ class TestMoviesDiskCache:
             path = lib._movies_cache_path("42")
         assert path.name == "movies_cache_42.json"
 
+    def test_merge_preserves_existing_entries(self, tmp_path: Path) -> None:
+        """_merge_and_write_movies_cache merges new items with existing cache."""
+        lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
+        page1 = [self._make_movie("1", "Movie One")]
+        page2 = [self._make_movie("2", "Movie Two")]
+        self._save_movies(lib, "4", page1, cache_dir)
+        self._save_movies(lib, "4", page2, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            loaded = lib._load_movies_cache("4")
+
+        assert loaded is not None
+        assert len(loaded) == 2
+        titles = {m.title for m in loaded}
+        assert "Movie One" in titles
+        assert "Movie Two" in titles
+
+    def test_merge_updates_existing_entry(self, tmp_path: Path) -> None:
+        """_merge_and_write_movies_cache updates an existing entry by rating_key."""
+        lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
+        original = [self._make_movie("1", "Old Title")]
+        updated = [self._make_movie("1", "New Title")]
+        self._save_movies(lib, "4", original, cache_dir)
+        self._save_movies(lib, "4", updated, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            loaded = lib._load_movies_cache("4")
+
+        assert loaded is not None
+        assert len(loaded) == 1
+        assert loaded[0].title == "New Title"
+
     def test_on_movies_ready_saves_cache_on_first_page(self, tmp_path: Path) -> None:
-        """_on_movies_ready saves cache only on the first page (_movies_loaded == 0)."""
+        """_on_movies_ready saves cache on the first page (_movies_loaded == 0)."""
         lib = _make_lib_with_tmp(tmp_path)
         lib._client = None  # prevent poster fetch attempts
         lib._movies_loaded = 0
@@ -5323,26 +5522,44 @@ class TestMoviesDiskCache:
 
         with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
             lib._on_movies_ready(movies, 1)
+            lib._cache_executor.shutdown(wait=True)
             loaded = lib._load_movies_cache("4")
 
         assert loaded is not None
         assert len(loaded) == 1
         assert loaded[0].title == "Movie One"
 
-    def test_on_movies_ready_does_not_save_cache_on_subsequent_pages(self, tmp_path: Path) -> None:
-        """_on_movies_ready does NOT save cache on subsequent pages."""
+    def test_on_movies_ready_saves_cache_on_subsequent_pages(self, tmp_path: Path) -> None:
+        """_on_movies_ready saves cache on every page, merging with existing data."""
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         lib._client = None
-        lib._movies_loaded = 50  # simulate second page
         lib._current_section_key = "4"
-        movies = [self._make_movie("51", "Movie 51")]
+        lib._movies_total = 100
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._on_movies_ready(movies, 100)
+        # First page
+        lib._movies_loaded = 0
+        page1 = [self._make_movie("1", "Movie One")]
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._on_movies_ready(page1, 100)
+            lib._cache_executor.shutdown(wait=True)
+
+        # Second page
+        lib._movies_loaded = 1
+        page2 = [self._make_movie("2", "Movie Two")]
+        # Re-create executor after shutdown
+        from concurrent.futures import ThreadPoolExecutor
+        lib._cache_executor = ThreadPoolExecutor(max_workers=1)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._on_movies_ready(page2, 100)
+            lib._cache_executor.shutdown(wait=True)
             loaded = lib._load_movies_cache("4")
 
-        # Cache should not exist (no first-page save happened)
-        assert loaded is None
+        assert loaded is not None
+        assert len(loaded) == 2
+        titles = {m.title for m in loaded}
+        assert "Movie One" in titles
+        assert "Movie Two" in titles
 
     def test_on_all_caches_ready_replaces_movies_model(self, tmp_path: Path) -> None:
         """_on_movies_cache_ready populates the movies model from startup cache data."""
@@ -5360,29 +5577,34 @@ class TestMoviesDiskCache:
         assert lib._movies_loaded == 0
 
     def test_worker_load_section_does_not_emit_cache(self, tmp_path: Path) -> None:
-        """_worker_load_section no longer emits cache — startup cache handles that."""
+        """_worker_load_section no longer emits cache — startup cache handles that.
+
+        When get_library_items returns ([], 0) (soft failure), the worker
+        emits sectionLoadFailed instead of overwriting cached data with nothing.
+        """
         lib = _make_lib_with_tmp(tmp_path)
         movies = [self._make_movie("1", "Cached Movie")]
-
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_movies_cache("4", movies)
+        cache_dir = tmp_path / "plex_cache"
+        self._save_movies(lib, "4", movies, cache_dir)
 
         network_signals: list = []
         lib._moviesReady.connect(lambda m, t: network_signals.append(m))
+        fail_signals: list = []
+        lib.sectionLoadFailed.connect(lambda: fail_signals.append(True))
 
         mock_client = MagicMock()
         mock_client.get_library_items.return_value = ([], 0)
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             lib._worker_load_section(mock_client, "4", "movie")
 
-        # Only the network signal fires (with empty result), no cache signal
-        assert len(network_signals) == 1
-        assert network_signals[0] == []
+        # Empty result treated as failure — no model overwrite
+        assert len(network_signals) == 0
+        assert len(fail_signals) == 1
 
 
 class TestShowsDiskCache:
-    """_save_shows_cache / _load_shows_cache round-trip."""
+    """_merge_and_write_shows_cache / _load_shows_cache round-trip."""
 
     def _make_show(self, rating_key="1", title="Test Show"):
         from backend.plex_models import PlexShow
@@ -5403,11 +5625,18 @@ class TestShowsDiskCache:
             poster_local="file:///tmp/show_poster.jpg",
         )
 
+    def _save_shows(self, lib, section_key: str, shows: list, cache_dir) -> None:
+        """Helper: snapshot shows to dicts then write cache synchronously."""
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            show_dicts = [lib._show_to_dict(s) for s in shows]
+            lib._merge_and_write_shows_cache(section_key, show_dicts)
+
     def test_save_and_load_round_trip(self, tmp_path: Path) -> None:
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         shows = [self._make_show("1", "Show One"), self._make_show("2", "Show Two")]
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_shows_cache("3", shows)
+        self._save_shows(lib, "3", shows, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             loaded = lib._load_shows_cache("3")
 
         assert loaded is not None
@@ -5447,11 +5676,12 @@ class TestShowsDiskCache:
     def test_cache_is_section_key_scoped(self, tmp_path: Path) -> None:
         """Shows caches for different section keys are independent."""
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         shows_3 = [self._make_show("1", "Show A")]
         shows_6 = [self._make_show("2", "Show B")]
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_shows_cache("3", shows_3)
-            lib._save_shows_cache("6", shows_6)
+        self._save_shows(lib, "3", shows_3, cache_dir)
+        self._save_shows(lib, "6", shows_6, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             loaded_3 = lib._load_shows_cache("3")
             loaded_6 = lib._load_shows_cache("6")
 
@@ -5464,8 +5694,25 @@ class TestShowsDiskCache:
             path = lib._shows_cache_path("99")
         assert path.name == "shows_cache_99.json"
 
+    def test_merge_preserves_existing_entries(self, tmp_path: Path) -> None:
+        """_merge_and_write_shows_cache merges new items with existing cache."""
+        lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
+        page1 = [self._make_show("1", "Show One")]
+        page2 = [self._make_show("2", "Show Two")]
+        self._save_shows(lib, "3", page1, cache_dir)
+        self._save_shows(lib, "3", page2, cache_dir)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            loaded = lib._load_shows_cache("3")
+
+        assert loaded is not None
+        assert len(loaded) == 2
+        titles = {s.title for s in loaded}
+        assert "Show One" in titles
+        assert "Show Two" in titles
+
     def test_on_shows_ready_saves_cache_on_first_page(self, tmp_path: Path) -> None:
-        """_on_shows_ready saves cache only on the first page (_shows_loaded == 0)."""
+        """_on_shows_ready saves cache on the first page (_shows_loaded == 0)."""
         lib = _make_lib_with_tmp(tmp_path)
         lib._client = None
         lib._shows_loaded = 0
@@ -5474,25 +5721,43 @@ class TestShowsDiskCache:
 
         with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
             lib._on_shows_ready(shows, 1)
+            lib._cache_executor.shutdown(wait=True)
             loaded = lib._load_shows_cache("3")
 
         assert loaded is not None
         assert len(loaded) == 1
         assert loaded[0].title == "Show One"
 
-    def test_on_shows_ready_does_not_save_cache_on_subsequent_pages(self, tmp_path: Path) -> None:
-        """_on_shows_ready does NOT save cache on subsequent pages."""
+    def test_on_shows_ready_saves_cache_on_subsequent_pages(self, tmp_path: Path) -> None:
+        """_on_shows_ready saves cache on every page, merging with existing data."""
         lib = _make_lib_with_tmp(tmp_path)
+        cache_dir = tmp_path / "plex_cache"
         lib._client = None
-        lib._shows_loaded = 50  # simulate second page
         lib._current_section_key = "3"
-        shows = [self._make_show("51", "Show 51")]
+        lib._shows_total = 100
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._on_shows_ready(shows, 100)
+        # First page
+        lib._shows_loaded = 0
+        page1 = [self._make_show("1", "Show One")]
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._on_shows_ready(page1, 100)
+            lib._cache_executor.shutdown(wait=True)
+
+        # Second page
+        lib._shows_loaded = 1
+        page2 = [self._make_show("2", "Show Two")]
+        from concurrent.futures import ThreadPoolExecutor
+        lib._cache_executor = ThreadPoolExecutor(max_workers=1)
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._on_shows_ready(page2, 100)
+            lib._cache_executor.shutdown(wait=True)
             loaded = lib._load_shows_cache("3")
 
-        assert loaded is None
+        assert loaded is not None
+        assert len(loaded) == 2
+        titles = {s.title for s in loaded}
+        assert "Show One" in titles
+        assert "Show Two" in titles
 
     def test_on_all_caches_ready_replaces_shows_model(self, tmp_path: Path) -> None:
         """_on_shows_cache_ready populates the shows model from startup cache data."""
@@ -5510,25 +5775,260 @@ class TestShowsDiskCache:
         assert lib._shows_loaded == 0
 
     def test_worker_load_section_does_not_emit_cache(self, tmp_path: Path) -> None:
-        """_worker_load_section no longer emits cache — startup cache handles that."""
+        """_worker_load_section no longer emits cache — startup cache handles that.
+
+        When get_library_items returns ([], 0) (soft failure), the worker
+        emits sectionLoadFailed instead of overwriting cached data with nothing.
+        """
         lib = _make_lib_with_tmp(tmp_path)
         shows = [self._make_show("1", "Cached Show")]
-
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_shows_cache("3", shows)
+        cache_dir = tmp_path / "plex_cache"
+        self._save_shows(lib, "3", shows, cache_dir)
 
         network_signals: list = []
         lib._showsReady.connect(lambda s, t: network_signals.append(s))
+        fail_signals: list = []
+        lib.sectionLoadFailed.connect(lambda: fail_signals.append(True))
 
         mock_client = MagicMock()
         mock_client.get_library_items.return_value = ([], 0)
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
             lib._worker_load_section(mock_client, "3", "show")
 
-        # Only the network signal fires (with empty result), no cache signal
-        assert len(network_signals) == 1
-        assert network_signals[0] == []
+        # Empty result treated as failure — no model overwrite
+        assert len(network_signals) == 0
+        assert len(fail_signals) == 1
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary.selectLibrary — cache-first loading (Task 002)
+# ---------------------------------------------------------------------------
+
+
+class TestSelectLibraryCacheFirst:
+    """selectLibrary() emits cached data immediately on main thread."""
+
+    def _make_movie(self, rating_key="1", title="Test Movie"):
+        from backend.plex_models import PlexMovie
+        return PlexMovie(
+            rating_key=rating_key,
+            title=title,
+            year=2020,
+            summary="A test movie.",
+            content_rating="PG-13",
+            audience_rating=7.5,
+            thumb_path="",
+            art_path="",
+            genres=[],
+            directors=[],
+            cast=[],
+            duration_ms=7200000,
+            poster_local="",
+        )
+
+    def _make_show(self, rating_key="1", title="Test Show"):
+        from backend.plex_models import PlexShow
+        return PlexShow(
+            rating_key=rating_key,
+            title=title,
+            year=2019,
+            summary="A test show.",
+            content_rating="TV-MA",
+            audience_rating=9.0,
+            thumb_path="",
+            art_path="",
+            genres=[],
+            cast=[],
+            child_count=3,
+            leaf_count=30,
+            viewed_leaf_count=15,
+            poster_local="",
+        )
+
+    def _save_movies(self, lib, section_key: str, movies: list, cache_dir) -> None:
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            dicts = [lib._movie_to_dict(m) for m in movies]
+            lib._merge_and_write_movies_cache(section_key, dicts)
+
+    def _save_shows(self, lib, section_key: str, shows: list, cache_dir) -> None:
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            dicts = [lib._show_to_dict(s) for s in shows]
+            lib._merge_and_write_shows_cache(section_key, dicts)
+
+    def test_select_library_movie_emits_cache_before_network(self, tmp_path: Path) -> None:
+        """selectLibrary() populates movies model from cache before submitting network fetch."""
+        lib = _make_lib_with_tmp(tmp_path)
+        movies = [self._make_movie("1", "Cached Movie")]
+        cache_dir = tmp_path / "plex_cache"
+        self._save_movies(lib, "4", movies, cache_dir)
+
+        lib._libraries_model.set_items([{"key": "4", "title": "Movies", "type": "movie"}])
+        lib._executor.submit = MagicMock()  # type: ignore[method-assign]
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib.selectLibrary("4")
+
+        # Model is populated from cache synchronously before network fetch is submitted
+        assert lib._movies_model.rowCount() == 1
+        from backend.plex_library import PlexMovieListModel
+        idx = lib._movies_model.index(0, 0)
+        assert lib._movies_model.data(idx, PlexMovieListModel.TitleRole) == "Cached Movie"
+        # Network worker should still be submitted (client is available)
+        lib._executor.submit.assert_called_once()
+
+    def test_select_library_show_emits_cache_before_network(self, tmp_path: Path) -> None:
+        """selectLibrary() populates shows model from cache before submitting network fetch."""
+        lib = _make_lib_with_tmp(tmp_path)
+        shows = [self._make_show("1", "Cached Show")]
+        cache_dir = tmp_path / "plex_cache"
+        self._save_shows(lib, "3", shows, cache_dir)
+
+        lib._libraries_model.set_items([{"key": "3", "title": "TV Shows", "type": "show"}])
+        lib._executor.submit = MagicMock()  # type: ignore[method-assign]
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib.selectLibrary("3")
+
+        assert lib._shows_model.rowCount() == 1
+        from backend.plex_library import PlexShowListModel
+        idx = lib._shows_model.index(0, 0)
+        assert lib._shows_model.data(idx, PlexShowListModel.TitleRole) == "Cached Show"
+        lib._executor.submit.assert_called_once()
+
+    def test_select_library_no_cache_skips_to_network(self, tmp_path: Path) -> None:
+        """selectLibrary() skips cache population when no cache exists."""
+        lib = _make_lib_with_tmp(tmp_path)
+        lib._libraries_model.set_items([{"key": "4", "title": "Movies", "type": "movie"}])
+        lib._executor.submit = MagicMock()  # type: ignore[method-assign]
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
+            lib.selectLibrary("4")
+
+        # Model remains empty — no cache, no network (executor was mocked)
+        assert lib._movies_model.rowCount() == 0
+        lib._executor.submit.assert_called_once()
+
+    def test_select_library_offline_shows_cache_no_network(self, tmp_path: Path) -> None:
+        """selectLibrary() shows cached data and does not submit network fetch when client is None."""
+        lib = _make_lib_with_tmp(tmp_path)
+        lib._client = None
+        movies = [self._make_movie("1", "Offline Cached Movie")]
+        cache_dir = tmp_path / "plex_cache"
+        self._save_movies(lib, "4", movies, cache_dir)
+
+        lib._libraries_model.set_items([{"key": "4", "title": "Movies", "type": "movie"}])
+        lib._executor.submit = MagicMock()  # type: ignore[method-assign]
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib.selectLibrary("4")
+
+        # Cache is shown even without a client
+        assert lib._movies_model.rowCount() == 1
+        from backend.plex_library import PlexMovieListModel
+        idx = lib._movies_model.index(0, 0)
+        assert lib._movies_model.data(idx, PlexMovieListModel.TitleRole) == "Offline Cached Movie"
+        # No network fetch submitted
+        lib._executor.submit.assert_not_called()
+
+    def test_select_library_offline_emits_section_load_failed(self, tmp_path: Path) -> None:
+        """selectLibrary() emits sectionLoadFailed when client is None (offline toast)."""
+        lib = _make_lib_with_tmp(tmp_path)
+        lib._client = None
+        movies = [self._make_movie("1", "Offline Cached Movie")]
+        cache_dir = tmp_path / "plex_cache"
+        self._save_movies(lib, "4", movies, cache_dir)
+
+        lib._libraries_model.set_items([{"key": "4", "title": "Movies", "type": "movie"}])
+        failed_signals: list = []
+        lib.sectionLoadFailed.connect(lambda: failed_signals.append(True))
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib.selectLibrary("4")
+
+        assert len(failed_signals) == 1
+
+    def test_select_library_online_does_not_emit_section_load_failed(self, tmp_path: Path) -> None:
+        """selectLibrary() does NOT emit sectionLoadFailed when client is available."""
+        lib = _make_lib_with_tmp(tmp_path)
+        # lib has a valid _client by default (from _make_lib_with_tmp)
+        movies = [self._make_movie("1", "Online Movie")]
+        cache_dir = tmp_path / "plex_cache"
+        self._save_movies(lib, "4", movies, cache_dir)
+
+        lib._libraries_model.set_items([{"key": "4", "title": "Movies", "type": "movie"}])
+        lib._executor.submit = MagicMock()
+        failed_signals: list = []
+        lib.sectionLoadFailed.connect(lambda: failed_signals.append(True))
+
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib.selectLibrary("4")
+
+        assert len(failed_signals) == 0
+
+
+class TestResolveCachedPosters:
+    """_resolve_cached_posters pre-resolves poster_local from disk for cached items."""
+
+    def _make_movie(self, rating_key="1", thumb_path="", poster_local=""):
+        from backend.plex_models import PlexMovie
+        return PlexMovie(
+            rating_key=rating_key,
+            title="Movie",
+            year=2020,
+            thumb_path=thumb_path,
+            poster_local=poster_local,
+        )
+
+    def test_resolves_missing_poster_when_file_exists(self, tmp_path: Path) -> None:
+        """Items with empty poster_local get it resolved if the cached file exists."""
+        lib = _make_lib_with_tmp(tmp_path)
+
+        # Simulate a poster file on disk
+        thumb_path = "/library/metadata/1/thumb/1"
+        poster_file = lib._poster_cache._cache_path(thumb_path)
+        poster_file.parent.mkdir(parents=True, exist_ok=True)
+        poster_file.write_bytes(b"FAKE_IMAGE")
+
+        movie = self._make_movie("1", thumb_path=thumb_path, poster_local="")
+        lib._resolve_cached_posters([movie])
+
+        assert movie.poster_local == poster_file.as_uri()
+
+    def test_skips_item_with_existing_poster_local(self, tmp_path: Path) -> None:
+        """Items that already have poster_local set are not overwritten."""
+        lib = _make_lib_with_tmp(tmp_path)
+        thumb_path = "/library/metadata/1/thumb/1"
+        existing_url = "file:///already/set.jpg"
+        movie = self._make_movie("1", thumb_path=thumb_path, poster_local=existing_url)
+        lib._resolve_cached_posters([movie])
+
+        assert movie.poster_local == existing_url
+
+    def test_skips_item_with_no_thumb_path(self, tmp_path: Path) -> None:
+        """Items without a thumb_path are skipped."""
+        lib = _make_lib_with_tmp(tmp_path)
+        movie = self._make_movie("1", thumb_path="", poster_local="")
+        lib._resolve_cached_posters([movie])
+
+        assert movie.poster_local == ""
+
+    def test_skips_when_cached_file_does_not_exist(self, tmp_path: Path) -> None:
+        """Items are skipped if the poster file is not on disk."""
+        lib = _make_lib_with_tmp(tmp_path)
+        movie = self._make_movie("1", thumb_path="/missing/thumb", poster_local="")
+        lib._resolve_cached_posters([movie])
+
+        assert movie.poster_local == ""
+
+    def test_no_op_when_poster_cache_is_none(self, tmp_path: Path) -> None:
+        """_resolve_cached_posters does nothing when _poster_cache is None."""
+        lib = _make_lib_with_tmp(tmp_path)
+        lib._poster_cache = None
+        movie = self._make_movie("1", thumb_path="/library/metadata/1/thumb/1", poster_local="")
+        lib._resolve_cached_posters([movie])  # Should not raise
+
+        assert movie.poster_local == ""
 
 
 class TestWorkerRefreshLibrariesCache:
@@ -5768,8 +6268,9 @@ class _RemovedWorkerLoadAllCaches:
         emitted: list = []
         lib._allCachesReady.connect(lambda d: emitted.append(d))
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_movies_cache("4", movies)
+        cache_dir = tmp_path / "plex_cache"
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._merge_and_write_movies_cache("4", [lib._movie_to_dict(m) for m in movies])
             lib._save_state_cache("last_movie_section", "4")
             lib._worker_load_all_caches()
 
@@ -5784,8 +6285,9 @@ class _RemovedWorkerLoadAllCaches:
         emitted: list = []
         lib._allCachesReady.connect(lambda d: emitted.append(d))
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_shows_cache("3", shows)
+        cache_dir = tmp_path / "plex_cache"
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._merge_and_write_shows_cache("3", [lib._show_to_dict(s) for s in shows])
             lib._save_state_cache("last_show_section", "3")
             lib._worker_load_all_caches()
 
@@ -5801,8 +6303,9 @@ class _RemovedWorkerLoadAllCaches:
         emitted: list = []
         lib._allCachesReady.connect(lambda d: emitted.append(d))
 
-        with patch("backend.plex_library._PLEX_CACHE_DIR", tmp_path / "plex_cache"):
-            lib._save_movies_cache("4", movies)
+        cache_dir = tmp_path / "plex_cache"
+        with patch("backend.plex_library._PLEX_CACHE_DIR", cache_dir):
+            lib._merge_and_write_movies_cache("4", [lib._movie_to_dict(m) for m in movies])
             # No state file — no last_movie_section
             lib._worker_load_all_caches()
 

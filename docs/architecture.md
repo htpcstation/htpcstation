@@ -347,7 +347,7 @@ Button hint conventions:
     "cores_directory": "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
   },
   "systems": { "gb": { "display_name": "Game Boy", "core": "gambatte_libretro.so", "extensions": [".gb"] } },
-  "plex": { "token": "...", "server_id": "...", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
+  "plex": { "token": "...", "server_id": "...", "server_url": "http://192.168.0.2:32400", "user_id": 0, "player": "mpv", "client_id": "<stable-uuid>" },
   "browser": { "command": "flatpak run com.brave.Browser" },
   "moonlight": { "command": "flatpak run com.moonlight_stream.Moonlight", "host_uuid": "..." },
   "ui": { "video_snap_autoplay": true, "video_snap_delay_ms": 1500, "show_network_indicator": true, "button_layout": "standard", "moonlight_view_mode": "grid", "theme_name": "default", "accent_color": "#e94560", "focus_ring_color": "#e94560" },
@@ -439,6 +439,10 @@ Button hint conventions:
 - **All worker signal connections must use `QueuedConnection`** — PySide6 `AutoConnection` from a Python `ThreadPoolExecutor` thread behaves as `DirectConnection` (not `QueuedConnection`), because executor threads are not `QThread` subclasses. The slot runs on the worker thread, and QML observers never fire. All 11 worker signals in `PlexLibrary.__init__` are connected with explicit `Qt.ConnectionType.QueuedConnection`.
 - **`sectionLoadFailed` signal** — Emitted by `_worker_load_section` when the network call fails after cache has already been emitted. QML uses this to clear `_loading` flags so cached data is visible (not covered by the loading spinner). WatchScreen shows a "Network unavailable" toast on this signal.
 - **`plexError` cross-thread delivery** — `_on_plex_error` runs on the worker thread (via `set_error_callback`). It uses `QMetaObject.invokeMethod` with `QueuedConnection` via a `_emit_plex_error` trampoline slot to ensure delivery on the main thread.
+- **Server URL cached in `config.json`** — `_setup_client()` persists the resolved server URL to `config.plex_server_url` on success and falls back to it when plex.tv is unreachable. The local server is often reachable even without internet.
+- **Cache-first `selectLibrary()`** — Always loads movies/shows/artists from disk cache synchronously (main thread) before submitting the network backfill to the executor. Poster paths pre-resolved via `_resolve_cached_posters()`. When `_client is None`, emits `sectionLoadFailed` for the offline toast and returns.
+- **Incremental cache saves** — `_save_movies_cache`/`_save_shows_cache`/`_save_artists_cache` replaced with merge-by-`rating_key` pattern: `_*_to_dict()` snapshots on main thread, `_merge_and_write_*_cache()` does read-merge-write on `_cache_executor`. Called on every page, not just page 1. Existing entries preserved — a full cache is never overwritten by a partial load.
+- **Empty network response guard** — `get_library_items()` returns `([], 0)` on soft failure (retry exhaustion, no exception). All worker functions (`_worker_load_section`, `_worker_load_more_movies`, `_worker_load_more_shows`) check for this and emit `sectionLoadFailed` instead of overwriting the cached model with nothing.
 - **Sort/genre state is per section key** — `_section_sort: dict[str, str]` and `_section_genre: dict[str, str]` keyed by Plex section key (e.g. `"4"`). Persisted to `plex_cache/state.json` on every sort/filter change. Loaded at startup in `_worker_load_all_caches`. Do not use a single shared `_current_sort` field.
 - **`selectLibrary()` passes current sort** — Lazy fetch on section entry uses `_section_sort.get(section_key, "")` so the user's sort is preserved across navigation.
 - **Poster downloads use `/photo/:/transcode`** — `get_poster_url()` routes through Plex's server-side resize endpoint at 400px wide. `get_authenticated_url()` is for non-poster paths (track streams, etc.) and returns a plain authenticated URL.
