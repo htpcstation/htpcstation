@@ -416,6 +416,13 @@ FocusScope {
                 color: Theme.colorPrimary
                 opacity: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus ? 0.12 : 0.0
                 radius: root.vpx(Theme.focusRingRadius)
+
+                scale: menuDelegate.ListView.isCurrentItem && listenMenu.activeFocus
+                    ? Theme.focusScale : 1.0
+                Behavior on scale {
+                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                }
+
                 Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
             }
 
@@ -907,6 +914,12 @@ FocusScope {
                     color: Theme.colorSecondary
                     opacity: trackDelegate.ListView.isCurrentItem && !trackList._playAllFocused ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
+
+                    scale: trackDelegate.ListView.isCurrentItem && !trackList._playAllFocused && trackList.activeFocus
+                        ? Theme.focusScale : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                    }
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
@@ -1719,6 +1732,12 @@ FocusScope {
                     opacity: recentAlbumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
 
+                    scale: recentAlbumDelegate.ListView.isCurrentItem && recentAlbumsList.activeFocus
+                        ? Theme.focusScale : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                    }
+
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
                     }
@@ -1948,6 +1967,12 @@ FocusScope {
                     color: Theme.colorSecondary
                     opacity: playlistDelegate.ListView.isCurrentItem ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
+
+                    scale: playlistDelegate.ListView.isCurrentItem && playlistsList.activeFocus
+                        ? Theme.focusScale : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                    }
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
@@ -2248,6 +2273,12 @@ FocusScope {
                     color: Theme.colorSecondary
                     opacity: playlistTrackDelegate.ListView.isCurrentItem && !playlistTrackList._playAllFocused ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
+
+                    scale: playlistTrackDelegate.ListView.isCurrentItem && !playlistTrackList._playAllFocused && playlistTrackList.activeFocus
+                        ? Theme.focusScale : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                    }
 
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
@@ -2559,6 +2590,12 @@ FocusScope {
                         color: Theme.colorSecondary
                         opacity: albumDelegate.ListView.isCurrentItem ? 1.0 : 0.0
                         radius: root.vpx(Theme.focusRingRadius)
+
+                        scale: albumDelegate.ListView.isCurrentItem && albumList.activeFocus
+                            ? Theme.focusScale : 1.0
+                        Behavior on scale {
+                            NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                        }
 
                         Behavior on opacity {
                             NumberAnimation { duration: Theme.animDurationFast }

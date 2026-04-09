@@ -328,6 +328,11 @@ FocusScope {
                 width: buttonRow._buttonSize
                 height: buttonRow._buttonSize
 
+                scale: activeFocus ? Theme.focusScale : 1.0
+                Behavior on scale {
+                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                }
+
                 Keys.onPressed: (event) => {
                     if (event.key === Qt.Key_Left) {
                         event.accepted = true

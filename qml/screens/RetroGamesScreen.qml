@@ -126,12 +126,20 @@ FocusScope {
             width: systemList.width
             height: root.vpx(64)
 
+            z: delegateRoot.ListView.isCurrentItem ? 1 : 0
+
             // Highlight background for the focused item
             Rectangle {
                 anchors.fill: parent
                 color: Theme.colorSecondary
                 opacity: delegateRoot.ListView.isCurrentItem ? 1.0 : 0.0
                 radius: root.vpx(Theme.focusRingRadius)
+
+                scale: delegateRoot.ListView.isCurrentItem && systemList.activeFocus
+                    ? Theme.focusScale : 1.0
+                Behavior on scale {
+                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                }
 
                 Behavior on opacity {
                     NumberAnimation { duration: Theme.animDurationFast }

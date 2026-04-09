@@ -262,6 +262,8 @@ FocusScope {
             width: movieGrid.cellWidth
             height: movieGrid.cellHeight
 
+            z: tileRoot.GridView.isCurrentItem && movieGrid.activeFocus ? 1 : 0
+
             // Inner container — slightly inset from the cell to create spacing
             Rectangle {
                 id: tileCard
@@ -273,6 +275,12 @@ FocusScope {
 
                 color: Theme.colorSecondary
                 radius: root.vpx(Theme.focusRingRadius)
+
+                scale: tileRoot.GridView.isCurrentItem && movieGrid.activeFocus
+                    ? Theme.focusScale : 1.0
+                Behavior on scale {
+                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                }
 
                 // Subtle highlight when focused
                 Rectangle {

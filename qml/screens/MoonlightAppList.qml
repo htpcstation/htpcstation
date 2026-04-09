@@ -342,6 +342,12 @@ FocusScope {
                     opacity: rowRoot.ListView.isCurrentItem ? 1.0 : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
 
+                    scale: rowRoot.ListView.isCurrentItem && appList.activeFocus
+                        ? Theme.focusScale : 1.0
+                    Behavior on scale {
+                        NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
+                    }
+
                     Behavior on opacity {
                         NumberAnimation { duration: Theme.animDurationFast }
                     }
