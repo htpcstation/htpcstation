@@ -44,6 +44,9 @@ FocusScope {
         function onShowsModelChanged() {
             showGridView._loading = false
         }
+        function onSectionLoadFailed() {
+            showGridView._loading = false
+        }
     }
 
     // Human-readable sort label for the status bar

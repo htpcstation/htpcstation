@@ -100,40 +100,13 @@ FocusScope {
     property bool _playlistsLoading: false
     property bool _playlistTracksLoading: false
 
-    // Error banner — shown when plex.plexError fires
-    property string _errorMessage: ""
-    property bool _errorPersistent: false   // true = auth error, stays until dismissed
-
-    function _showPlexError(errorType) {
-        switch (errorType) {
-            case "auth":
-                _errorMessage = "Plex sign-in required — go to Settings to sign in"
-                _errorPersistent = true
-                break
-            case "server":
-                _errorMessage = "Plex server unavailable"
-                _errorPersistent = false
-                break
-            case "network":
-                _errorMessage = "Network error — check your connection"
-                _errorPersistent = false
-                break
-            case "not_found":
-                _errorMessage = "Content not found"
-                _errorPersistent = false
-                break
-            default:
-                _errorMessage = "An unexpected error occurred"
-                _errorPersistent = false
-                break
-        }
-        if (!_errorPersistent) errorBannerTimer.restart()
-    }
+    // Toast — shown when plex.plexError fires or section load fails
+    property string _toastText: ""
 
     Timer {
-        id: errorBannerTimer
+        id: toastTimer
         interval: 5000
-        onTriggered: listenScreen._errorMessage = ""
+        onTriggered: listenScreen._toastText = ""
     }
 
     // ── Try to find and select the music library ────────────────────────────
@@ -188,7 +161,35 @@ FocusScope {
         function onLibrariesModelChanged() {
             listenScreen._trySelectMusicLibrary()
         }
-        function onPlexError(errorType) { listenScreen._showPlexError(errorType) }
+        function onPlexError(errorType) {
+            switch (errorType) {
+                case "auth":
+                    listenScreen._toastText = "Plex sign-in required — go to Settings"
+                    break
+                case "server":
+                    listenScreen._toastText = "Plex server unavailable"
+                    break
+                case "network":
+                    listenScreen._toastText = "Network unavailable"
+                    break
+                case "not_found":
+                    listenScreen._toastText = "Content not found"
+                    break
+                default:
+                    listenScreen._toastText = "Plex error"
+                    break
+            }
+            toastTimer.restart()
+        }
+        function onSectionLoadFailed() {
+            listenScreen._loading = false
+            if (plex && plex.artistsModel && plex.artistsModel.count > 0) {
+                listenScreen._toastText = "Network unavailable — showing cached data"
+            } else {
+                listenScreen._toastText = "Network unavailable"
+            }
+            toastTimer.restart()
+        }
 
         function onArtistDetailReady(ratingKey, data) {
             if (ratingKey !== listenScreen._selectedArtistKey) return
@@ -2406,52 +2407,24 @@ FocusScope {
         }
     }
 
-    // ── Error banner ──────────────────────────────────────────────────────────
+    // ── Toast bar ─────────────────────────────────────────────────────────────
     Rectangle {
-        id: errorBanner
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: root.vpx(44)
-        color: listenScreen._errorPersistent ? Theme.colorAccentNegative || "#8B1A1A"
-                                             : Qt.darker(Theme.colorSecondary, 1.4)
-        visible: listenScreen._errorMessage !== ""
-        z: 160
+        id: toastBar
+        anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: root.vpx(32) }
+        width: toastLabel.width + root.vpx(32)
+        height: root.vpx(40)
+        radius: root.vpx(6)
+        color: Theme.colorSecondary
+        visible: listenScreen._toastText !== ""
+        z: 100
 
-        Row {
-            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-            spacing: root.vpx(12)
-
-            Text {
-                text: listenScreen._errorPersistent ? "⚠" : "ℹ"
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                text: listenScreen._errorMessage
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                visible: listenScreen._errorPersistent
-                text: "  [Settings →]"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-
-        // Dismiss on any key press for persistent errors
-        Keys.onPressed: (event) => {
-            if (listenScreen._errorPersistent) {
-                listenScreen._errorMessage = ""
-                event.accepted = true
-            }
+        Text {
+            id: toastLabel
+            anchors.centerIn: parent
+            text: listenScreen._toastText
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeBody)
         }
     }
 

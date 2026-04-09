@@ -224,62 +224,6 @@ FocusScope {
         onTriggered: watchScreen._toastText = ""
     }
 
-    // Error banner — shown when plex.plexError fires
-    property string _errorMessage: ""
-    property bool _errorPersistent: false   // true = auth error, stays until dismissed
-
-    function _showPlexError(errorType) {
-        // During active MPV playback, route transient errors to the toast
-        // instead of the banner (auth errors always use the banner).
-        if (_mpvPlaying && errorType !== "auth") {
-            switch (errorType) {
-                case "server":
-                    _toastText = "Plex server unavailable"
-                    break
-                case "network":
-                    _toastText = "Network error"
-                    break
-                case "not_found":
-                    _toastText = "Content not found"
-                    break
-                default:
-                    _toastText = "Unexpected error"
-                    break
-            }
-            toastTimer.restart()
-            return
-        }
-        switch (errorType) {
-            case "auth":
-                _errorMessage = "Plex sign-in required — go to Settings to sign in"
-                _errorPersistent = true
-                break
-            case "server":
-                _errorMessage = "Plex server unavailable"
-                _errorPersistent = false
-                break
-            case "network":
-                _errorMessage = "Network error — check your connection"
-                _errorPersistent = false
-                break
-            case "not_found":
-                _errorMessage = "Content not found"
-                _errorPersistent = false
-                break
-            default:
-                _errorMessage = "An unexpected error occurred"
-                _errorPersistent = false
-                break
-        }
-        if (!_errorPersistent) errorBannerTimer.restart()
-    }
-
-    Timer {
-        id: errorBannerTimer
-        interval: 5000
-        onTriggered: watchScreen._errorMessage = ""
-    }
-
     Timer {
         id: loadingOverlayTimer
         interval: 400
@@ -304,7 +248,8 @@ FocusScope {
         onTriggered: {
             if (watchScreen._isLoadingContent) {
                 watchScreen._clearLoading()
-                watchScreen._showPlexError("network")
+                watchScreen._toastText = "Network unavailable"
+                toastTimer.restart()
             }
         }
     }
@@ -362,7 +307,32 @@ FocusScope {
             watchScreen._mpvPlaying = false
             watchScreen._clearLoading()
         }
-        function onPlexError(errorType) { watchScreen._showPlexError(errorType) }
+        function onPlexError(errorType) {
+            switch (errorType) {
+                case "auth":
+                    watchScreen._toastText = "Plex sign-in required — go to Settings"
+                    break
+                case "server":
+                    watchScreen._toastText = "Plex server unavailable"
+                    break
+                case "network":
+                    watchScreen._toastText = "Network unavailable"
+                    break
+                case "not_found":
+                    watchScreen._toastText = "Content not found"
+                    break
+                default:
+                    watchScreen._toastText = "Plex error"
+                    break
+            }
+            toastTimer.restart()
+        }
+        function onSectionLoadFailed() {
+            // The content screen clears its own _loading flag.
+            // WatchScreen shows the toast.
+            watchScreen._toastText = "Network unavailable — showing cached data"
+            toastTimer.restart()
+        }
         function onStreamInfoReady(ratingKey, url, viewOffsetMs) {
             if (!watchScreen._isLoadingContent) return  // cancelled or stale
             if (!url) {
@@ -1199,56 +1169,6 @@ FocusScope {
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                 }
-            }
-        }
-    }
-
-    // ── MPV playback handlers ─────────────────────────────────────────────────
-    // ── Error banner ──────────────────────────────────────────────────────────
-    Rectangle {
-        id: errorBanner
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: root.vpx(44)
-        color: watchScreen._errorPersistent ? Theme.colorAccentNegative || "#8B1A1A"
-                                            : Qt.darker(Theme.colorSecondary, 1.4)
-        visible: watchScreen._errorMessage !== ""
-        z: 160
-
-        Row {
-            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-            spacing: root.vpx(12)
-
-            Text {
-                text: watchScreen._errorPersistent ? "⚠" : "ℹ"
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                text: watchScreen._errorMessage
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeBody)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-
-            Text {
-                visible: watchScreen._errorPersistent
-                text: "  [Settings →]"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                anchors.verticalCenter: parent.verticalCenter
-            }
-        }
-
-        // Dismiss on any key press for persistent errors
-        Keys.onPressed: (event) => {
-            if (watchScreen._errorPersistent) {
-                watchScreen._errorMessage = ""
-                event.accepted = true
             }
         }
     }

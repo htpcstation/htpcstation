@@ -45,6 +45,9 @@ FocusScope {
         function onShowsModelChanged() {
             showListView._loading = false
         }
+        function onSectionLoadFailed() {
+            showListView._loading = false
+        }
     }
 
     // Human-readable sort label for the status bar

@@ -49,6 +49,9 @@ FocusScope {
         function onMoviesModelChanged() {
             movieListView._loading = false
         }
+        function onSectionLoadFailed() {
+            movieListView._loading = false
+        }
     }
 
     // Human-readable sort label for the status bar

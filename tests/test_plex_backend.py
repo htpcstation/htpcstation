@@ -4192,8 +4192,13 @@ class TestPlexLibraryErrorCallback:
             assert lib._client._on_error is not None
 
     def test_plex_error_signal_emitted(self) -> None:
-        """Mock client to call _on_plex_error(PlexErrorType.AUTH); verify plexError emitted with 'auth'."""
+        """Mock client to call _on_plex_error(PlexErrorType.AUTH); verify plexError emitted with 'auth'.
+
+        _on_plex_error now uses QMetaObject.invokeMethod with QueuedConnection to
+        ensure cross-thread delivery, so we must process Qt events before checking.
+        """
         from backend.plex_client import PlexErrorType
+        from PySide6.QtCore import QCoreApplication
 
         lib = self._make_lib()
 
@@ -4201,6 +4206,7 @@ class TestPlexLibraryErrorCallback:
         lib.plexError.connect(lambda err: received.append(err))
 
         lib._on_plex_error(PlexErrorType.AUTH)
+        QCoreApplication.processEvents()
 
         assert received == ["auth"]
 
@@ -5526,13 +5532,13 @@ class TestShowsDiskCache:
 
 
 class TestWorkerRefreshLibrariesCache:
-    """_worker_refresh only emits network data (startup cache is handled by _worker_load_all_caches)."""
+    """_worker_refresh pre-emits cached data then emits network data."""
 
     def _make_lib(self, tmp_path):
         return _make_lib_with_tmp(tmp_path)
 
-    def test_worker_refresh_emits_only_network_libraries(self, tmp_path: Path) -> None:
-        """_worker_refresh emits only network data — no cache pre-emit."""
+    def test_worker_refresh_emits_cache_then_network_libraries(self, tmp_path: Path) -> None:
+        """_worker_refresh pre-emits cached libraries, then emits network libraries."""
         lib = self._make_lib(tmp_path)
         libraries = [{"key": "1", "title": "Movies", "type": "movie"}]
 
@@ -5552,9 +5558,10 @@ class TestWorkerRefreshLibrariesCache:
 
         lib._worker_refresh(mock_client)
 
-        # Only one emit — from network (no cache pre-emit in _worker_refresh)
-        assert len(emitted) == 1
-        assert len(emitted[0]) == 2     # network data
+        # Two emits: first from cache, then from network
+        assert len(emitted) == 2
+        assert len(emitted[0]) == 1     # cache data (1 library)
+        assert len(emitted[1]) == 2     # network data (2 libraries)
 
     def test_worker_refresh_skips_cache_emit_when_no_cache(self, tmp_path: Path) -> None:
         """When no libraries cache exists, _worker_refresh only emits network data."""
@@ -5572,7 +5579,7 @@ class TestWorkerRefreshLibrariesCache:
 
         lib._worker_refresh(mock_client)
 
-        assert len(emitted) == 1  # only network data
+        assert len(emitted) == 1  # only network data (no cache to pre-emit)
 
 
 class TestWorkerRefreshOnDeckCache:

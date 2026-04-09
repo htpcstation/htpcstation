@@ -18,9 +18,11 @@ import requests
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QMetaObject,
     QModelIndex,
     QObject,
     Property,
+    Q_ARG,
     Qt,
     Signal,
     Slot,
@@ -475,6 +477,7 @@ class PlexLibrary(QObject):
     currentLibraryChanged = Signal(str)
     myListChanged = Signal(bool)   # True = added, False = removed
     plexError = Signal(str)  # error type string: "auth", "not_found", "server", "network", "unknown"
+    sectionLoadFailed = Signal()   # emitted when _worker_load_section network call fails
     mpvStarted = Signal()
     mpvFinished = Signal()
     mpvPlaybackReady = Signal()  # emitted when first frame is ready (wait_until_playing)
@@ -1994,11 +1997,20 @@ class PlexLibrary(QObject):
 
     def _on_plex_error(self, error_type) -> None:
         """Called on worker thread when a Plex API request fails."""
-        self.plexError.emit(error_type.value)
-        # On network errors, try the next known server connection
+        # Use invokeMethod to ensure delivery on the main thread
+        QMetaObject.invokeMethod(
+            self,
+            "_emit_plex_error",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, error_type.value),
+        )
         if error_type == PlexErrorType.NETWORK and self._client is not None:
             if self._client.try_next_connection():
                 logger.info("PlexLibrary: reconnected to server via fallback URL")
+
+    @Slot(str)
+    def _emit_plex_error(self, error_type: str) -> None:
+        self.plexError.emit(error_type)
 
     # ------------------------------------------------------------------
     # Internal: worker thread functions
@@ -2006,6 +2018,15 @@ class PlexLibrary(QObject):
 
     def _worker_refresh(self, client: PlexClient) -> None:
         """Worker: check availability, fetch libraries and on-deck."""
+        # Emit cached data immediately so the UI is never blank during a slow
+        # or failed network call. onLibrariesModelChanged will clear _refreshing.
+        cached_libraries = self._load_libraries_cache()
+        if cached_libraries:
+            self._librariesReady.emit(cached_libraries, True)
+        cached_ondeck = self._load_ondeck_cache()
+        if cached_ondeck:
+            self._onDeckCacheReady.emit(cached_ondeck)
+
         try:
             identity = client.get_identity()
             machine_id = identity.get("machineIdentifier", "")
@@ -2099,6 +2120,7 @@ class PlexLibrary(QObject):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load section %s: %s", section_key, exc)
+            self.sectionLoadFailed.emit()
             return
 
         if section_type == "movie":

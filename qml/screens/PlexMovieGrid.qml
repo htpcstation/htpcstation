@@ -48,6 +48,9 @@ FocusScope {
         function onMoviesModelChanged() {
             movieGridView._loading = false
         }
+        function onSectionLoadFailed() {
+            movieGridView._loading = false
+        }
     }
 
     // Human-readable sort label for the status bar
