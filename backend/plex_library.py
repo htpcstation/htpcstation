@@ -539,8 +539,6 @@ class PlexLibrary(QObject):
     _showsReady = Signal(list, int)    # (shows, total_size)
     _onDeckReady = Signal(list)
     _onDeckCacheReady  = Signal(list)         # pre-processed on-deck items from disk cache
-    _moviesCacheReady  = Signal(list, str)    # (PlexMovie list, section_key) from disk cache
-    _showsCacheReady   = Signal(list, str)    # (PlexShow list, section_key) from disk cache
     _availabilityReady = Signal(bool)
     _posterReady = Signal(str, int, str)  # (model_type, row, file_url)
     _machineIdentifierReady = Signal(str)
@@ -631,8 +629,6 @@ class PlexLibrary(QObject):
         self._showsReady.connect(self._on_shows_ready,                   Qt.ConnectionType.QueuedConnection)
         self._onDeckReady.connect(self._on_on_deck_ready,                Qt.ConnectionType.QueuedConnection)
         self._onDeckCacheReady.connect(self._on_on_deck_cache_ready,     Qt.ConnectionType.QueuedConnection)
-        self._moviesCacheReady.connect(self._on_movies_cache_ready,      Qt.ConnectionType.QueuedConnection)
-        self._showsCacheReady.connect(self._on_shows_cache_ready,        Qt.ConnectionType.QueuedConnection)
         self._availabilityReady.connect(self._on_availability_ready,     Qt.ConnectionType.QueuedConnection)
         self._posterReady.connect(self._on_poster_ready,                 Qt.ConnectionType.QueuedConnection)
         self._machineIdentifierReady.connect(self._on_machine_identifier_ready, Qt.ConnectionType.QueuedConnection)
@@ -1470,27 +1466,6 @@ class PlexLibrary(QObject):
         """Called on main thread when MPV first frame is ready."""
         if self._mpv_active:
             self.mpvPlaybackReady.emit()
-
-    @Slot(str, result="QVariant")
-    def getArtist(self, rating_key: str) -> dict:
-        """Return full artist details as a dict (synchronous, blocks briefly)."""
-        if self._client is None:
-            return {}
-        data = self._client.get_metadata(rating_key)
-        if not data:
-            return {}
-        artist = parse_artist(data)
-        if artist.thumb_path and self._poster_cache:
-            artist.poster_local = self._poster_cache.get_poster(
-                self._client, artist.thumb_path
-            )
-        return {
-            "ratingKey": artist.rating_key,
-            "title": artist.title,
-            "summary": artist.summary,
-            "genre": artist.genre,
-            "posterLocal": artist.poster_local,
-        }
 
     @Slot(str)
     def fetchArtistPreview(self, rating_key: str) -> None:

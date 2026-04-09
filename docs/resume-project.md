@@ -22,7 +22,7 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,084 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,047 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 

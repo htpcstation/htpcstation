@@ -1,4 +1,4 @@
-"""Tests for Task 001 — Plex music backend.
+"""Tests for Plex music backend.
 
 Covers:
   - parse_artist: full and minimal data
@@ -6,8 +6,10 @@ Covers:
   - parse_track: full data including Media[0].Part[0].key extraction
   - parse_track: missing Media → empty media_key
   - get_libraries: now includes artist-type libraries
-  - PlexLibrary.getArtist: returns correct dict
-  - PlexLibrary.getTrackStreamUrl: returns correct URL with token
+  - PlexLibrary.fetchArtistPreview: async artist metadata fetch
+  - PlexLibrary.fetchArtistDetail: async artist + albums fetch
+  - PlexLibrary.fetchAlbumDetail: async album + tracks fetch
+  - PlexLibrary.fetchRecentAlbums: async recently added albums
   - PlexClient.get_hubs: returns Hub array from API response
 """
 
@@ -406,80 +408,6 @@ class TestGetLibrariesIncludesArtist:
 # ---------------------------------------------------------------------------
 # PlexLibrary.getArtist
 # ---------------------------------------------------------------------------
-
-
-class TestGetArtist:
-    def test_returns_artist_dict_with_expected_keys(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {
-            "ratingKey": "500",
-            "title": "The Beatles",
-            "summary": "Legendary band.",
-            "thumb": "/library/metadata/500/thumb/1",
-            "Genre": [{"tag": "Rock"}, {"tag": "Pop"}],
-        }
-        lib._client = mock_client
-
-        result = lib.getArtist("500")
-
-        assert result["ratingKey"] == "500"
-        assert result["title"] == "The Beatles"
-        assert result["summary"] == "Legendary band."
-        assert result["genre"] == "Rock, Pop"
-        assert "posterLocal" in result
-
-    def test_returns_empty_dict_when_no_client(self) -> None:
-        lib = _make_lib()
-        lib._client = None
-        result = lib.getArtist("500")
-        assert result == {}
-
-    def test_returns_empty_dict_when_metadata_not_found(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {}
-        lib._client = mock_client
-        result = lib.getArtist("999")
-        assert result == {}
-
-    def test_poster_local_populated_when_thumb_path_present(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {
-            "ratingKey": "500",
-            "title": "Artist",
-            "thumb": "/library/metadata/500/thumb/1",
-        }
-        lib._client = mock_client
-
-        mock_cache = MagicMock()
-        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/artist.jpg"
-        lib._poster_cache = mock_cache
-
-        result = lib.getArtist("500")
-
-        mock_cache.get_poster.assert_called_once_with(
-            mock_client, "/library/metadata/500/thumb/1"
-        )
-        assert result["posterLocal"] == "file:///tmp/poster_cache/artist.jpg"
-
-    def test_poster_local_empty_when_no_thumb_path(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {
-            "ratingKey": "501",
-            "title": "No Thumb Artist",
-        }
-        lib._client = mock_client
-
-        mock_cache = MagicMock()
-        lib._poster_cache = mock_cache
-
-        result = lib.getArtist("501")
-
-        mock_cache.get_poster.assert_not_called()
-        assert result["posterLocal"] == ""
 
 
 # ---------------------------------------------------------------------------

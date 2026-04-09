@@ -21,7 +21,10 @@ Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-
 - Server URL probe on startup: _setup_client probes primary URL, falls through to remote/relay if unreachable (enables external network access)
 - Offline sort: sortMovies/sortShows sort in-memory model locally; getMovieGenres/getShowGenres return empty when unavailable (no main-thread block)
 - Async poster pre-resolve: fetchArtistDetail, fetchAlbumDetail, fetchRecentAlbums, and 3 legacy @Slot methods no longer download posters in loops — use disk cache pre-resolve instead
-- 2,084 tests passing (was 2,017)
+- Dead code cleanup: removed 10 sync @Slot methods (getArtist, getStreamInfo, getWatchHistory, getAlbum, getArtistAlbums, getAlbums, getPlaylists, getPlaylistTracks, getTracks, getRecentlyAddedAlbums), 2 dead signals (_moviesCacheReady, _showsCacheReady), and associated test code
+- _setup_client() moved off main thread (eliminates 10-45s UI freeze on startup/refresh); results marshalled via _setupReady signal
+- Async artist preview (fetchArtistPreview + artistPreviewReady signal) replaces blocking getArtist() call during D-pad navigation
+- 2,047 tests passing (was 2,017)
 
 ---
 
