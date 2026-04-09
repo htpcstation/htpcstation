@@ -572,6 +572,7 @@ class PlexLibrary(QObject):
         self._config = config
         self._browser_launcher = browser_launcher
         self._available = False
+        self._setup_complete = False  # True after first _on_setup_ready
         self._current_library = ""
         self._current_section_key = ""
         self._current_section_type = ""
@@ -923,8 +924,11 @@ class PlexLibrary(QObject):
 
         if self._client is None:
             # No server connection — show cached data only (loaded above).
-            # Emit sectionLoadFailed so QML shows offline toast.
-            self.sectionLoadFailed.emit()
+            # Only show the offline toast if setup has completed. During the
+            # startup window (_setup_complete is False), the client hasn't been
+            # created yet — not a network error.
+            if self._setup_complete:
+                self.sectionLoadFailed.emit()
             return
 
         client = self._client
@@ -3077,6 +3081,7 @@ class PlexLibrary(QObject):
 
     def _on_setup_ready(self, result: dict) -> None:
         """Main thread: apply setup results and start data refresh."""
+        self._setup_complete = True
         account = result.get("account")
         if account is not None:
             self._account = account
