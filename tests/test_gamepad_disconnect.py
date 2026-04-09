@@ -39,7 +39,7 @@ def _make_handler(device, ecodes_mock):
 
     manager = MagicMock()
     manager._raw_mode = False
-    manager._mpv_active = False
+    manager._external_active = False
     manager.keys = None
     manager.window = None
 
@@ -94,7 +94,7 @@ class TestRemoveDevice:
 
         manager_obj = MagicMock()
         manager_obj._raw_mode = False
-        manager_obj._mpv_active = False
+        manager_obj._external_active = False
         manager_obj.keys = None
         manager_obj.window = None
 

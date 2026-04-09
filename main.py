@@ -203,8 +203,12 @@ def main() -> None:
 
     launcher.processStarted.connect(_hide_window)
     launcher.processFinished.connect(_show_window)
+    launcher.processStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
+    launcher.processFinished.connect(lambda *_: gamepad_manager.setExternalAppActive(False))
     browser_launcher.processStarted.connect(_hide_window)
     browser_launcher.processFinished.connect(_show_window)
+    browser_launcher.processStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
+    browser_launcher.processFinished.connect(lambda *_: gamepad_manager.setExternalAppActive(False))
     # Steam launches are fire-and-forget — we don't hide or minimize the
     # window.  The game takes focus and HTPC Station sits behind it.  When
     # the game exits, the window manager returns focus to HTPC Station
@@ -213,14 +217,17 @@ def main() -> None:
     # Moonlight streaming: hide the window while streaming, restore when done
     moonlight.processStarted.connect(_hide_window)
     moonlight.processFinished.connect(_show_window)
+    moonlight.processStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
+    moonlight.processFinished.connect(lambda *_: gamepad_manager.setExternalAppActive(False))
 
     # MPV (libmpv, embedded): no hide/show on start — MPV renders inside the Qt
     # window. On playback end, raise and re-activate the window so the HTPC
     # Station UI regains focus (the MPV surface goes blank when playback stops).
-    # Suppress Qt gamepad key injection while MPV is active — MPV handles the
-    # gamepad via SDL; injecting the same events into Qt causes double-handling.
-    plex_library.mpvStarted.connect(lambda: gamepad_manager.setMpvActive(True))
-    plex_library.mpvFinished.connect(lambda: gamepad_manager.setMpvActive(False))
+    # Suppress Qt gamepad key injection while an external app is active — MPV,
+    # emulators, browser kiosk, and Moonlight all handle the gamepad directly;
+    # injecting the same events into Qt causes double-handling.
+    plex_library.mpvStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
+    plex_library.mpvFinished.connect(lambda: gamepad_manager.setExternalAppActive(False))
     plex_library.mpvFinished.connect(_show_window_after_mpv)
 
     # Start+Select combo: kill the browser process (equivalent to Alt+F4).

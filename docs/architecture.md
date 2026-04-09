@@ -24,7 +24,7 @@ htpcstation/
                                        # generate_mapping_js()
     gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode,
                                        # startRawMode/stopRawMode (opens/closes SdlResolver),
-                                       # getDeviceCapabilities(), setMpvActive()
+                                       # getDeviceCapabilities(), setExternalAppActive()
     sdl_resolver.py                    # SdlResolver: ctypes SDL wrapper, probes libSDL2/libSDL3 at
                                        # import, opens SDL joystick on startRawMode, resolves evdev
                                        # events to SDL records via GameControllerDB (compiled into SDL).
@@ -455,6 +455,14 @@ Button hint conventions:
 - **Emit capture signals before `stopRawMode()`** — `stopRawMode()` calls `SdlResolver.close()`, which clears all lookup tables. Any `settings.setHotkeyActionByEvdev/ByAxis()` call that needs to resolve an SDL record must happen before `stopRawMode()`.
 - **Hold-to-skip dual-reporting bug** — In `ControllerMappingDialog`, dual-reporting inputs (D-input triggers) fire an axis event followed by a button event for the same physical press. The axis event starts the hold timer (`_holdSkipCode = axisCode`). The button event (different code) then hits the `else` branch and calls `_recordInput` immediately. Fix: ignore button press events when `_holdSkipCode !== -1`.
 - **`rawInput` emits value=0 for releases** — Raw mode was extended in M6-V2 to emit both press (`value=1`) and release (`value=0`) events for buttons so `ModifierCaptureDialog` can detect tap-vs-hold. The `_handle_button` guard is `if value in (0, 1)` — auto-repeat (`value=2`) is explicitly excluded.
+- **All external app launchers must call `setExternalAppActive()`** —
+  `GamepadManager` suppresses Qt key injection and clears all held-key
+  state when an external app is active. Any launcher that hides the Qt
+  window (emulators, browser kiosk, Moonlight, MPV) must call
+  `setExternalAppActive(True)` on start and `setExternalAppActive(False)`
+  on finish. Omitting this leaves auto-repeat timers running into the
+  restored UI — manifests as a grid/list that scrolls to the bottom and
+  ignores Up input until the gamepad is disconnected.
 
 ### Other
 - **Bundled emoji font** — Qt doesn't reliably use NotoEmoji as fallback. Use text equivalents (❤️→♥, 🎵→♫).
