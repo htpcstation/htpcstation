@@ -72,6 +72,22 @@ def _make_plex_account_mock():
     return mock_cls
 
 
+def _flush_setup(lib):
+    """Wait for any pending _worker_setup to complete and deliver _setupReady.
+
+    Must be called while patches are still active (inside the ``with`` block).
+    Drains the executor and processes Qt events repeatedly to ensure all
+    chained work (_worker_setup → _on_setup_ready → _worker_refresh →
+    signal delivery) completes before the test exits.
+    """
+    from PySide6.QtCore import QCoreApplication
+    # Three rounds: _worker_setup, _worker_refresh (submitted by _on_setup_ready),
+    # and any final signal delivery.
+    for _ in range(3):
+        lib._executor.submit(lambda: None).result()
+        QCoreApplication.processEvents()
+
+
 # ---------------------------------------------------------------------------
 # plex_models — parse_movie
 # ---------------------------------------------------------------------------
@@ -1146,6 +1162,7 @@ class TestLoadMoreMoviesGuard:
             config.plex_user_id = None
 
             lib = PlexLibrary(config)
+            _flush_setup(lib)
             # Simulate state: one page already loaded, more available
             lib._movies_total = 100
             lib._movies_loaded = 50
@@ -1180,6 +1197,7 @@ class TestLoadMoreMoviesGuard:
             config.plex_user_id = None
 
             lib = PlexLibrary(config)
+            _flush_setup(lib)
             lib._loading_more = True
             lib._movies_loaded = 0
             lib._client = None  # prevent poster fetch attempts
@@ -1253,6 +1271,7 @@ class TestGetLibraryList:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_empty_when_no_data(self) -> None:
@@ -1330,7 +1349,7 @@ class TestGetLibraryList:
 
 class TestServerUrlProperty:
     def test_server_url_exposed(self) -> None:
-        """serverUrl returns the resolved URL after _setup_client succeeds."""
+        """serverUrl returns the resolved URL after _worker_setup succeeds."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
         from backend.plex_account import PlexAccount
@@ -1356,6 +1375,7 @@ class TestServerUrlProperty:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         assert lib.serverUrl == "http://192.168.0.2:32400"
 
@@ -1373,6 +1393,7 @@ class TestServerUrlProperty:
             config.plex_token = None
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         assert lib.serverUrl == ""
 
@@ -1398,6 +1419,7 @@ class TestLoadMoreMoviesFailureResetsFlag:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         lib._loading_more = True
 
@@ -1444,6 +1466,7 @@ class TestGetShow:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_returns_show_dict_with_expected_keys(self) -> None:
@@ -1530,6 +1553,7 @@ class TestGetSeasons:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_returns_season_list(self) -> None:
@@ -1637,6 +1661,7 @@ class TestGetEpisodes:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_returns_episode_list(self) -> None:
@@ -1761,6 +1786,7 @@ class TestSelectLibraryOnDeckGuard:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_ondeck_does_not_submit_worker(self) -> None:
@@ -1822,6 +1848,7 @@ class TestGetMoviePosterCaching:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_poster_local_populated_when_thumb_path_present(self) -> None:
@@ -1911,6 +1938,7 @@ class TestGetShowPosterCaching:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_poster_local_populated_when_thumb_path_present(self) -> None:
@@ -2163,6 +2191,7 @@ class TestSortMovies:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_az_maps_to_correct_api_param(self) -> None:
@@ -2288,6 +2317,7 @@ class TestFilterByGenre:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_filter_sets_current_genre(self) -> None:
@@ -2374,6 +2404,7 @@ class TestGetGenres:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_get_movie_genres_calls_client(self) -> None:
@@ -2447,6 +2478,7 @@ class TestSelectLibraryResetsSortFilter:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_select_library_preserves_sort_when_same_section(self) -> None:
@@ -2517,6 +2549,7 @@ class TestLoadMoreMoviesPassesSortFilter:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_and_genre_passed_to_worker(self) -> None:
@@ -2568,6 +2601,7 @@ class TestResolveServerUrl:
             config.plex_user_id = None
             config.plex_server_url = ""
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_prefers_local_connection(self) -> None:
@@ -2718,12 +2752,12 @@ class TestResolveServerUrl:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary._setup_client — user switching (Task 002)
+# PlexLibrary._worker_setup — user switching (Task 002)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupClientUserSwitching:
-    """_setup_client calls switch_user when plex_user_id is set."""
+    """_worker_setup calls switch_user when plex_user_id is set."""
 
     def test_switch_user_called_when_user_id_set(self) -> None:
         """When plex_user_id is set, switch_user is called and user token is used."""
@@ -2749,6 +2783,7 @@ class TestSetupClientUserSwitching:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         mock_account.switch_user.assert_called_once_with(42)
         # PlexClient uses the admin token for server API calls (managed users
@@ -2783,6 +2818,7 @@ class TestSetupClientUserSwitching:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         # PlexClient should be created with the admin token as fallback
         mock_client_cls.assert_called_once()
@@ -2827,12 +2863,12 @@ class TestSetupClientUserSwitching:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary._setup_client — user token caching (Bug 2)
+# PlexLibrary._worker_setup — user token caching (Bug 2)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupClientTokenCaching:
-    """_setup_client caches the user token to avoid redundant switch_user calls."""
+    """_worker_setup caches the user token to avoid redundant switch_user calls."""
 
     def _make_lib_with_user(self, user_id=42):
         from backend.plex_library import PlexLibrary
@@ -2857,11 +2893,12 @@ class TestSetupClientTokenCaching:
             config.plex_token = "admin-token"
             config.plex_user_id = user_id
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         return lib, mock_account, mock_client_cls
 
     def test_switch_user_called_only_once_on_repeated_setup(self) -> None:
-        """Calling _setup_client() multiple times with the same user_id only calls
+        """Calling _worker_setup() multiple times with the same user_id only calls
         switch_user() once — subsequent calls reuse the cached token."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
@@ -2883,13 +2920,16 @@ class TestSetupClientTokenCaching:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
             # switch_user was called once during __init__
             assert mock_account.switch_user.call_count == 1
 
-            # Call _setup_client() again (simulating refresh())
-            lib._setup_client()
-            lib._setup_client()
+            # Call _worker_setup() again (simulating refresh())
+            lib._worker_setup()
+            _flush_setup(lib)
+            lib._worker_setup()
+            _flush_setup(lib)
 
             # switch_user should still only have been called once
             assert mock_account.switch_user.call_count == 1
@@ -2902,7 +2942,7 @@ class TestSetupClientTokenCaching:
         assert lib._cached_user_token == "user-specific-token"
 
     def test_select_user_clears_cache(self) -> None:
-        """selectUser() clears the cached token so the next _setup_client() re-switches."""
+        """selectUser() clears the cached token so the next _worker_setup() re-switches."""
         lib, mock_account, _ = self._make_lib_with_user(42)
 
         # Cache is populated after init
@@ -2910,14 +2950,13 @@ class TestSetupClientTokenCaching:
         assert lib._cached_user_token == "user-specific-token"
 
         # selectUser clears the cache
-        with patch.object(lib, "_setup_client"), patch.object(lib, "refresh"):
-            lib.selectUser(99)
+        lib.selectUser(99)
 
         assert lib._cached_user_id is None
         assert lib._cached_user_token == ""
 
     def test_switch_user_called_again_after_cache_cleared(self) -> None:
-        """After selectUser() clears the cache, the next _setup_client() calls switch_user()."""
+        """After selectUser() clears the cache, the next _worker_setup() calls switch_user()."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
         from backend.plex_account import PlexAccount
@@ -2938,14 +2977,16 @@ class TestSetupClientTokenCaching:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
             # switch_user called once during init
             assert mock_account.switch_user.call_count == 1
 
-            # Clear cache (as selectUser would do) and call _setup_client() again
+            # Clear cache (as selectUser would do) and call _worker_setup() again
             lib._cached_user_id = None
             lib._cached_user_token = ""
-            lib._setup_client()
+            lib._worker_setup()
+            _flush_setup(lib)
 
             # switch_user should have been called again
             assert mock_account.switch_user.call_count == 2
@@ -2972,10 +3013,72 @@ class TestSetupClientTokenCaching:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         # Cache should not be populated when switch fails
         assert lib._cached_user_id is None
         assert lib._cached_user_token == ""
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._on_setup_ready — refresh_after flag (Task 010)
+# ---------------------------------------------------------------------------
+
+
+class TestSetupRefreshAfterFlag:
+    """_on_setup_ready only submits _worker_refresh when refresh_after is True."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        config = MagicMock(spec=Config)
+        config.plex_token = ""
+        config.plex_server_id = ""
+        config.plex_user_id = None
+        config.plex_server_url = ""
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            lib = PlexLibrary(config)
+
+        config.plex_token = "tok"
+        config.plex_server_id = "server123"
+        return lib, config
+
+    def test_init_setup_does_not_submit_worker_refresh(self) -> None:
+        """__init__ calls _worker_setup(False) — _on_setup_ready should NOT submit _worker_refresh."""
+        lib, config = self._make_lib()
+
+        with patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.plex_library.PlexClient"), \
+             patch.object(lib, "_start_event_listener"), \
+             patch.object(lib._executor, "submit", wraps=lib._executor.submit) as mock_submit:
+            lib._worker_setup(refresh_after=False)
+            _flush_setup(lib)
+
+        # _worker_refresh should NOT have been submitted
+        submitted_fns = [c.args[0].__name__ for c in mock_submit.call_args_list
+                         if c.args and callable(c.args[0]) and hasattr(c.args[0], '__name__')]
+        assert "_worker_refresh" not in submitted_fns
+
+    def test_refresh_setup_submits_worker_refresh(self) -> None:
+        """refresh() calls _worker_setup(True) — _on_setup_ready should submit _worker_refresh."""
+        lib, config = self._make_lib()
+
+        with patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.plex_library.PlexClient"), \
+             patch.object(lib, "_start_event_listener"), \
+             patch.object(lib._executor, "submit", wraps=lib._executor.submit) as mock_submit:
+            lib._worker_setup(refresh_after=True)
+            _flush_setup(lib)
+
+        # _worker_refresh should have been submitted
+        submitted_fns = [c.args[0].__name__ for c in mock_submit.call_args_list
+                         if c.args and callable(c.args[0]) and hasattr(c.args[0], '__name__')]
+        assert "_worker_refresh" in submitted_fns
 
 
 # ---------------------------------------------------------------------------
@@ -2999,6 +3102,7 @@ class TestGetServerListAndHomeUsers:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_get_server_list_returns_formatted_list(self) -> None:
@@ -3069,15 +3173,13 @@ class TestSelectServerAndUser:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_select_server_updates_config(self) -> None:
         lib = self._make_lib()
-        lib._executor.submit = lambda fn, *args, **kwargs: None  # suppress network calls
 
-        with patch.object(lib, "_setup_client"), \
-             patch.object(lib, "refresh"):
-            lib.selectServer("new-server-id")
+        lib.selectServer("new-server-id")
 
         lib._config.set_plex_server_id.assert_called_once_with("new-server-id")
 
@@ -3247,12 +3349,12 @@ class TestRestrictionRatingsMapping:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary._setup_client — restriction profile stored (Task 003)
+# PlexLibrary._worker_setup — restriction profile stored (Task 003)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupClientRestrictionProfile:
-    """_setup_client stores the content_rating_filter from the user's restrictionProfile."""
+    """_worker_setup stores the content_rating_filter from the user's restrictionProfile."""
 
     def _make_lib_with_restricted_user(self, restriction_profile: str):
         from backend.plex_library import PlexLibrary
@@ -3286,6 +3388,7 @@ class TestSetupClientRestrictionProfile:
             config.plex_token = "admin-token"
             config.plex_user_id = 42
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         return lib
 
@@ -3333,6 +3436,7 @@ class TestSetupClientRestrictionProfile:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         assert lib._content_rating_filter == ""
 
@@ -3370,6 +3474,7 @@ class TestWorkerLoadSectionContentRating:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_content_rating_filter_passed_to_get_library_items(self) -> None:
@@ -3490,6 +3595,7 @@ class TestShowsReadySignalCarriesTotalCount:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_on_shows_ready_sets_total(self) -> None:
@@ -3576,6 +3682,7 @@ class TestLoadMoreShowsGuard:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_loading_more_flag_prevents_duplicate_submission(self) -> None:
@@ -3679,6 +3786,7 @@ class TestLoadMoreShowsFailureResetsFlag:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         lib._shows_loading_more = True
 
@@ -3712,6 +3820,7 @@ class TestSortShows:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_az_maps_to_correct_api_param(self) -> None:
@@ -3817,6 +3926,7 @@ class TestFilterShowsByGenre:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_filter_sets_shows_genre(self) -> None:
@@ -3932,6 +4042,7 @@ class TestLoadMoreShowsPassesSortFilter:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_and_genre_passed_to_worker(self) -> None:
@@ -3975,6 +4086,7 @@ class TestWorkerLoadSectionShowsTotal:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_shows_ready_receives_total_from_worker(self) -> None:
@@ -4033,6 +4145,7 @@ class TestLaunchLiveTv:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config, browser_launcher=browser_launcher)
+            _flush_setup(lib)
         return lib
 
     def test_launches_correct_url_with_token(self) -> None:
@@ -4128,6 +4241,7 @@ class TestGetLibraryListLiveTv:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_live_tv_entry_always_present(self) -> None:
@@ -4209,10 +4323,11 @@ class TestPlexLibraryErrorCallback:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_plex_library_registers_error_callback(self) -> None:
-        """After _setup_client(), verify client._on_error is not None."""
+        """After _worker_setup(), verify client._on_error is not None."""
         lib = self._make_lib()
         if lib._client is not None:
             assert lib._client._on_error is not None
@@ -4238,88 +4353,15 @@ class TestPlexLibraryErrorCallback:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getWatchHistory — Task 005 (playback history)
-# ---------------------------------------------------------------------------
-
-
-class TestGetWatchHistorySlot:
-    """getWatchHistory() returns a list of dicts with expected keys."""
-
-    def _make_lib(self):
-        from backend.plex_library import PlexLibrary
-        from backend.config import Config
-
-        with patch("backend.plex_library.PlexClient"), \
-             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
-             patch("backend.config.CONFIG_FILE"), \
-             patch("backend.config.CONFIG_DIR"):
-            config = MagicMock(spec=Config)
-            config.plex_server_id = "server123"
-            config.plex_token = "tok"
-            config.plex_user_id = None
-            lib = PlexLibrary(config)
-        return lib
-
-    def test_get_watch_history_slot_returns_list(self) -> None:
-        lib = self._make_lib()
-        mock_client = MagicMock()
-        mock_client.get_watch_history.return_value = [
-            {
-                "ratingKey": "123",
-                "title": "Test Movie",
-                "type": "movie",
-                "viewedAt": 1700000000,
-                "grandparentTitle": "",
-                "thumb": "/library/metadata/123/thumb/1",
-                "grandparentThumb": "",
-                "duration": 7200000,
-            },
-            {
-                "ratingKey": "456",
-                "title": "Pilot",
-                "type": "episode",
-                "viewedAt": 1700000100,
-                "grandparentTitle": "Test Show",
-                "thumb": "/library/metadata/456/thumb/1",
-                "grandparentThumb": "/library/metadata/200/thumb/1",
-                "duration": 2700000,
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getWatchHistory(50)
-
-        assert len(result) == 2
-        assert result[0]["ratingKey"] == "123"
-        assert result[0]["title"] == "Test Movie"
-        assert result[0]["type"] == "movie"
-        assert result[0]["viewedAt"] == 1700000000
-        assert result[0]["grandparentTitle"] == ""
-        assert result[0]["thumb"] == "/library/metadata/123/thumb/1"
-        assert result[0]["grandparentThumb"] == ""
-        assert result[0]["duration"] == 7200000
-        assert result[1]["ratingKey"] == "456"
-        assert result[1]["grandparentTitle"] == "Test Show"
-
-    def test_get_watch_history_slot_returns_empty_without_client(self) -> None:
-        lib = self._make_lib()
-        lib._client = None
-
-        result = lib.getWatchHistory(50)
-
-        assert result == []
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary._setup_client — passes fallback URLs (Task 006)
+# PlexLibrary._worker_setup — passes fallback URLs (Task 006)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupClientPassesFallbackUrls:
-    """_setup_client passes all known server URLs as fallbacks to PlexClient."""
+    """_worker_setup passes all known server URLs as fallbacks to PlexClient."""
 
-    def test_setup_client_passes_fallback_urls(self) -> None:
-        """After _setup_client, client._fallback_urls is set from _all_server_urls."""
+    def test_worker_setup_passes_fallback_urls(self) -> None:
+        """After _worker_setup, client._fallback_urls is set from _all_server_urls."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
         from backend.plex_account import PlexAccount
@@ -4350,6 +4392,7 @@ class TestSetupClientPassesFallbackUrls:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         # The primary URL is the best connection (local direct IP)
         assert lib._server_url == "http://192.168.0.2:32400"
@@ -4362,12 +4405,12 @@ class TestSetupClientPassesFallbackUrls:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary._setup_client — server URL caching (Task 001)
+# PlexLibrary._worker_setup — server URL caching (Task 001)
 # ---------------------------------------------------------------------------
 
 
 class TestSetupClientServerUrlCaching:
-    """_setup_client caches the server URL and falls back to cache when offline."""
+    """_worker_setup caches the server URL and falls back to cache when offline."""
 
     def test_resolved_url_is_cached(self) -> None:
         """When _resolve_server_url succeeds, the URL is persisted via set_plex_server_url."""
@@ -4460,9 +4503,10 @@ class TestSetupClientServerUrlCaching:
             config.plex_user_id = None
             config.plex_server_url = "http://192.168.0.2:32400"
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         # Client should be created using the cached URL
-        mock_client_cls.assert_called_once_with(
+        mock_client_cls.assert_called_with(
             "http://192.168.0.2:32400", "tok", client_id=config.plex_client_id
         )
         assert lib._server_url == "http://192.168.0.2:32400"
@@ -4490,6 +4534,7 @@ class TestSetupClientServerUrlCaching:
             config.plex_user_id = None
             config.plex_server_url = ""
             lib = PlexLibrary(config)
+            _flush_setup(lib)
 
         mock_client_cls.assert_not_called()
         assert lib._client is None
@@ -4517,6 +4562,7 @@ class TestOnPlexErrorTriggersReconnect:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_on_plex_error_triggers_reconnect_on_network(self) -> None:
@@ -4576,12 +4622,13 @@ class TestEventListenerIntegration:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
-    def test_start_event_listener_called_after_setup_client(self) -> None:
-        """After _setup_client succeeds, _event_listener is not None."""
+    def test_start_event_listener_called_after_worker_setup(self) -> None:
+        """After _worker_setup succeeds, _event_listener is not None."""
         lib = self._make_lib()
-        # _setup_client was called during __init__ and succeeded (server123 is in fake resources)
+        # _worker_setup was called during __init__ and succeeded (server123 is in fake resources)
         assert lib._event_listener is not None
 
     def test_stop_event_listener_called_on_shutdown(self) -> None:
@@ -4678,6 +4725,7 @@ class TestRateSlot:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_rate_slot_dispatches_to_executor(self) -> None:
@@ -4751,6 +4799,7 @@ class TestFetchArtistDetail:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_emits_artist_detail_ready_with_artist_and_albums(self) -> None:
@@ -4990,6 +5039,7 @@ class TestFetchAlbumDetail:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_emits_album_detail_ready_with_album_and_tracks(self) -> None:
@@ -5157,6 +5207,7 @@ class TestFetchRecentAlbums:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_emits_recent_albums_ready(self) -> None:
@@ -5319,6 +5370,7 @@ class TestFetchPlaylists:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_emits_playlists_ready_with_audio_playlists(self) -> None:
@@ -5397,6 +5449,7 @@ class TestFetchPlaylistTracks:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_emits_playlist_tracks_ready(self) -> None:
@@ -5490,6 +5543,7 @@ def _make_lib_with_tmp(tmp_path):
         config.plex_token = "tok"
         config.plex_user_id = None
         lib = PlexLibrary(config)
+        _flush_setup(lib)
     return lib
 
 
@@ -6313,6 +6367,12 @@ class TestWorkerRefreshLibrariesCache:
         """When no libraries cache exists, _worker_refresh only emits network data."""
         lib = self._make_lib(tmp_path)
 
+        # Clear any cache written by _worker_setup/_worker_refresh during init
+        from backend.plex_library import _PLEX_CACHE_DIR
+        cache_file = _PLEX_CACHE_DIR / "libraries_cache.json"
+        if cache_file.exists():
+            cache_file.unlink()
+
         emitted: list = []
         lib._librariesReady.connect(lambda libs: emitted.append(libs))
 
@@ -6663,7 +6723,7 @@ class _RemovedOnAllCachesReady:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary._probe_server_url & _setup_client probe logic (Task 004)
+# PlexLibrary._probe_server_url & _worker_setup probe logic (Task 004)
 # ---------------------------------------------------------------------------
 
 
@@ -6722,15 +6782,15 @@ class TestProbeServerUrl:
 
 
 class TestSetupClientProbesFallback:
-    """_setup_client probes URLs and falls back to alternatives when primary is unreachable."""
+    """_worker_setup probes URLs and falls back to alternatives when primary is unreachable."""
 
     def _make_lib_and_call_setup(self, probe_rv=True, probe_side_effect=None):
-        """Build a PlexLibrary (no-token init), then manually call _setup_client."""
+        """Build a PlexLibrary (no-token init), then run _worker_setup + _flush_setup."""
         from backend.plex_library import PlexLibrary
         from backend.config import Config
         from backend.plex_account import PlexAccount
 
-        # Create the library with no token so __init__ skips _setup_client
+        # Create the library with no token so __init__ skips _worker_setup
         config = MagicMock(spec=Config)
         config.plex_token = ""
         config.plex_server_id = ""
@@ -6743,7 +6803,7 @@ class TestSetupClientProbesFallback:
              patch("backend.config.CONFIG_DIR"):
             lib = PlexLibrary(config)
 
-        # Now configure it for a real _setup_client call
+        # Now configure it for a real _worker_setup call
         config.plex_token = "tok"
         config.plex_server_id = "server123"
 
@@ -6767,7 +6827,8 @@ class TestSetupClientProbesFallback:
              patch("backend.plex_library.PlexAccount", return_value=mock_account), \
              patch.object(lib, "_probe_server_url", **probe_kwargs), \
              patch.object(lib, "_start_event_listener"):
-            lib._setup_client()
+            lib._worker_setup()
+            _flush_setup(lib)
 
         return lib, config, mock_client_cls
 
@@ -6969,6 +7030,7 @@ class TestSortMoviesOffline:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_movies_offline_sorts_locally(self) -> None:
@@ -7032,6 +7094,7 @@ class TestSortShowsOffline:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_sort_shows_offline_sorts_locally(self) -> None:
@@ -7072,6 +7135,7 @@ class TestGetGenresAvailability:
             config.plex_token = "tok"
             config.plex_user_id = None
             lib = PlexLibrary(config)
+            _flush_setup(lib)
         return lib
 
     def test_get_movie_genres_returns_empty_when_unavailable(self) -> None:

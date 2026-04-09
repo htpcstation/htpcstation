@@ -7,12 +7,8 @@ Covers:
   - parse_track: missing Media → empty media_key
   - get_libraries: now includes artist-type libraries
   - PlexLibrary.getArtist: returns correct dict
-  - PlexLibrary.getAlbum: returns album dict with summary/studio/genre/rating fields
-  - PlexLibrary.getAlbums: returns list of album dicts, filters non-album children
-  - PlexLibrary.getTracks: returns list of track dicts with media_key
   - PlexLibrary.getTrackStreamUrl: returns correct URL with token
   - PlexClient.get_hubs: returns Hub array from API response
-  - PlexLibrary.getArtistAlbums: returns grouped list with headers and albums
 """
 
 from __future__ import annotations
@@ -487,339 +483,125 @@ class TestGetArtist:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getAlbum
+# PlexLibrary.fetchArtistPreview
 # ---------------------------------------------------------------------------
 
 
-class TestGetAlbum:
-    def test_returns_album_dict_with_all_expected_keys(self) -> None:
+def _run_fetch_worker_with_events(lib, method_name, *args):
+    """Submit a fetch* call, run the captured worker synchronously, then flush Qt events."""
+    from PySide6.QtCore import QCoreApplication
+
+    submitted = []
+
+    def fake_submit(fn, *a, **kw):
+        submitted.append(fn)
+
+    lib._executor.submit = fake_submit  # type: ignore[method-assign]
+    getattr(lib, method_name)(*args)
+    for fn in submitted:
+        fn()
+    QCoreApplication.processEvents()
+
+
+class TestFetchArtistPreview:
+    def test_emits_artist_preview_ready_with_correct_data(self) -> None:
         lib = _make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {
-            "ratingKey": "600",
-            "title": "Abbey Road",
-            "year": 1969,
-            "thumb": "/library/metadata/600/thumb/1",
-            "leafCount": 17,
-            "parentTitle": "The Beatles",
-            "summary": "Classic album.",
-            "studio": "Apple Records",
+            "ratingKey": "500",
+            "title": "The Beatles",
+            "summary": "Legendary band.",
+            "thumb": "/library/metadata/500/thumb/1",
             "Genre": [{"tag": "Rock"}, {"tag": "Pop"}],
-            "rating": 9.0,
         }
         lib._client = mock_client
 
-        result = lib.getAlbum("600")
+        received = []
+        lib.artistPreviewReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistPreview", "500")
 
-        assert result["ratingKey"] == "600"
-        assert result["title"] == "Abbey Road"
-        assert result["year"] == 1969
-        assert result["leafCount"] == 17
-        assert result["parentTitle"] == "The Beatles"
-        assert result["summary"] == "Classic album."
-        assert result["studio"] == "Apple Records"
-        assert result["genre"] == "Rock, Pop"
-        assert abs(result["rating"] - 0.9) < 1e-9
-        assert "posterLocal" in result
+        assert len(received) == 1
+        rk, data = received[0]
+        assert rk == "500"
+        assert data["ratingKey"] == "500"
+        assert data["title"] == "The Beatles"
+        assert data["summary"] == "Legendary band."
+        assert data["genre"] == "Rock, Pop"
+        assert "posterLocal" in data
 
-    def test_returns_empty_dict_when_no_client(self) -> None:
+    def test_no_op_when_no_client(self) -> None:
         lib = _make_lib()
         lib._client = None
-        result = lib.getAlbum("600")
-        assert result == {}
 
-    def test_returns_empty_dict_when_metadata_not_found(self) -> None:
+        submitted: list = []
+        lib._executor.submit = lambda fn, *a, **kw: submitted.append(fn)  # type: ignore[method-assign]
+        lib.fetchArtistPreview("500")
+
+        assert len(submitted) == 0
+
+    def test_no_emit_when_metadata_not_found(self) -> None:
         lib = _make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {}
         lib._client = mock_client
-        result = lib.getAlbum("999")
-        assert result == {}
 
-    def test_poster_local_populated_when_thumb_path_present(self) -> None:
+        received = []
+        lib.artistPreviewReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistPreview", "999")
+
+        assert len(received) == 0
+
+    def test_uses_disk_cache_pre_resolve_not_get_poster(self, tmp_path) -> None:
+        """Poster resolution uses _cache_path().exists(), not get_poster()."""
         lib = _make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {
-            "ratingKey": "600",
-            "title": "Abbey Road",
-            "thumb": "/library/metadata/600/thumb/1",
+            "ratingKey": "500",
+            "title": "Artist",
+            "thumb": "/library/metadata/500/thumb/1",
         }
         lib._client = mock_client
 
         mock_cache = MagicMock()
-        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        cached_path = MagicMock()
+        cached_path.exists.return_value = True
+        cached_path.as_uri.return_value = "file:///tmp/poster_cache/artist.jpg"
+        mock_cache._cache_path.return_value = cached_path
         lib._poster_cache = mock_cache
 
-        result = lib.getAlbum("600")
+        received = []
+        lib.artistPreviewReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistPreview", "500")
 
-        mock_cache.get_poster.assert_called_once_with(
-            mock_client, "/library/metadata/600/thumb/1"
-        )
-        assert result["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
-
-    def test_poster_local_empty_when_no_thumb_path(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {
-            "ratingKey": "601",
-            "title": "No Thumb Album",
-        }
-        lib._client = mock_client
-
-        mock_cache = MagicMock()
-        lib._poster_cache = mock_cache
-
-        result = lib.getAlbum("601")
-
+        assert len(received) == 1
+        assert received[0][1]["posterLocal"] == "file:///tmp/poster_cache/artist.jpg"
+        mock_cache._cache_path.assert_called_once_with("/library/metadata/500/thumb/1")
+        # get_poster must NOT be called — preview uses disk pre-resolve only
         mock_cache.get_poster.assert_not_called()
-        assert result["posterLocal"] == ""
 
-    def test_genre_empty_when_no_genres(self) -> None:
+    def test_poster_local_empty_when_not_cached(self) -> None:
+        """When the poster is not in the disk cache, posterLocal stays empty."""
         lib = _make_lib()
         mock_client = MagicMock()
         mock_client.get_metadata.return_value = {
-            "ratingKey": "602",
-            "title": "Album Without Genre",
+            "ratingKey": "500",
+            "title": "Artist",
+            "thumb": "/library/metadata/500/thumb/1",
         }
         lib._client = mock_client
 
-        result = lib.getAlbum("602")
-
-        assert result["genre"] == ""
-
-    def test_rating_zero_when_not_rated(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_metadata.return_value = {
-            "ratingKey": "603",
-            "title": "Unrated Album",
-        }
-        lib._client = mock_client
-
-        result = lib.getAlbum("603")
-
-        assert result["rating"] == 0.0
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary.getAlbums
-# ---------------------------------------------------------------------------
-
-
-class TestGetAlbums:
-    def test_returns_album_list(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {
-                "type": "album",
-                "ratingKey": "600",
-                "title": "Abbey Road",
-                "year": 1969,
-                "leafCount": 17,
-                "parentRatingKey": "500",
-                "parentTitle": "The Beatles",
-            },
-            {
-                "type": "album",
-                "ratingKey": "601",
-                "title": "Let It Be",
-                "year": 1970,
-                "leafCount": 12,
-                "parentRatingKey": "500",
-                "parentTitle": "The Beatles",
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getAlbums("500")
-
-        assert len(result) == 2
-        assert result[0]["ratingKey"] == "600"
-        assert result[0]["title"] == "Abbey Road"
-        assert result[0]["year"] == 1969
-        assert result[0]["leafCount"] == 17
-        assert result[0]["parentRatingKey"] == "500"
-        assert "posterLocal" in result[0]
-        assert result[1]["ratingKey"] == "601"
-        assert result[1]["title"] == "Let It Be"
-
-    def test_filters_out_non_album_children(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {"type": "album", "ratingKey": "600", "title": "Abbey Road"},
-            {"type": "track", "ratingKey": "700", "title": "Some Track"},
-            {"type": "artist", "ratingKey": "500", "title": "The Beatles"},
-        ]
-        lib._client = mock_client
-
-        result = lib.getAlbums("500")
-
-        assert len(result) == 1
-        assert result[0]["ratingKey"] == "600"
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        lib = _make_lib()
-        lib._client = None
-        result = lib.getAlbums("500")
-        assert result == []
-
-    def test_returns_empty_list_when_no_children(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = []
-        lib._client = mock_client
-        result = lib.getAlbums("500")
-        assert result == []
-
-    def test_poster_local_populated_when_thumb_path_present(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {
-                "type": "album",
-                "ratingKey": "600",
-                "title": "Abbey Road",
-                "thumb": "/library/metadata/600/thumb/1",
-            },
-        ]
-        lib._client = mock_client
-
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
         mock_cache = MagicMock()
-        mock_cache._cache_path.return_value = mock_path
+        cached_path = MagicMock()
+        cached_path.exists.return_value = False
+        mock_cache._cache_path.return_value = cached_path
         lib._poster_cache = mock_cache
 
-        result = lib.getAlbums("500")
+        received = []
+        lib.artistPreviewReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistPreview", "500")
 
-        mock_cache._cache_path.assert_called_once_with(
-            "/library/metadata/600/thumb/1"
-        )
-        assert result[0]["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary.getTracks
-# ---------------------------------------------------------------------------
-
-
-class TestGetTracks:
-    def test_returns_track_list_with_media_key(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {
-                "type": "track",
-                "ratingKey": "700",
-                "title": "Come Together",
-                "index": 1,
-                "duration": 259000,
-                "parentTitle": "Abbey Road",
-                "grandparentTitle": "The Beatles",
-                "Media": [
-                    {"Part": [{"key": "/library/parts/12345/file.flac"}]}
-                ],
-            },
-            {
-                "type": "track",
-                "ratingKey": "701",
-                "title": "Something",
-                "index": 2,
-                "duration": 182000,
-                "parentTitle": "Abbey Road",
-                "grandparentTitle": "The Beatles",
-                "Media": [
-                    {"Part": [{"key": "/library/parts/12346/file.flac"}]}
-                ],
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getTracks("600")
-
-        assert len(result) == 2
-        assert result[0]["ratingKey"] == "700"
-        assert result[0]["title"] == "Come Together"
-        assert result[0]["index"] == 1
-        assert result[0]["durationMs"] == 259000
-        assert result[0]["parentTitle"] == "Abbey Road"
-        assert result[0]["grandparentTitle"] == "The Beatles"
-        assert result[0]["mediaKey"] == "/library/parts/12345/file.flac"
-        assert result[1]["ratingKey"] == "701"
-        assert result[1]["mediaKey"] == "/library/parts/12346/file.flac"
-
-    def test_filters_out_non_track_children(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {
-                "type": "track",
-                "ratingKey": "700",
-                "title": "Come Together",
-                "Media": [{"Part": [{"key": "/library/parts/12345/file.flac"}]}],
-            },
-            {"type": "album", "ratingKey": "600", "title": "Abbey Road"},
-        ]
-        lib._client = mock_client
-
-        result = lib.getTracks("600")
-
-        assert len(result) == 1
-        assert result[0]["ratingKey"] == "700"
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        lib = _make_lib()
-        lib._client = None
-        result = lib.getTracks("600")
-        assert result == []
-
-    def test_returns_empty_list_when_no_children(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = []
-        lib._client = mock_client
-        result = lib.getTracks("600")
-        assert result == []
-
-    def test_track_with_missing_media_has_empty_media_key(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {
-                "type": "track",
-                "ratingKey": "702",
-                "title": "Track Without Media",
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getTracks("600")
-
-        assert len(result) == 1
-        assert result[0]["mediaKey"] == ""
-
-    def test_all_expected_keys_present(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_children.return_value = [
-            {"type": "track", "ratingKey": "700", "title": "Track"},
-        ]
-        lib._client = mock_client
-
-        result = lib.getTracks("600")
-
-        assert len(result) == 1
-        track = result[0]
-        assert "ratingKey" in track
-        assert "title" in track
-        assert "index" in track
-        assert "durationMs" in track
-        assert "parentTitle" in track
-        assert "grandparentTitle" in track
-        assert "mediaKey" in track
+        assert len(received) == 1
+        assert received[0][1]["posterLocal"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -1204,248 +986,6 @@ class TestGetHubs:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getArtistAlbums
-# ---------------------------------------------------------------------------
-
-
-def _make_hub_response(hubs: list) -> list:
-    """Helper to build a hub list as returned by get_hubs()."""
-    return hubs
-
-
-class TestGetArtistAlbums:
-    def _make_hub(
-        self,
-        hub_id: str,
-        title: str,
-        metadata: list | None = None,
-    ) -> dict:
-        return {
-            "hubIdentifier": hub_id,
-            "title": title,
-            "type": "album",
-            "Metadata": metadata or [],
-        }
-
-    def _make_album_item(
-        self,
-        rating_key: str,
-        title: str,
-        year: int = 0,
-        leaf_count: int = 0,
-        thumb: str = "",
-    ) -> dict:
-        return {
-            "type": "album",
-            "ratingKey": rating_key,
-            "title": title,
-            "year": year,
-            "leafCount": leaf_count,
-            "thumb": thumb,
-        }
-
-    def test_returns_grouped_list_with_headers_and_albums(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "3 Albums", [
-                self._make_album_item("600", "Abbey Road", 1969, 17),
-                self._make_album_item("601", "Let It Be", 1970, 12),
-                self._make_album_item("602", "Help!", 1965, 14),
-            ]),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        # Should have 1 header + 3 albums = 4 entries
-        assert len(result) == 4
-        assert result[0]["type"] == "header"
-        assert result[0]["title"] == "Albums"
-        assert result[1]["type"] == "album"
-        assert result[2]["type"] == "album"
-        assert result[3]["type"] == "album"
-
-    def test_filters_to_album_type_hubs_only(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "2 Albums", [
-                self._make_album_item("600", "Abbey Road", 1969),
-                self._make_album_item("601", "Let It Be", 1970),
-            ]),
-            # Non-album hubs should be ignored
-            {
-                "hubIdentifier": "hub.artist.similar",
-                "title": "Similar Artists",
-                "type": "artist",
-                "Metadata": [{"ratingKey": "999", "title": "Similar Artist"}],
-            },
-            {
-                "hubIdentifier": "hub.artist.popularTracks",
-                "title": "Popular Tracks",
-                "type": "track",
-                "Metadata": [],
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        # Only the albums hub should be included
-        assert len(result) == 3  # 1 header + 2 albums
-        types = [e["type"] for e in result]
-        assert types == ["header", "album", "album"]
-
-    def test_sorts_albums_within_category_by_year_descending(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "3 Albums", [
-                self._make_album_item("600", "Abbey Road", 1969),
-                self._make_album_item("601", "Let It Be", 1970),
-                self._make_album_item("602", "Help!", 1965),
-            ]),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        albums = [e for e in result if e["type"] == "album"]
-        years = [a["year"] for a in albums]
-        assert years == sorted(years, reverse=True)
-        assert years == [1970, 1969, 1965]
-
-    def test_strips_count_prefix_from_hub_titles(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "5 Albums", []),
-            self._make_hub("hub.artist.albums.singles", "Singles & EPs", []),
-            self._make_hub("hub.artist.albums.demo", "1 Album", []),
-            self._make_hub("hub.artist.albums.compilation", "Compilations", []),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        headers = [e for e in result if e["type"] == "header"]
-        titles = [h["title"] for h in headers]
-        assert "Albums" in titles
-        assert "Singles & EPs" in titles
-        assert "Albums" in titles  # "1 Album" -> "Albums"
-        assert "Compilations" in titles
-        # Ensure no count prefix remains
-        for title in titles:
-            assert not title[0].isdigit(), f"Title '{title}' still has count prefix"
-
-    def test_returns_empty_list_when_no_hubs_found(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = []
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        assert result == []
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        lib = _make_lib()
-        lib._client = None
-
-        result = lib.getArtistAlbums("500")
-
-        assert result == []
-
-    def test_multiple_hub_categories_preserve_order(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "2 Albums", [
-                self._make_album_item("600", "Album A", 2020),
-            ]),
-            self._make_hub("hub.artist.albums.singles", "Singles & EPs", [
-                self._make_album_item("700", "Single X", 2021),
-            ]),
-            self._make_hub("hub.artist.albums.compilation", "Compilations", [
-                self._make_album_item("800", "Comp Z", 2019),
-            ]),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        # Should be: header Albums, album A, header Singles & EPs, single X, header Compilations, comp Z
-        assert len(result) == 6
-        assert result[0] == {"type": "header", "title": "Albums"}
-        assert result[1]["title"] == "Album A"
-        assert result[2] == {"type": "header", "title": "Singles & EPs"}
-        assert result[3]["title"] == "Single X"
-        assert result[4] == {"type": "header", "title": "Compilations"}
-        assert result[5]["title"] == "Comp Z"
-
-    def test_album_entries_have_expected_keys(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "1 Album", [
-                self._make_album_item("600", "Abbey Road", 1969, 17),
-            ]),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        album = next(e for e in result if e["type"] == "album")
-        assert "ratingKey" in album
-        assert "title" in album
-        assert "year" in album
-        assert "leafCount" in album
-        assert "posterLocal" in album
-        assert album["ratingKey"] == "600"
-        assert album["title"] == "Abbey Road"
-        assert album["year"] == 1969
-        assert album["leafCount"] == 17
-
-    def test_poster_local_populated_when_thumb_present(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "1 Album", [
-                self._make_album_item("600", "Abbey Road", 1969, 17, "/thumb/600"),
-            ]),
-        ]
-        lib._client = mock_client
-
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
-        mock_cache = MagicMock()
-        mock_cache._cache_path.return_value = mock_path
-        lib._poster_cache = mock_cache
-
-        result = lib.getArtistAlbums("500")
-
-        album = next(e for e in result if e["type"] == "album")
-        mock_cache._cache_path.assert_called_once_with("/thumb/600")
-        assert album["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
-
-    def test_hub_with_no_metadata_emits_only_header(self) -> None:
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_hubs.return_value = [
-            self._make_hub("hub.artist.albums", "Albums", []),
-        ]
-        lib._client = mock_client
-
-        result = lib.getArtistAlbums("500")
-
-        assert len(result) == 1
-        assert result[0]["type"] == "header"
-        assert result[0]["title"] == "Albums"
-
-
-# ---------------------------------------------------------------------------
 # Artist list cache — Task 007
 # ---------------------------------------------------------------------------
 
@@ -1614,160 +1154,6 @@ class TestLoadArtistsCache:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getRecentlyAddedAlbums — Task 011
-# ---------------------------------------------------------------------------
-
-
-class TestGetRecentlyAddedAlbums:
-    def test_returns_album_dicts_with_correct_fields(self) -> None:
-        """getRecentlyAddedAlbums returns album dicts with ratingKey, title, year, parentTitle, posterLocal."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = {
-            "MediaContainer": {
-                "Metadata": [
-                    {
-                        "type": "album",
-                        "ratingKey": "600",
-                        "title": "Abbey Road",
-                        "year": 1969,
-                        "parentTitle": "The Beatles",
-                        "thumb": "/library/metadata/600/thumb/1",
-                    },
-                    {
-                        "type": "album",
-                        "ratingKey": "601",
-                        "title": "Let It Be",
-                        "year": 1970,
-                        "parentTitle": "The Beatles",
-                        "thumb": "",
-                    },
-                ]
-            }
-        }
-        lib._client = mock_client
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        assert len(result) == 2
-        assert result[0]["ratingKey"] == "600"
-        assert result[0]["title"] == "Abbey Road"
-        assert result[0]["year"] == 1969
-        assert result[0]["parentTitle"] == "The Beatles"
-        assert "posterLocal" in result[0]
-        assert result[1]["ratingKey"] == "601"
-        assert result[1]["title"] == "Let It Be"
-
-    def test_filters_non_album_items(self) -> None:
-        """getRecentlyAddedAlbums skips items whose type is not 'album'."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = {
-            "MediaContainer": {
-                "Metadata": [
-                    {
-                        "type": "album",
-                        "ratingKey": "600",
-                        "title": "Abbey Road",
-                        "year": 1969,
-                        "parentTitle": "The Beatles",
-                    },
-                    {
-                        "type": "track",
-                        "ratingKey": "700",
-                        "title": "Come Together",
-                    },
-                    {
-                        "type": "artist",
-                        "ratingKey": "500",
-                        "title": "The Beatles",
-                    },
-                ]
-            }
-        }
-        lib._client = mock_client
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        assert len(result) == 1
-        assert result[0]["ratingKey"] == "600"
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        """getRecentlyAddedAlbums returns [] when no Plex client is configured."""
-        lib = _make_lib()
-        lib._client = None
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        assert result == []
-
-    def test_returns_empty_list_when_api_returns_none(self) -> None:
-        """getRecentlyAddedAlbums returns [] when the API call returns None."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = None
-        lib._client = mock_client
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        assert result == []
-
-    def test_returns_empty_list_when_metadata_missing(self) -> None:
-        """getRecentlyAddedAlbums returns [] when MediaContainer has no Metadata key."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = {"MediaContainer": {}}
-        lib._client = mock_client
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        assert result == []
-
-    def test_poster_local_populated_when_thumb_present(self) -> None:
-        """getRecentlyAddedAlbums resolves poster via disk cache pre-resolve."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = {
-            "MediaContainer": {
-                "Metadata": [
-                    {
-                        "type": "album",
-                        "ratingKey": "600",
-                        "title": "Abbey Road",
-                        "thumb": "/library/metadata/600/thumb/1",
-                    },
-                ]
-            }
-        }
-        lib._client = mock_client
-
-        mock_path = MagicMock()
-        mock_path.exists.return_value = True
-        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
-        mock_cache = MagicMock()
-        mock_cache._cache_path.return_value = mock_path
-        lib._poster_cache = mock_cache
-
-        result = lib.getRecentlyAddedAlbums("3")
-
-        mock_cache._cache_path.assert_called_once_with(
-            "/library/metadata/600/thumb/1"
-        )
-        assert result[0]["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
-
-    def test_calls_correct_api_endpoint(self) -> None:
-        """getRecentlyAddedAlbums calls /library/sections/{key}/recentlyAdded."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client._get.return_value = {"MediaContainer": {"Metadata": []}}
-        lib._client = mock_client
-
-        lib.getRecentlyAddedAlbums("42")
-
-        mock_client._get.assert_called_once_with("/library/sections/42/recentlyAdded")
-
-
-# ---------------------------------------------------------------------------
 # PlexClient.get_playlists — Task 012
 # ---------------------------------------------------------------------------
 
@@ -1844,184 +1230,6 @@ class TestGetPlaylists:
 
         call_url = mock_session.get.call_args[0][0]
         assert call_url == "http://server:32400/playlists"
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary.getPlaylists — Task 012
-# ---------------------------------------------------------------------------
-
-
-class TestGetPlaylists:
-    def test_filters_to_audio_only_playlists(self) -> None:
-        """getPlaylists returns only playlists with playlistType == 'audio'."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlists.return_value = [
-            {"ratingKey": "1", "title": "My Music", "playlistType": "audio", "leafCount": 10, "duration": 3600000, "smart": False},
-            {"ratingKey": "2", "title": "My Videos", "playlistType": "video", "leafCount": 5, "duration": 0, "smart": False},
-            {"ratingKey": "3", "title": "Smart Music", "playlistType": "audio", "leafCount": 20, "duration": 7200000, "smart": True},
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylists()
-
-        assert len(result) == 2
-        assert all(p["ratingKey"] in ("1", "3") for p in result)
-
-    def test_returns_correct_fields(self) -> None:
-        """getPlaylists returns dicts with ratingKey, title, leafCount, duration, smart."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlists.return_value = [
-            {"ratingKey": "42", "title": "Chill Vibes", "playlistType": "audio",
-             "leafCount": 15, "duration": 5400000, "smart": False},
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylists()
-
-        assert len(result) == 1
-        pl = result[0]
-        assert pl["ratingKey"] == "42"
-        assert pl["title"] == "Chill Vibes"
-        assert pl["leafCount"] == 15
-        assert pl["duration"] == 5400000
-        assert pl["smart"] is False
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        """getPlaylists returns [] when no Plex client is configured."""
-        lib = _make_lib()
-        lib._client = None
-
-        result = lib.getPlaylists()
-
-        assert result == []
-
-    def test_returns_empty_list_when_no_audio_playlists(self) -> None:
-        """getPlaylists returns [] when there are no audio playlists."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlists.return_value = [
-            {"ratingKey": "1", "title": "Videos", "playlistType": "video", "leafCount": 3, "duration": 0},
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylists()
-
-        assert result == []
-
-    def test_handles_none_duration_and_leaf_count(self) -> None:
-        """getPlaylists coerces None duration and leafCount to 0."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlists.return_value = [
-            {"ratingKey": "1", "title": "Playlist", "playlistType": "audio",
-             "leafCount": None, "duration": None, "smart": False},
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylists()
-
-        assert result[0]["leafCount"] == 0
-        assert result[0]["duration"] == 0
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary.getPlaylistTracks — Task 012
-# ---------------------------------------------------------------------------
-
-
-class TestGetPlaylistTracks:
-    def test_returns_track_dicts_with_correct_fields(self) -> None:
-        """getPlaylistTracks returns track dicts with all expected fields."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlist_items.return_value = [
-            {
-                "ratingKey": "700",
-                "title": "Come Together",
-                "index": 1,
-                "duration": 259000,
-                "parentTitle": "Abbey Road",
-                "grandparentTitle": "The Beatles",
-                "Media": [{"Part": [{"key": "/library/parts/12345/file.flac"}]}],
-            },
-            {
-                "ratingKey": "800",
-                "title": "Bohemian Rhapsody",
-                "index": 1,
-                "duration": 354000,
-                "parentTitle": "A Night at the Opera",
-                "grandparentTitle": "Queen",
-                "Media": [{"Part": [{"key": "/library/parts/99999/file.flac"}]}],
-            },
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylistTracks("42")
-
-        assert len(result) == 2
-        assert result[0]["ratingKey"] == "700"
-        assert result[0]["title"] == "Come Together"
-        assert result[0]["index"] == 1
-        assert result[0]["durationMs"] == 259000
-        assert result[0]["parentTitle"] == "Abbey Road"
-        assert result[0]["grandparentTitle"] == "The Beatles"
-        assert result[0]["mediaKey"] == "/library/parts/12345/file.flac"
-        assert result[1]["ratingKey"] == "800"
-        assert result[1]["grandparentTitle"] == "Queen"
-
-    def test_returns_empty_list_when_no_client(self) -> None:
-        """getPlaylistTracks returns [] when no Plex client is configured."""
-        lib = _make_lib()
-        lib._client = None
-
-        result = lib.getPlaylistTracks("42")
-
-        assert result == []
-
-    def test_returns_empty_list_on_api_error(self) -> None:
-        """getPlaylistTracks returns [] when the API returns an empty list."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlist_items.return_value = []
-        lib._client = mock_client
-
-        result = lib.getPlaylistTracks("42")
-
-        assert result == []
-
-    def test_all_expected_keys_present(self) -> None:
-        """getPlaylistTracks track dicts have all required keys."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlist_items.return_value = [
-            {"ratingKey": "700", "title": "Track"},
-        ]
-        lib._client = mock_client
-
-        result = lib.getPlaylistTracks("42")
-
-        assert len(result) == 1
-        track = result[0]
-        assert "ratingKey" in track
-        assert "title" in track
-        assert "index" in track
-        assert "durationMs" in track
-        assert "parentTitle" in track
-        assert "grandparentTitle" in track
-        assert "mediaKey" in track
-
-    def test_calls_correct_rating_key(self) -> None:
-        """getPlaylistTracks passes the rating_key to get_playlist_items."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_playlist_items.return_value = []
-        lib._client = mock_client
-
-        lib.getPlaylistTracks("99")
-
-        mock_client.get_playlist_items.assert_called_once_with("99")
 
 
 class TestWorkerLoadSectionArtistCache:

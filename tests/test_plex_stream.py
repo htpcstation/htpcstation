@@ -5,8 +5,6 @@ Covers:
   - PlexClient.get_stream_url: returns ("", 0) when no Media
   - PlexClient.get_stream_url: returns ("", 0) when no Part
   - PlexClient.get_stream_url: includes viewOffset
-  - PlexLibrary.getStreamInfo: returns correct dict
-  - PlexLibrary.getStreamInfo: returns {"url": "", "viewOffset": 0} when client None
   - PlexLibrary.playWithMpv: calls _mpv_launcher.launch with correct url/title/start_ms
   - PlexLibrary.playWithMpv: no-ops when client None
   - PlexLibrary.playWithMpv: no-ops when stream URL empty
@@ -247,48 +245,6 @@ class TestGetStreamUrl:
 
         assert view_offset == 0
         assert url != ""
-
-
-# ---------------------------------------------------------------------------
-# PlexLibrary.getStreamInfo
-# ---------------------------------------------------------------------------
-
-
-class TestGetStreamInfo:
-    def test_returns_correct_dict(self) -> None:
-        """getStreamInfo returns {"url": ..., "viewOffset": ...} from the client."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_stream_url.return_value = (
-            "http://server:32400/library/parts/456/0/file.mkv?X-Plex-Token=tok",
-            90000,
-        )
-        lib._client = mock_client
-
-        result = lib.getStreamInfo("123")
-
-        assert result["url"] == "http://server:32400/library/parts/456/0/file.mkv?X-Plex-Token=tok"
-        assert result["viewOffset"] == 90000
-
-    def test_returns_empty_dict_when_client_none(self) -> None:
-        """getStreamInfo returns {"url": "", "viewOffset": 0} when no client."""
-        lib = _make_lib()
-        lib._client = None
-
-        result = lib.getStreamInfo("123")
-
-        assert result == {"url": "", "viewOffset": 0}
-
-    def test_returns_empty_dict_when_no_stream_url(self) -> None:
-        """getStreamInfo returns {"url": "", "viewOffset": 0} when client returns empty URL."""
-        lib = _make_lib()
-        mock_client = MagicMock()
-        mock_client.get_stream_url.return_value = ("", 0)
-        lib._client = mock_client
-
-        result = lib.getStreamInfo("999")
-
-        assert result == {"url": "", "viewOffset": 0}
 
 
 # ---------------------------------------------------------------------------

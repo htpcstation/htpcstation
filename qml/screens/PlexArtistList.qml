@@ -39,7 +39,7 @@ FocusScope {
     }
 
     // ── Preview data for the left panel ──────────────────────────────────────
-    // Cached artist dict for the currently highlighted item (from plex.getArtist).
+    // Cached artist dict for the currently highlighted item.
     property var _previewData: ({})
 
     // Last ratingKey for which we fetched preview data (avoids redundant calls).
@@ -56,17 +56,24 @@ FocusScope {
         var rk = item.artistRatingKey
         if (!rk || rk === _lastPreviewKey) return
         _lastPreviewKey = rk
-        if (plex) {
-            _previewData = plex.getArtist(rk)
-        } else {
-            _previewData = {}
-        }
+        _previewData = {}  // clear immediately for visual feedback
+        if (plex) plex.fetchArtistPreview(rk)  // NON-BLOCKING
     }
 
     // Re-trigger preview when view becomes visible.
     onVisibleChanged: {
         if (visible) {
             _updatePreview()
+        }
+    }
+
+    // ── Connections to Plex backend signals ──────────────────────────────────
+    Connections {
+        target: plex
+        function onArtistPreviewReady(ratingKey, data) {
+            if (ratingKey === plexArtistList._lastPreviewKey) {
+                plexArtistList._previewData = data
+            }
         }
     }
 

@@ -524,6 +524,7 @@ class PlexLibrary(QObject):
     showReady     = Signal(str, "QVariant")   # (rating_key, show_dict)
     seasonsReady  = Signal(str, "QVariant")   # (rating_key, seasons_list)
     episodesReady = Signal(str, "QVariant")   # (season_rating_key, episodes_list)
+    artistPreviewReady = Signal(str, "QVariant")   # (rating_key, artist_preview_dict)
     artistDetailReady  = Signal(str, "QVariant")   # (artist_rating_key, {artist, albums})
     albumDetailReady   = Signal(str, "QVariant")   # (album_rating_key, {album, tracks})
     recentAlbumsReady  = Signal("QVariant")        # list of album dicts
@@ -532,6 +533,7 @@ class PlexLibrary(QObject):
     posterUpdated      = Signal(str, str)           # (ratingKey, posterUrl) — lightweight poster update
 
     # Internal signals used to marshal results from worker threads to main thread
+    _setupReady = Signal("QVariant")  # dict with setup results from worker thread
     _librariesReady = Signal(list, bool)  # (libraries, from_cache)
     _moviesReady = Signal(list, int)   # (movies, total_size)
     _showsReady = Signal(list, int)    # (shows, total_size)
@@ -552,6 +554,7 @@ class PlexLibrary(QObject):
     _showReady     = Signal(str, object)
     _seasonsReady  = Signal(str, object)
     _episodesReady = Signal(str, object)
+    _artistPreviewReady = Signal(str, object)
     _artistDetailReady  = Signal(str, object)
     _albumDetailReady   = Signal(str, object)
     _recentAlbumsReady  = Signal(object)
@@ -605,7 +608,7 @@ class PlexLibrary(QObject):
 
         # PlexAccount for server discovery and user switching
         self._account: Optional[PlexAccount] = None
-        # Resolved server URL (set by _setup_client after discovery)
+        # Resolved server URL (set by _on_setup_ready after discovery)
         self._server_url: str = ""
         # Active token (user-specific or admin) used for deep-link URLs
         self._active_token: str = ""
@@ -620,9 +623,9 @@ class PlexLibrary(QObject):
         # Build Plex client if config is available
         self._client: Optional[PlexClient] = None
         self._event_listener: Optional["PlexEventListener"] = None
-        self._setup_client()
 
         # Connect internal signals (worker -> main thread)
+        self._setupReady.connect(self._on_setup_ready,                   Qt.ConnectionType.QueuedConnection)
         self._librariesReady.connect(self._on_libraries_ready,           Qt.ConnectionType.QueuedConnection)
         self._moviesReady.connect(self._on_movies_ready,                 Qt.ConnectionType.QueuedConnection)
         self._showsReady.connect(self._on_shows_ready,                   Qt.ConnectionType.QueuedConnection)
@@ -643,6 +646,8 @@ class PlexLibrary(QObject):
         self._showReady.connect(lambda rk, d: self.showReady.emit(rk, d))
         self._seasonsReady.connect(lambda rk, d: self.seasonsReady.emit(rk, d))
         self._episodesReady.connect(lambda rk, d: self.episodesReady.emit(rk, d))
+        self._artistPreviewReady.connect(self._on_artist_preview_ready,
+                                        Qt.ConnectionType.QueuedConnection)
         self._artistDetailReady.connect(self._on_artist_detail_ready,
                                         Qt.ConnectionType.QueuedConnection)
         self._albumDetailReady.connect(self._on_album_detail_ready,
@@ -683,6 +688,13 @@ class PlexLibrary(QObject):
         # Populate models from disk cache immediately (dedicated thread, no network I/O).
         # Uses _cache_executor so it is never queued behind network calls in _executor.
         self._cache_executor.submit(self._worker_load_all_caches)
+
+        # Kick off server discovery + client setup on a worker thread.
+        # _client remains None until _on_setup_ready fires — existing guards handle this.
+        # refresh_after=False: __init__ only sets up the client; explicit refresh()
+        # calls from QML trigger the data refresh.
+        if self._config.plex_token:
+            self._executor.submit(self._worker_setup, False)
 
     def set_wid(self, wid: int) -> None:
         """Pass the Qt native window handle to the MPV player.
@@ -840,14 +852,14 @@ class PlexLibrary(QObject):
     @Slot()
     def refresh(self) -> None:
         """Re-fetch library list and on-deck, check server availability."""
-        # Re-create client from config in case settings changed
-        self._setup_client()
-        if self._client is None:
-            logger.info("PlexLibrary.refresh: no Plex client configured")
+        token = self._config.plex_token
+        if not token:
+            self._client = None
+            self._account = None
+            self._server_url = ""
             self._on_availability_ready(False)
             return
-        client = self._client
-        self._executor.submit(self._worker_refresh, client)
+        self._executor.submit(self._worker_setup, True)
 
     @Slot(str)
     def selectLibrary(self, section_key: str) -> None:
@@ -889,18 +901,20 @@ class PlexLibrary(QObject):
         self.currentLibraryChanged.emit(section_title)
 
         # Cache-first: emit cached data immediately for instant display.
-        # Network fetch (below) will backfill if client is available.
-        if section_type == "movie":
+        # Skip if the model already has content (e.g. returning from a detail
+        # view) — re-loading cache triggers set_movies/set_shows which resets
+        # the GridView's contentY, causing scroll position jumps.
+        if section_type == "movie" and len(self._movies_model._movies) == 0:
             cached = self._load_movies_cache(section_key)
             if cached:
                 self._resolve_cached_posters(cached)
                 self._on_movies_cache_ready(cached, section_key)
-        elif section_type == "show":
+        elif section_type == "show" and len(self._shows_model._shows) == 0:
             cached = self._load_shows_cache(section_key)
             if cached:
                 self._resolve_cached_posters(cached)
                 self._on_shows_cache_ready(cached, section_key)
-        elif section_type == "artist":
+        elif section_type == "artist" and len(self._artists_model._artists) == 0:
             cached = self._load_artists_cache()
             if cached:
                 self._resolve_cached_posters(cached)
@@ -1251,18 +1265,6 @@ class PlexLibrary(QObject):
             self._episodesReady.emit(season_rating_key, result)
         self._executor.submit(_worker)
 
-    @Slot(str, result="QVariant")
-    def getStreamInfo(self, rating_key: str) -> dict:
-        """Return {"url": str, "viewOffset": int} for the given ratingKey.
-
-        viewOffset is in milliseconds. Returns {"url": "", "viewOffset": 0} on failure.
-        Runs synchronously on the calling thread — call from a worker or accept brief UI block.
-        """
-        if self._client is None:
-            return {"url": "", "viewOffset": 0}
-        url, view_offset = self._client.get_stream_url(rating_key)
-        return {"url": url, "viewOffset": view_offset}
-
     @Slot(str, int)
     def fetchStreamInfo(self, rating_key: str, known_view_offset: int = 0) -> None:
         """Async version of getStreamInfo. Emits streamInfoReady when done.
@@ -1283,31 +1285,6 @@ class PlexLibrary(QObject):
     def _on_stream_info_ready(self, rating_key: str, url: str, view_offset_ms: int) -> None:
         """Called on main thread when async stream info fetch completes."""
         self.streamInfoReady.emit(rating_key, url, view_offset_ms)
-
-    @Slot(int, result="QVariant")
-    def getWatchHistory(self, limit: int = 50) -> list:
-        """Fetch watch history. Returns list of dicts for QML consumption.
-
-        Each dict has: ratingKey, title, type, viewedAt, grandparentTitle,
-        thumb, grandparentThumb, duration.
-        Synchronous — call from a worker context or accept the brief block.
-        """
-        if self._client is None:
-            return []
-        raw = self._client.get_watch_history(limit=limit)
-        result = []
-        for item in raw:
-            result.append({
-                "ratingKey": str(item.get("ratingKey", "")),
-                "title": item.get("title", ""),
-                "type": item.get("type", ""),
-                "viewedAt": int(item.get("viewedAt", 0) or 0),
-                "grandparentTitle": item.get("grandparentTitle", ""),
-                "thumb": item.get("thumb", ""),
-                "grandparentThumb": item.get("grandparentThumb", ""),
-                "duration": int(item.get("duration", 0) or 0),
-            })
-        return result
 
     @Slot(int)
     def fetchWatchHistory(self, limit: int = 50) -> None:
@@ -1515,107 +1492,32 @@ class PlexLibrary(QObject):
             "posterLocal": artist.poster_local,
         }
 
-    @Slot(str, result="QVariant")
-    def getAlbum(self, rating_key: str) -> dict:
-        """Return album metadata as a dict (synchronous, blocks briefly)."""
+    @Slot(str)
+    def fetchArtistPreview(self, rating_key: str) -> None:
+        """Async: fetch artist metadata only (no albums). Emits artistPreviewReady."""
         if self._client is None:
-            return {}
-        data = self._client.get_metadata(rating_key)
-        if not data:
-            return {}
-        album = parse_album(data)
-        if album.thumb_path and self._poster_cache:
-            album.poster_local = self._poster_cache.get_poster(
-                self._client, album.thumb_path
-            )
-        return {
-            "ratingKey": album.rating_key,
-            "title": album.title,
-            "year": album.year,
-            "leafCount": album.leaf_count,
-            "parentTitle": album.parent_title,
-            "posterLocal": album.poster_local,
-            "summary": album.summary,
-            "studio": album.studio,
-            "genre": album.genre,
-            "rating": album.rating,
-        }
+            return
+        client = self._client
+        poster_cache = self._poster_cache
 
-    @Slot(str, result="QVariant")
-    def getArtistAlbums(self, artist_rating_key: str) -> list:
-        """Return all album categories for an artist as a grouped list.
+        def _worker():
+            data = client.get_metadata(rating_key)
+            if not data:
+                return
+            artist = parse_artist(data)
+            if artist.thumb_path and poster_cache:
+                cached_path = poster_cache._cache_path(artist.thumb_path)
+                if cached_path.exists():
+                    artist.poster_local = cached_path.as_uri()
+            self._artistPreviewReady.emit(rating_key, {
+                "ratingKey": artist.rating_key,
+                "title": artist.title,
+                "summary": artist.summary,
+                "genre": artist.genre,
+                "posterLocal": artist.poster_local,
+            })
 
-        Returns a list of dicts, each representing either a section header
-        or an album entry:
-
-        Headers:  {"type": "header", "title": "Albums"}
-        Albums:   {"type": "album", "ratingKey": ..., "title": ..., "year": ...,
-                   "leafCount": ..., "posterLocal": ...}
-
-        Albums within each category are sorted by year descending (newest first).
-        """
-        import re
-
-        if self._client is None:
-            return []
-        hubs = self._client.get_hubs(artist_rating_key)
-        result = []
-        for hub in hubs:
-            hub_id = hub.get("hubIdentifier", "")
-            if not (hub_id.startswith("artist.albums") or hub_id.startswith("hub.artist.albums")):
-                continue
-            # Clean up the hub title: strip leading count prefix
-            raw_title = hub.get("title", "")
-            clean_title = re.sub(r'^\d+\s+', '', raw_title)
-            # Normalize "Album" -> "Albums" for consistency
-            if clean_title == "Album":
-                clean_title = "Albums"
-            # Parse and sort albums within this category
-            albums = []
-            for item in hub.get("Metadata", []):
-                album = parse_album(item)
-                if album.thumb_path and self._poster_cache:
-                    cached_path = self._poster_cache._cache_path(album.thumb_path)
-                    if cached_path.exists():
-                        album.poster_local = cached_path.as_uri()
-                albums.append({
-                    "type": "album",
-                    "ratingKey": album.rating_key,
-                    "title": album.title,
-                    "year": album.year,
-                    "leafCount": album.leaf_count,
-                    "posterLocal": album.poster_local,
-                })
-            # Sort albums by year descending (newest first)
-            albums.sort(key=lambda a: a["year"] or 0, reverse=True)
-            # Emit header then albums
-            result.append({"type": "header", "title": clean_title})
-            result.extend(albums)
-        return result
-
-    @Slot(str, result="QVariant")
-    def getAlbums(self, artist_rating_key: str) -> list:
-        """Return albums list as a list of dicts (synchronous, blocks briefly)."""
-        if self._client is None:
-            return []
-        children = self._client.get_children(artist_rating_key)
-        albums = []
-        for item in children:
-            if item.get("type") == "album":
-                album = parse_album(item)
-                if album.thumb_path and self._poster_cache:
-                    cached_path = self._poster_cache._cache_path(album.thumb_path)
-                    if cached_path.exists():
-                        album.poster_local = cached_path.as_uri()
-                albums.append({
-                    "ratingKey": album.rating_key,
-                    "title": album.title,
-                    "year": album.year,
-                    "leafCount": album.leaf_count,
-                    "parentRatingKey": album.parent_rating_key,
-                    "posterLocal": album.poster_local,
-                })
-        return albums
+        self._executor.submit(_worker)
 
     # Maximum track count for playlists.  Playlists larger than this are
     # hidden to avoid freezing the UI with a synchronous fetch of tens of
@@ -1641,60 +1543,6 @@ class PlexLibrary(QObject):
         for emoji, replacement in cls._EMOJI_REPLACEMENTS.items():
             text = text.replace(emoji, replacement)
         return text
-
-    @Slot(result="QVariant")
-    def getPlaylists(self) -> list:
-        """Return audio playlists as a list of dicts.
-
-        Filters out non-audio playlists, playlists with more than
-        _MAX_PLAYLIST_TRACKS tracks (to avoid UI freezes), and smart
-        playlists that return zero items from the API.
-        """
-        if self._client is None:
-            return []
-        raw = self._client.get_playlists()
-        result = []
-        for p in raw:
-            if p.get("playlistType") != "audio":
-                continue
-            leaf_count = int(p.get("leafCount", 0) or 0)
-            if leaf_count > self._MAX_PLAYLIST_TRACKS:
-                continue
-            # Smart playlists may report a leafCount but return 0 items
-            # from the API.  Probe with a single-item fetch to check.
-            rk = str(p.get("ratingKey", ""))
-            if p.get("smart") and rk:
-                probe = self._client.get_playlist_items(rk, limit=1)
-                if not probe:
-                    continue
-            result.append({
-                "ratingKey": rk,
-                "title": self._replace_emoji(p.get("title", "")),
-                "leafCount": leaf_count,
-                "duration": int(p.get("duration", 0) or 0),
-                "smart": bool(p.get("smart", False)),
-            })
-        return result
-
-    @Slot(str, result="QVariant")
-    def getPlaylistTracks(self, rating_key: str) -> list:
-        """Return tracks for a playlist as a list of dicts."""
-        if self._client is None:
-            return []
-        raw = self._client.get_playlist_items(rating_key)
-        result = []
-        for item in raw:
-            track = parse_track(item)
-            result.append({
-                "ratingKey": track.rating_key,
-                "title": track.title,
-                "index": track.index,
-                "durationMs": track.duration_ms,
-                "parentTitle": track.parent_title,
-                "grandparentTitle": track.grandparent_title,
-                "mediaKey": track.media_key,
-            })
-        return result
 
     @Slot(str)
     def fetchArtistDetail(self, rating_key: str) -> None:
@@ -1954,54 +1802,6 @@ class PlexLibrary(QObject):
                 })
             self._playlistTracksReady.emit(rating_key, result)
         self._executor.submit(_worker)
-
-    @Slot(str, result="QVariant")
-    def getRecentlyAddedAlbums(self, section_key: str) -> list:
-        """Return recently added albums for a music library section."""
-        if self._client is None:
-            return []
-        data = self._client._get(f"/library/sections/{section_key}/recentlyAdded")
-        if data is None:
-            return []
-        items = data.get("MediaContainer", {}).get("Metadata", [])
-        result = []
-        for item in items:
-            if item.get("type") != "album":
-                continue
-            album = parse_album(item)
-            if album.thumb_path and self._poster_cache:
-                cached_path = self._poster_cache._cache_path(album.thumb_path)
-                if cached_path.exists():
-                    album.poster_local = cached_path.as_uri()
-            result.append({
-                "ratingKey": album.rating_key,
-                "title": album.title,
-                "year": album.year,
-                "parentTitle": album.parent_title,
-                "posterLocal": album.poster_local,
-            })
-        return result
-
-    @Slot(str, result="QVariant")
-    def getTracks(self, album_rating_key: str) -> list:
-        """Return tracks list as a list of dicts (synchronous, blocks briefly)."""
-        if self._client is None:
-            return []
-        children = self._client.get_children(album_rating_key)
-        tracks = []
-        for item in children:
-            if item.get("type") == "track":
-                track = parse_track(item)
-                tracks.append({
-                    "ratingKey": track.rating_key,
-                    "title": track.title,
-                    "index": track.index,
-                    "durationMs": track.duration_ms,
-                    "parentTitle": track.parent_title,
-                    "grandparentTitle": track.grandparent_title,
-                    "mediaKey": track.media_key,
-                })
-        return tracks
 
     @Slot(str, result=str)
     def getTrackStreamUrl(self, media_key: str) -> str:
@@ -2463,9 +2263,12 @@ class PlexLibrary(QObject):
     def _on_movies_ready(self, movies: list, total: int) -> None:
         self._loading_more = False
         if self._movies_loaded == 0:
-            # First page — replace model
-            self._movies_model.set_movies(movies)
-            self.moviesModelChanged.emit()
+            # First page — only replace if the model doesn't already have more
+            # data (e.g. from cache). Avoids replacing a 500-item cached model
+            # with a 50-item first page, which causes scroll/focus jumps.
+            if len(movies) >= len(self._movies_model._movies):
+                self._movies_model.set_movies(movies)
+                self.moviesModelChanged.emit()
             self._save_state_cache("last_movie_section", self._current_section_key)
         else:
             # Subsequent pages — append
@@ -2496,9 +2299,11 @@ class PlexLibrary(QObject):
     def _on_shows_ready(self, shows: list, total: int) -> None:
         self._shows_loading_more = False
         if self._shows_loaded == 0:
-            # First page — replace model
-            self._shows_model.set_shows(shows)
-            self.showsModelChanged.emit()
+            # First page — only replace if the model doesn't already have more
+            # data (e.g. from cache).
+            if len(shows) >= len(self._shows_model._shows):
+                self._shows_model.set_shows(shows)
+                self.showsModelChanged.emit()
             self._save_state_cache("last_show_section", self._current_section_key)
         else:
             # Subsequent pages — append
@@ -2526,6 +2331,9 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
 
+    def _on_artist_preview_ready(self, rating_key: str, data: object) -> None:
+        self.artistPreviewReady.emit(rating_key, data)
+
     def _on_artist_detail_ready(self, rating_key: str, data: object) -> None:
         self.artistDetailReady.emit(rating_key, data)
 
@@ -2542,8 +2350,11 @@ class PlexLibrary(QObject):
         self.playlistTracksReady.emit(rating_key, data)
 
     def _on_artists_ready(self, artists: list, total: int) -> None:
-        self._artists_model.set_artists(artists)
-        self.artistsModelChanged.emit()
+        # Only replace if incoming data is at least as large as current model
+        # (avoids replacing cached model with smaller network response).
+        if len(artists) >= len(self._artists_model._artists):
+            self._artists_model.set_artists(artists)
+            self.artistsModelChanged.emit()
 
         # Save every page — merge-by-key preserves existing entries.
         # Snapshot to dicts on main thread; disk I/O on _cache_executor.
@@ -3073,33 +2884,38 @@ class PlexLibrary(QObject):
             logger.warning("Failed to load shows cache", exc_info=True)
             return None
 
-    def _resolve_server_url(self) -> Optional[str]:
+    def _resolve_server_url(self, account: PlexAccount) -> tuple[Optional[str], list[str]]:
         """Resolve the server URL from plex.tv resources API.
 
         Finds the server matching config.plex_server_id and picks the best
         connection URL using the priority: local > non-relay > relay, with
         HTTPS preferred within each tier.
 
-        Returns the URI string, or None if not found.
-        """
-        if self._account is None or not self._config.plex_server_id:
-            return None
+        Returns (best_uri, all_uris) where best_uri is the chosen URL string
+        (or None if not found) and all_uris is the prioritised list of all
+        connection URIs.
 
-        resources = self._account.get_resources()
+        Safe to call from any thread — does not write to shared state.
+        """
+        server_id = self._config.plex_server_id
+        if not server_id:
+            return None, []
+
+        resources = account.get_resources()
         server = next(
-            (r for r in resources if r.get("clientIdentifier") == self._config.plex_server_id),
+            (r for r in resources if r.get("clientIdentifier") == server_id),
             None,
         )
         if server is None:
             logger.warning(
-                "PlexLibrary: server %s not found in resources", self._config.plex_server_id
+                "PlexLibrary: server %s not found in resources", server_id
             )
-            return None
+            return None, []
 
         connections = server.get("connections", [])
         if not connections:
-            logger.warning("PlexLibrary: server %s has no connections", self._config.plex_server_id)
-            return None
+            logger.warning("PlexLibrary: server %s has no connections", server_id)
+            return None, []
 
         # Sort connections by priority: local first, then non-relay, then relay.
         # Within each tier, prefer direct IP connections over plex.direct URLs
@@ -3117,13 +2933,12 @@ class PlexLibrary(QObject):
             return (tier, plex_direct_pref, https_pref)
 
         sorted_conns = sorted(connections, key=_conn_priority)
-        # Store all URIs for self-healing fallback
-        self._all_server_urls = [c.get("uri", "") for c in sorted_conns if c.get("uri")]
+        all_urls = [c.get("uri", "") for c in sorted_conns if c.get("uri")]
         best = sorted_conns[0]
         uri = best.get("uri", "")
         logger.info("PlexLibrary: resolved server URL: %s (%d connections available)",
-                    uri, len(self._all_server_urls))
-        return uri or None
+                    uri, len(all_urls))
+        return (uri or None), all_urls
 
     def _probe_server_url(self, url: str, timeout: float = 3.0) -> bool:
         """Quick probe: is the server reachable at this URL?
@@ -3137,30 +2952,33 @@ class PlexLibrary(QObject):
         except Exception:
             return False
 
-    def _setup_client(self) -> None:
-        """Create the PlexClient using PlexAccount server discovery."""
+    def _worker_setup(self, refresh_after: bool = False) -> None:
+        """Worker thread: resolve server, probe, switch user. Emits _setupReady.
+
+        All network I/O happens here. Does NOT write to any shared instance
+        state — results are marshalled to the main thread via _setupReady.
+
+        Args:
+            refresh_after: if True, _on_setup_ready will also submit _worker_refresh
+                to fetch library/on-deck data.  False for __init__ (setup only),
+                True for explicit refresh() calls from QML.
+        """
         token = self._config.plex_token
-        if not token:
-            self._client = None
-            self._account = None
-            self._server_url = ""
-            logger.info("PlexLibrary: no Plex token configured")
+        server_id = self._config.plex_server_id
+
+        if not server_id:
+            self._setupReady.emit({
+                "available": False,
+                "account": PlexAccount(token) if token else None,
+                "refresh_after": refresh_after,
+            })
             return
 
-        if not self._config.plex_server_id:
-            self._client = None
-            self._account = PlexAccount(token)
-            self._server_url = ""
-            logger.info("PlexLibrary: no Plex server selected")
-            return
-
-        self._account = PlexAccount(token)
-        server_url = self._resolve_server_url()
+        account = PlexAccount(token)
+        server_url, all_urls = self._resolve_server_url(account)
         if server_url:
             # Cache the highest-priority (local) URL for offline startup.
-            # Always store the best URL, not whatever URL happens to work
-            # this session (e.g. a remote/relay URL on an external network).
-            best_url = self._all_server_urls[0] if self._all_server_urls else server_url
+            best_url = all_urls[0] if all_urls else server_url
             if best_url != self._config.plex_server_url:
                 self._config.set_plex_server_url(best_url)
 
@@ -3170,7 +2988,7 @@ class PlexLibrary(QObject):
                     "PlexLibrary: primary URL %s unreachable, trying alternatives",
                     server_url,
                 )
-                for alt_url in self._all_server_urls:
+                for alt_url in all_urls:
                     if alt_url == server_url:
                         continue
                     if self._probe_server_url(alt_url):
@@ -3179,68 +2997,112 @@ class PlexLibrary(QObject):
                         break
                 else:
                     logger.warning("PlexLibrary: all server URLs unreachable")
-                    # Fall through — create client with best URL anyway so the
-                    # existing retry/fallback mechanism can still try later.
         else:
             server_url = self._config.plex_server_url
             if server_url:
                 logger.info(
                     "PlexLibrary: plex.tv unreachable, using cached server URL: %s", server_url
                 )
-                if not self._all_server_urls:
-                    self._all_server_urls = [server_url]
+                if not all_urls:
+                    all_urls = [server_url]
             else:
-                self._client = None
-                self._server_url = ""
                 logger.info(
                     "PlexLibrary: could not resolve server URL and no cached URL available"
                 )
+                self._setupReady.emit({"available": False, "account": account, "refresh_after": refresh_after})
                 return
 
         # If a user is selected, switch to get a user-specific token.
-        # Cache the result to avoid hammering the API on every refresh().
+        # Read cached values — these are only written on the main thread in
+        # _on_setup_ready, so reading them here is safe (stale-read at worst,
+        # which just means an extra switch_user call).
         user_token = token
         user_id = self._config.plex_user_id
+        user_title = ""
+        content_rating_filter = ""
+        cached_user_id = self._cached_user_id
+        cached_user_token = self._cached_user_token
+        cached_content_rating_filter = self._cached_content_rating_filter
         if user_id:
-            if self._cached_user_id == user_id and self._cached_user_token:
-                # Reuse the cached token and restriction filter
-                user_token = self._cached_user_token
-                self._content_rating_filter = self._cached_content_rating_filter
+            if cached_user_id == user_id and cached_user_token:
+                user_token = cached_user_token
+                content_rating_filter = cached_content_rating_filter
+                user_title = self._cached_user_title
                 logger.debug("PlexLibrary: reusing cached token for user %s", user_id)
             else:
-                switched_token = self._account.switch_user(user_id)
+                switched_token = account.switch_user(user_id)
                 if switched_token:
                     user_token = switched_token
-                    self._cached_user_id = user_id
-                    self._cached_user_token = switched_token
-                    # Look up and cache the user's display title and restriction profile
-                    home_users = self._account.get_home_users()
+                    home_users = account.get_home_users()
                     matched = next(
                         (u for u in home_users if u.get("id") == user_id), None
                     )
-                    self._cached_user_title = matched.get("title", "") if matched else ""
+                    user_title = matched.get("title", "") if matched else ""
                     restriction = matched.get("restrictionProfile", "") if matched else ""
-                    self._content_rating_filter = _RESTRICTION_RATINGS.get(restriction, "")
-                    self._cached_content_rating_filter = self._content_rating_filter
+                    content_rating_filter = _RESTRICTION_RATINGS.get(restriction, "")
                     logger.info("PlexLibrary: switched to user %s", user_id)
                 else:
                     logger.warning(
                         "PlexLibrary: failed to switch to user %s, using admin token", user_id
                     )
 
+        self._setupReady.emit({
+            "available": True,
+            "server_url": server_url,
+            "all_urls": all_urls,
+            "account": account,
+            "token": token,
+            "user_token": user_token,
+            "user_id": user_id,
+            "user_title": user_title,
+            "content_rating_filter": content_rating_filter,
+            "refresh_after": refresh_after,
+        })
+
+    def _on_setup_ready(self, result: dict) -> None:
+        """Main thread: apply setup results and start data refresh."""
+        account = result.get("account")
+        if account is not None:
+            self._account = account
+
+        if not result.get("available"):
+            self._client = None
+            self._server_url = ""
+            self._on_availability_ready(False)
+            return
+
+        server_url = result["server_url"]
+        all_urls = result["all_urls"]
+        token = result["token"]
+        user_token = result["user_token"]
+        user_id = result.get("user_id")
+        user_title = result.get("user_title", "")
+        content_rating_filter = result.get("content_rating_filter", "")
+
         self._server_url = server_url
-        # The user-specific token is for browser deep links only (so Plex Web
-        # applies the correct user profile and content restrictions).
-        # The PlexClient uses the admin token for server API calls because
-        # managed/restricted users don't have direct server access.
+        self._all_server_urls = all_urls
         self._active_token = user_token
+        self._content_rating_filter = content_rating_filter
+
+        # Update user-switching cache
+        if user_id and user_token != token:
+            # A successful switch occurred (token changed)
+            self._cached_user_id = user_id
+            self._cached_user_token = user_token
+            self._cached_user_title = user_title
+            self._cached_content_rating_filter = content_rating_filter
+
         self._client = PlexClient(server_url, token, client_id=self._config.plex_client_id)
         self._client.set_error_callback(self._on_plex_error)
-        # Pass all known server URLs for self-healing on connection failure
-        fallbacks = [u for u in self._all_server_urls if u != server_url]
+        fallbacks = [u for u in all_urls if u != server_url]
         self._client.set_fallback_urls(fallbacks)
         logger.info("PlexLibrary: client configured for %s", server_url)
         self._start_event_listener()
+
+        # Submit data refresh only when requested (refresh() passes True,
+        # __init__ passes False since QML triggers refresh explicitly).
+        if result.get("refresh_after", True):
+            self._executor.submit(self._worker_refresh, self._client)
 
     def _start_event_listener(self) -> None:
         """Start the SSE listener if a client is configured."""
@@ -3273,7 +3135,7 @@ class PlexLibrary(QObject):
     def _ensure_account(self) -> PlexAccount | None:
         """Return a PlexAccount, creating one if needed.
 
-        This allows getServerList/getHomeUsers to work even when _setup_client
+        This allows getServerList/getHomeUsers to work even when _worker_setup
         failed (e.g. wrong server selected, server unreachable).
         """
         if self._account is not None:
@@ -3349,7 +3211,7 @@ class PlexLibrary(QObject):
         """
         self._config.set_plex_user_id(user_id)
         # Clear the cached user token, title, and content rating filter
-        # so the next _setup_client() will re-switch and re-resolve the restriction profile
+        # so the next _worker_setup() will re-switch and re-resolve the restriction profile
         self._cached_user_id = None
         self._cached_user_token = ""
         self._cached_user_title = ""
