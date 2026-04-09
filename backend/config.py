@@ -418,6 +418,8 @@ class Config:
         self._listen_view_mode: str = "grid"
         # Theme
         self._theme_name: str = "default"
+        self._accent_color: str = "#e94560"
+        self._focus_ring_color: str = "#e94560"
 
         if CONFIG_FILE.exists():
             self._load()
@@ -595,6 +597,34 @@ class Config:
             logger.warning("set_theme_name: invalid value %r — ignored", name)
             return
         self._theme_name = name.strip()
+        self.save()
+
+    @property
+    def accent_color(self) -> str:
+        """Active accent color as a hex string. Defaults to '#e94560'."""
+        return self._accent_color
+
+    def set_accent_color(self, color: str) -> None:
+        """Set the accent color and persist the config."""
+        color = color.strip()
+        if not color.startswith("#") or len(color) not in (4, 7, 9):
+            logger.warning("set_accent_color: invalid value %r — ignored", color)
+            return
+        self._accent_color = color
+        self.save()
+
+    @property
+    def focus_ring_color(self) -> str:
+        """Active focus ring color as a hex string. Defaults to '#e94560'."""
+        return self._focus_ring_color
+
+    def set_focus_ring_color(self, color: str) -> None:
+        """Set the focus ring color and persist the config."""
+        color = color.strip()
+        if not color.startswith("#") or len(color) not in (4, 7, 9):
+            logger.warning("set_focus_ring_color: invalid value %r — ignored", color)
+            return
+        self._focus_ring_color = color
         self.save()
 
     def set_rom_directory(self, path: "str | Path") -> None:
@@ -918,6 +948,8 @@ class Config:
                 "watch_view_mode": self._watch_view_mode,
                 "listen_view_mode": self._listen_view_mode,
                 "theme_name": self._theme_name,
+                "accent_color": self._accent_color,
+                "focus_ring_color": self._focus_ring_color,
             },
             "sort_preferences": {
                 "retro_games": self._sort_retro_games,
@@ -1099,6 +1131,12 @@ class Config:
             self._listen_view_mode = raw_listen_view_mode if raw_listen_view_mode in ("grid", "list") else "grid"
             raw_theme_name = ui.get("theme_name", "default").strip()
             self._theme_name = raw_theme_name if raw_theme_name else "default"
+            raw_accent = ui.get("accent_color", "").strip()
+            if raw_accent.startswith("#") and len(raw_accent) in (4, 7, 9):
+                self._accent_color = raw_accent
+            raw_focus = ui.get("focus_ring_color", "").strip()
+            if raw_focus.startswith("#") and len(raw_focus) in (4, 7, 9):
+                self._focus_ring_color = raw_focus
 
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})

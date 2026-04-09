@@ -7,10 +7,9 @@ QtObject {
     // These are the only values that change between palettes.
     // All semantic tokens below reference these.
 
-    readonly property color _bg:          "#1a1a2e"   // page background
-    readonly property color _surface:     "#16213e"   // card / panel surface
-    readonly property color _surfaceHigh: "#0f3460"   // elevated surface (dialogs, overlays)
-    readonly property color _accent:      "#e94560"   // primary accent (focus, active, badges)
+    readonly property color _bg:          "#111111"   // page background
+    readonly property color _surface:     "#1c1c1c"   // card / panel surface
+    readonly property color _surfaceHigh: "#2a2a2a"   // elevated surface (dialogs, overlays)
     readonly property color _textPrimary: "#eeeeff"   // primary text
     readonly property color _textDim:     "#8888aa"   // secondary / hint text
     readonly property color _black:       "#000000"   // absolute black (image placeholders)
@@ -32,10 +31,10 @@ QtObject {
     readonly property color colorSurface:       _surface
     readonly property color colorSurfaceHigh:   _surfaceHigh
 
-    // Accent
-    readonly property color colorAccent:        _accent
+    // Accent — settings-driven, not readonly so QML re-evaluates on settings changes
+    property color colorAccent:    settings ? settings.accentColor    : "#e94560"
     // Keep colorPrimary as an alias — widely used, renaming is 4b/4c work
-    readonly property color colorPrimary:       _accent
+    readonly property color colorPrimary:       colorAccent
 
     // Text
     readonly property color colorText:          _textPrimary
@@ -43,9 +42,9 @@ QtObject {
     readonly property color colorTextOnAccent:  _white    // text drawn on accent-colored backgrounds
 
     // Interactive surfaces
-    readonly property color colorFocusRing:     _accent
-    readonly property color colorTabUnderline:  _accent
-    readonly property color colorHighlight:     Qt.rgba(_accent.r, _accent.g, _accent.b, 0.15)
+    property color colorFocusRing: settings ? settings.focusRingColor : "#e94560"
+    readonly property color colorTabUnderline:  colorAccent
+    readonly property color colorHighlight:     Qt.rgba(colorAccent.r, colorAccent.g, colorAccent.b, 0.15)
 
     // Keep colorSecondary as an alias — widely used, renaming is 4b/4c work
     readonly property color colorSecondary:     _surface
@@ -73,7 +72,9 @@ QtObject {
     readonly property color colorTrackMuted:    _muted        // unselected track indicator
 
     // ── Typography ────────────────────────────────────────────────────────────
-    readonly property string fontFamily:    "Sans"
+    readonly property string fontFamily:       "Liberation Sans"
+    readonly property int    fontWeightNormal: Font.Normal
+    readonly property int    fontWeightBold:   Font.Bold
     readonly property int fontSizeTitle:    36
     readonly property int fontSizeHeading:  24
     readonly property int fontSizeBody:     18
@@ -85,5 +86,9 @@ QtObject {
 
     // ── Focus ring geometry (design-grid px, before vpx scaling) ─────────────
     readonly property int focusRingWidth:  3
-    readonly property int focusRingRadius: 4
+    readonly property int focusRingRadius: 10
+
+    // ── Scale animation tokens ────────────────────────────────────────────────
+    readonly property real focusScale:         1.05
+    readonly property int  focusScaleDuration: 120
 }

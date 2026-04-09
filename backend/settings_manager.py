@@ -81,6 +81,8 @@ class SettingsManager(QObject):
     showMoonlightTabChanged = Signal()
     tabVisibilityChanged = Signal()
     themeNameChanged = Signal()
+    accentColorChanged = Signal()
+    focusRingColorChanged = Signal()
 
     def __init__(
         self,
@@ -211,6 +213,12 @@ class SettingsManager(QObject):
 
     def _get_theme_name(self) -> str:
         return self._config.theme_name
+
+    def _get_accent_color(self) -> str:
+        return self._config.accent_color
+
+    def _get_focus_ring_color(self) -> str:
+        return self._config.focus_ring_color
 
     def _get_theme_dir(self) -> str:
         return "file://" + str(self._app_dir / "themes" / self._config.theme_name) + "/"
@@ -389,6 +397,8 @@ class SettingsManager(QObject):
         fget=_get_theme_dir,
         notify=themeNameChanged,
     )
+    accentColor = Property(str, fget=_get_accent_color, notify=accentColorChanged)
+    focusRingColor = Property(str, fget=_get_focus_ring_color, notify=focusRingColorChanged)
 
     # ------------------------------------------------------------------
     # Slots — setters
@@ -591,6 +601,18 @@ class SettingsManager(QObject):
         """Set the Listen tab visibility."""
         self._config.set_show_listen_tab(enabled)
         self.tabVisibilityChanged.emit()
+
+    @Slot(str)
+    def setAccentColor(self, color: str) -> None:
+        """Set the accent color."""
+        self._config.set_accent_color(color)
+        self.accentColorChanged.emit()
+
+    @Slot(str)
+    def setFocusRingColor(self, color: str) -> None:
+        """Set the focus ring color."""
+        self._config.set_focus_ring_color(color)
+        self.focusRingColorChanged.emit()
 
     # -- Button layout ----------------------------------------------------
 
