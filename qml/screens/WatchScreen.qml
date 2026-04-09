@@ -82,8 +82,12 @@ FocusScope {
         for (var i = 0; i < all.length; i++) {
             if (all[i].type !== "artist") filtered.push(all[i])
         }
+        filtered.push({ title: watchScreen._refreshing ? "Refreshing..." : "↻  Refresh",
+                        type: "refresh", sectionKey: "", count: 0 })
         return filtered
     }
+
+    on_RefreshingChanged: _libraryEntries = _getVideoLibraries()
 
     // ── Resume dialog state ───────────────────────────────────────────────────
     property bool _resumeDialogVisible: false
@@ -446,8 +450,6 @@ FocusScope {
         if (_loadingOverlayVisible) { loadingOverlay.forceActiveFocus(); return }
         if (currentView === "libraries") {
             _contentFocused = false
-            // Don't steal focus from the Refresh item when it is already focused.
-            if (refreshItem.activeFocus) return
             libraryList.forceActiveFocus()
         } else if (currentView === "content") {
             _contentFocused = true
@@ -542,8 +544,7 @@ FocusScope {
                 topMargin: root.vpx(16)
                 leftMargin: root.vpx(32)
                 rightMargin: root.vpx(32)
-                // Leave room for the Refresh item (64px height + 16px bottom margin + 16px gap)
-                bottomMargin: root.vpx(96)
+                bottomMargin: root.vpx(16)
             }
 
             clip: true
@@ -562,7 +563,13 @@ FocusScope {
                     if (keys.isAccept(event)) {
                         event.accepted = true
                         if (currentItem) {
-                            if (currentItem.entryType === "livetv") {
+                            if (currentItem.entryType === "refresh") {
+                                if (!watchScreen._refreshing) {
+                                    watchScreen._refreshing = true
+                                    watchScreen._availabilityKnown = false
+                                    plex.refresh()
+                                }
+                            } else if (currentItem.entryType === "livetv") {
                                 // Navigate to embedded Live TV guide instead of launching browser
                                 watchScreen.selectedLibraryType = "livetv"
                                 watchScreen.currentView = "content"
@@ -577,9 +584,6 @@ FocusScope {
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
                         watchScreen.back()
-                    } else if (event.key === Qt.Key_Down && currentIndex === count - 1) {
-                        event.accepted = true
-                        refreshItem.forceActiveFocus()
                     }
                 }
 
@@ -618,7 +622,7 @@ FocusScope {
                         color: Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        opacity: 0.5
+                        opacity: modelData.type === "refresh" ? 0.0 : 0.5
                     }
 
                     // Library / section title
@@ -629,7 +633,9 @@ FocusScope {
                             verticalCenter: parent.verticalCenter
                         }
                         text: modelData.title
-                        color: modelData.type === "ondeck" ? Theme.colorPrimary : Theme.colorText
+                        color: modelData.type === "refresh"
+                            ? Theme.colorTextDim
+                            : (modelData.type === "ondeck" ? Theme.colorPrimary : Theme.colorText)
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeHeading)
                     }
@@ -661,7 +667,13 @@ FocusScope {
                         }
                         onDoubleClicked: {
                             libraryList.currentIndex = index
-                            if (modelData.type === "livetv") {
+                            if (modelData.type === "refresh") {
+                                if (!watchScreen._refreshing) {
+                                    watchScreen._refreshing = true
+                                    watchScreen._availabilityKnown = false
+                                    plex.refresh()
+                                }
+                            } else if (modelData.type === "livetv") {
                                 // Navigate to embedded Live TV guide instead of launching browser
                                 watchScreen.selectedLibraryType = "livetv"
                                 watchScreen.currentView = "content"
@@ -677,57 +689,6 @@ FocusScope {
                 }
             }
 
-        // ── Refresh item ──────────────────────────────────────────────────────
-        Item {
-            id: refreshItem
-
-            anchors {
-                left: parent.left
-                right: parent.right
-                bottom: parent.bottom
-                leftMargin: root.vpx(32)
-                rightMargin: root.vpx(32)
-                bottomMargin: root.vpx(16)
-            }
-            height: root.vpx(64)
-
-            // Highlight background (matches library list delegate style)
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorSecondary
-                opacity: refreshItem.activeFocus ? 1.0 : 0.0
-                radius: root.vpx(Theme.focusRingRadius)
-                Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
-            }
-
-            Text {
-                anchors { left: parent.left; leftMargin: root.vpx(40); verticalCenter: parent.verticalCenter }
-                text: watchScreen._refreshing ? "Refreshing..." : "↻  Refresh"
-                color: watchScreen._refreshing ? Theme.colorTextDim : Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            }
-
-            FocusRing {}
-
-            Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
-                    event.accepted = true
-                    if (!watchScreen._refreshing) {
-                        watchScreen._refreshing = true
-                        watchScreen._availabilityKnown = false
-                        plex.refresh()
-                    }
-                } else if (keys.isCancel(event)) {
-                    event.accepted = true
-                    watchScreen.back()
-                } else if (event.key === Qt.Key_Up) {
-                    event.accepted = true
-                    libraryList.forceActiveFocus()
-                    libraryList.currentIndex = libraryList.count - 1
-                }
-            }
-        }
     }
 
     // ── Movie grid (task 017) ─────────────────────────────────────────────────
