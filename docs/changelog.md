@@ -18,7 +18,8 @@ Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-
 - Gamepad suppression wired to all external launchers (setMpvActive → setExternalAppActive); fixes stuck-scroll bug
 - WatchScreen Refresh moved inline as last ListView sentinel entry (matches ListenScreen pattern)
 - Plex offline cache overhaul: cached server URL for offline client creation, cache-first selectLibrary (synchronous cache load + network backfill), incremental merge-by-rating_key cache saves (every page, never overwrites full cache with partial), poster pre-resolve from disk cache, empty network response ([], 0) guard on all worker functions
-- 2,062 tests passing (was 2,017)
+- Server URL probe on startup: _setup_client probes primary URL, falls through to remote/relay if unreachable (enables external network access)
+- 2,069 tests passing (was 2,017)
 
 ---
 

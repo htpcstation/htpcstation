@@ -6414,3 +6414,145 @@ class _RemovedOnAllCachesReady:
 
         assert len(lib_signals) == 0
         assert len(movie_signals) == 0
+
+
+# ---------------------------------------------------------------------------
+# PlexLibrary._probe_server_url & _setup_client probe logic (Task 004)
+# ---------------------------------------------------------------------------
+
+
+class TestProbeServerUrl:
+    """_probe_server_url returns True when the server responds, False otherwise."""
+
+    def test_probe_returns_true_on_success(self) -> None:
+        from backend.plex_library import PlexLibrary
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock()
+            config.plex_token = ""
+            config.plex_server_id = ""
+            lib = PlexLibrary(config)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        with patch("backend.plex_library.requests.get", return_value=mock_resp):
+            assert lib._probe_server_url("http://192.168.0.2:32400") is True
+
+    def test_probe_returns_false_on_timeout(self) -> None:
+        from backend.plex_library import PlexLibrary
+        import requests as req
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock()
+            config.plex_token = ""
+            config.plex_server_id = ""
+            lib = PlexLibrary(config)
+
+        with patch("backend.plex_library.requests.get", side_effect=req.ConnectionError):
+            assert lib._probe_server_url("http://192.168.0.2:32400") is False
+
+    def test_probe_returns_false_on_http_error(self) -> None:
+        from backend.plex_library import PlexLibrary
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock()
+            config.plex_token = ""
+            config.plex_server_id = ""
+            lib = PlexLibrary(config)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        with patch("backend.plex_library.requests.get", return_value=mock_resp):
+            assert lib._probe_server_url("http://192.168.0.2:32400") is False
+
+
+class TestSetupClientProbesFallback:
+    """_setup_client probes URLs and falls back to alternatives when primary is unreachable."""
+
+    def _make_lib_and_call_setup(self, probe_rv=True, probe_side_effect=None):
+        """Build a PlexLibrary (no-token init), then manually call _setup_client."""
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+        from backend.plex_account import PlexAccount
+
+        # Create the library with no token so __init__ skips _setup_client
+        config = MagicMock(spec=Config)
+        config.plex_token = ""
+        config.plex_server_id = ""
+        config.plex_user_id = None
+        config.plex_server_url = ""
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount"), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            lib = PlexLibrary(config)
+
+        # Now configure it for a real _setup_client call
+        config.plex_token = "tok"
+        config.plex_server_id = "server123"
+
+        mock_account = MagicMock(spec=PlexAccount)
+        mock_account.get_resources.return_value = [
+            {
+                "clientIdentifier": "server123",
+                "name": "My Server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.0.2:32400", "local": True, "relay": False, "protocol": "http"},
+                    {"uri": "https://remote.plex.direct:32400", "local": False, "relay": False, "protocol": "https"},
+                ],
+            }
+        ]
+        lib._account = mock_account
+
+        probe_kwargs = {"side_effect": probe_side_effect} if probe_side_effect else {"return_value": probe_rv}
+
+        with patch("backend.plex_library.PlexClient") as mock_client_cls, \
+             patch("backend.plex_library.PlexAccount", return_value=mock_account), \
+             patch.object(lib, "_probe_server_url", **probe_kwargs), \
+             patch.object(lib, "_start_event_listener"):
+            lib._setup_client()
+
+        return lib, config, mock_client_cls
+
+    def test_primary_reachable_uses_primary(self) -> None:
+        """When the primary URL is reachable, it is used directly."""
+        _lib, config, mock_client_cls = self._make_lib_and_call_setup(probe_rv=True)
+        mock_client_cls.assert_called_once_with(
+            "http://192.168.0.2:32400", "tok", client_id=config.plex_client_id
+        )
+
+    def test_primary_unreachable_falls_back_to_remote(self) -> None:
+        """When the primary URL is unreachable, the first reachable alternative is used."""
+        def probe_side_effect(url, timeout=3.0):
+            return url == "https://remote.plex.direct:32400"
+
+        _lib, config, mock_client_cls = self._make_lib_and_call_setup(probe_side_effect=probe_side_effect)
+        mock_client_cls.assert_called_once_with(
+            "https://remote.plex.direct:32400", "tok", client_id=config.plex_client_id
+        )
+
+    def test_all_unreachable_uses_primary(self) -> None:
+        """When all URLs are unreachable, the primary URL is still used."""
+        _lib, config, mock_client_cls = self._make_lib_and_call_setup(probe_rv=False)
+        mock_client_cls.assert_called_once_with(
+            "http://192.168.0.2:32400", "tok", client_id=config.plex_client_id
+        )
+
+    def test_cached_url_is_always_best_not_session_url(self) -> None:
+        """The config always stores the highest-priority URL, not the session URL."""
+        def probe_side_effect(url, timeout=3.0):
+            return url == "https://remote.plex.direct:32400"
+
+        _lib, config, _cls = self._make_lib_and_call_setup(probe_side_effect=probe_side_effect)
+        config.set_plex_server_url.assert_called_once_with("http://192.168.0.2:32400")

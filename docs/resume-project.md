@@ -22,7 +22,7 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,062 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,069 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
@@ -44,6 +44,7 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,062 tests pas
   - Poster pre-resolve: `_resolve_cached_posters()` checks poster disk cache when loading from JSON cache, preventing unnecessary `_poster_executor` submissions.
   - `sectionLoadFailed` emitted when `_client is None` so QML shows offline toast.
   - Empty network responses `([], 0)` from `get_library_items` (soft failure after retry exhaustion) no longer overwrite cached models — treated as `sectionLoadFailed` in `_worker_load_section`, `_worker_load_more_movies`, and `_worker_load_more_shows`.
+  - Server URL probe on startup (Task 004): `_setup_client()` probes the primary URL with a 3s `/identity` check before creating the client. If unreachable (e.g. on external network), falls through to remote/relay URLs from plex.tv resources. Config always caches the local URL for home network use.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

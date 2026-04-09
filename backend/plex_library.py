@@ -2988,6 +2988,18 @@ class PlexLibrary(QObject):
                     uri, len(self._all_server_urls))
         return uri or None
 
+    def _probe_server_url(self, url: str, timeout: float = 3.0) -> bool:
+        """Quick probe: is the server reachable at this URL?
+
+        Uses a lightweight GET /identity with a short timeout.
+        Returns True if the server responds with status < 400.
+        """
+        try:
+            response = requests.get(f"{url}/identity", timeout=timeout)
+            return response.status_code < 400
+        except Exception:
+            return False
+
     def _setup_client(self) -> None:
         """Create the PlexClient using PlexAccount server discovery."""
         token = self._config.plex_token
@@ -3008,9 +3020,30 @@ class PlexLibrary(QObject):
         self._account = PlexAccount(token)
         server_url = self._resolve_server_url()
         if server_url:
-            # Cache for offline startup
-            if server_url != self._config.plex_server_url:
-                self._config.set_plex_server_url(server_url)
+            # Cache the highest-priority (local) URL for offline startup.
+            # Always store the best URL, not whatever URL happens to work
+            # this session (e.g. a remote/relay URL on an external network).
+            best_url = self._all_server_urls[0] if self._all_server_urls else server_url
+            if best_url != self._config.plex_server_url:
+                self._config.set_plex_server_url(best_url)
+
+            # Probe the best URL; fall through to alternatives if unreachable
+            if not self._probe_server_url(server_url):
+                logger.info(
+                    "PlexLibrary: primary URL %s unreachable, trying alternatives",
+                    server_url,
+                )
+                for alt_url in self._all_server_urls:
+                    if alt_url == server_url:
+                        continue
+                    if self._probe_server_url(alt_url):
+                        logger.info("PlexLibrary: using alternative URL %s", alt_url)
+                        server_url = alt_url
+                        break
+                else:
+                    logger.warning("PlexLibrary: all server URLs unreachable")
+                    # Fall through — create client with best URL anyway so the
+                    # existing retry/fallback mechanism can still try later.
         else:
             server_url = self._config.plex_server_url
             if server_url:

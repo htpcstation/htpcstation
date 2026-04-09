@@ -14,6 +14,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication
 
 # Import once at module level to avoid repeated import lookups in the autouse fixture.
+from unittest.mock import MagicMock, patch
+
 import backend.plex_library as _plex_lib_module
 import backend.live_tv_library as _live_tv_lib_module
 from backend.plex_library import PlexLibrary as _PlexLibrary
@@ -47,3 +49,16 @@ def isolate_plex_cache(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(_plex_lib_module, "_POSTER_CACHE_DIR", posters)
     monkeypatch.setattr(_live_tv_lib_module, "_CACHE_DIR", plex_cache / "guide")
     monkeypatch.setattr(_PlexLibrary, "_migrate_cache_dirs", lambda self: None)
+
+
+@pytest.fixture(autouse=True)
+def _mock_probe_requests_get():
+    """Prevent _probe_server_url from making real network calls.
+
+    The probe does requests.get(url + "/identity", timeout=3) which stalls
+    the test suite when the URL is unreachable. Stub it globally; tests that
+    specifically test probe behavior patch requests.get themselves.
+    """
+    with patch.object(_plex_lib_module, "requests",
+                      MagicMock(get=MagicMock(return_value=MagicMock(status_code=200)))):
+        yield
