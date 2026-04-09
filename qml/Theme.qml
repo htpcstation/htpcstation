@@ -81,7 +81,7 @@ QtObject {
     readonly property int fontSizeSmall:    14
 
     // ── Animation durations (ms) ──────────────────────────────────────────────
-    readonly property int animDurationFast:   150
+    readonly property int animDurationFast:   80
     readonly property int animDurationNormal: 250
 
     // ── Focus ring geometry (design-grid px, before vpx scaling) ─────────────

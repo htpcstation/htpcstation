@@ -310,7 +310,9 @@ FocusScope {
     // ── Launcher button row ───────────────────────────────────────────────────
     Row {
         id: buttonRow
-        anchors.centerIn: parent
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.top
+        anchors.verticalCenterOffset: parent.height / 6
         spacing: root.vpx(24)
         visible: homeScreen._launcherVisible
         focus: homeScreen._launcherVisible
