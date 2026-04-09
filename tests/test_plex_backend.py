@@ -2384,12 +2384,12 @@ class TestFilterByGenre:
 
 
 # ---------------------------------------------------------------------------
-# PlexLibrary.getMovieGenres / getShowGenres (Task 022)
+# PlexLibrary.fetchGenres (Task 022 — async replacement for getMovieGenres/getShowGenres)
 # ---------------------------------------------------------------------------
 
 
-class TestGetGenres:
-    """getMovieGenres and getShowGenres delegate to the Plex client."""
+class TestFetchGenres:
+    """fetchGenres fetches genres asynchronously and caches results."""
 
     def _make_lib(self):
         from backend.plex_library import PlexLibrary
@@ -2407,10 +2407,10 @@ class TestGetGenres:
             _flush_setup(lib)
         return lib
 
-    def test_get_movie_genres_calls_client(self) -> None:
+    def test_fetches_genres_from_client(self) -> None:
+        from PySide6.QtCore import QCoreApplication
         lib = self._make_lib()
         lib._current_section_key = "4"
-        lib._available = True
         mock_client = MagicMock()
         mock_client.get_genres.return_value = [
             {"key": "1", "title": "Action"},
@@ -2418,43 +2418,59 @@ class TestGetGenres:
         ]
         lib._client = mock_client
 
-        result = lib.getMovieGenres()
+        received = []
+        lib.genresReady.connect(lambda sk, g: received.append((sk, g)))
+        lib.fetchGenres()
+        lib._executor.submit(lambda: None).result()
+        QCoreApplication.processEvents()
 
-        mock_client.get_genres.assert_called_once_with("4")
-        assert len(result) == 2
-        assert result[0]["title"] == "Action"
+        assert len(received) == 1
+        assert received[0][0] == "4"
+        assert len(received[0][1]) == 2
+        assert received[0][1][0]["title"] == "Action"
 
-    def test_get_show_genres_calls_client(self) -> None:
+    def test_returns_from_cache_on_second_call(self) -> None:
+        from PySide6.QtCore import QCoreApplication
         lib = self._make_lib()
-        lib._current_section_key = "3"
-        lib._available = True
+        lib._current_section_key = "4"
         mock_client = MagicMock()
-        mock_client.get_genres.return_value = [
-            {"key": "5", "title": "Drama"},
-        ]
+        mock_client.get_genres.return_value = [{"key": "1", "title": "Action"}]
         lib._client = mock_client
 
-        result = lib.getShowGenres()
+        received = []
+        lib.genresReady.connect(lambda sk, g: received.append((sk, g)))
+        lib.fetchGenres()
+        lib._executor.submit(lambda: None).result()
+        QCoreApplication.processEvents()
 
-        mock_client.get_genres.assert_called_once_with("3")
-        assert result[0]["title"] == "Drama"
+        # Second call — should use cache, no additional client call
+        lib.fetchGenres()
+        QCoreApplication.processEvents()
 
-    def test_get_movie_genres_returns_empty_when_no_client(self) -> None:
+        assert len(received) == 2
+        mock_client.get_genres.assert_called_once()  # only one network call
+
+    def test_emits_empty_when_no_client(self) -> None:
         lib = self._make_lib()
-        lib._client = None
         lib._current_section_key = "4"
+        lib._client = None
 
-        result = lib.getMovieGenres()
+        received = []
+        lib.genresReady.connect(lambda sk, g: received.append((sk, g)))
+        lib.fetchGenres()
 
-        assert result == []
+        assert len(received) == 1
+        assert received[0][1] == []
 
-    def test_get_movie_genres_returns_empty_when_no_section_key(self) -> None:
+    def test_noop_when_no_section_key(self) -> None:
         lib = self._make_lib()
         lib._current_section_key = ""
 
-        result = lib.getMovieGenres()
+        received = []
+        lib.genresReady.connect(lambda sk, g: received.append((sk, g)))
+        lib.fetchGenres()
 
-        assert result == []
+        assert len(received) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -7119,55 +7135,3 @@ class TestSortShowsOffline:
         assert len(submitted) == 0
 
 
-class TestGetGenresAvailability:
-    """getMovieGenres / getShowGenres return empty when server is unavailable."""
-
-    def _make_lib(self):
-        from backend.plex_library import PlexLibrary
-        from backend.config import Config
-
-        with patch("backend.plex_library.PlexClient"), \
-             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
-             patch("backend.config.CONFIG_FILE"), \
-             patch("backend.config.CONFIG_DIR"):
-            config = MagicMock(spec=Config)
-            config.plex_server_id = "server123"
-            config.plex_token = "tok"
-            config.plex_user_id = None
-            lib = PlexLibrary(config)
-            _flush_setup(lib)
-        return lib
-
-    def test_get_movie_genres_returns_empty_when_unavailable(self) -> None:
-        lib = self._make_lib()
-        lib._current_section_key = "4"
-        lib._client = MagicMock()
-        lib._available = False
-
-        result = lib.getMovieGenres()
-
-        assert result == []
-        lib._client.get_genres.assert_not_called()
-
-    def test_get_show_genres_returns_empty_when_unavailable(self) -> None:
-        lib = self._make_lib()
-        lib._current_section_key = "3"
-        lib._client = MagicMock()
-        lib._available = False
-
-        result = lib.getShowGenres()
-
-        assert result == []
-        lib._client.get_genres.assert_not_called()
-
-    def test_get_movie_genres_calls_client_when_available(self) -> None:
-        lib = self._make_lib()
-        lib._current_section_key = "4"
-        lib._client = MagicMock()
-        lib._client.get_genres.return_value = [{"key": "1", "title": "Action"}]
-        lib._available = True
-
-        result = lib.getMovieGenres()
-
-        assert len(result) == 1
-        lib._client.get_genres.assert_called_once_with("4")

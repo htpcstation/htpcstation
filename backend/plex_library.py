@@ -531,6 +531,7 @@ class PlexLibrary(QObject):
     playlistsReady     = Signal("QVariant")        # list of playlist dicts
     playlistTracksReady = Signal(str, "QVariant")  # (rating_key, list of track dicts)
     posterUpdated      = Signal(str, str)           # (ratingKey, posterUrl) — lightweight poster update
+    genresReady        = Signal(str, "QVariant")    # (section_key, genre_list) — async genre fetch result
 
     # Internal signals used to marshal results from worker threads to main thread
     _setupReady = Signal("QVariant")  # dict with setup results from worker thread
@@ -553,6 +554,7 @@ class PlexLibrary(QObject):
     _seasonsReady  = Signal(str, object)
     _episodesReady = Signal(str, object)
     _artistPreviewReady = Signal(str, object)
+    _genresReady        = Signal(str, object)       # (section_key, genre_list)
     _artistDetailReady  = Signal(str, object)
     _albumDetailReady   = Signal(str, object)
     _recentAlbumsReady  = Signal(object)
@@ -582,6 +584,7 @@ class PlexLibrary(QObject):
         self._machine_identifier: str = ""
         self._section_sort: dict[str, str] = {}   # sort param per section key
         self._section_genre: dict[str, str] = {}  # genre filter per section key
+        self._genres_cache: dict[str, list] = {}  # cached genre lists per section key
         self._content_rating_filter: str = ""  # comma-separated allowed ratings for restricted users
         self._cached_content_rating_filter: str = ""  # cached alongside user token
 
@@ -644,6 +647,8 @@ class PlexLibrary(QObject):
         self._episodesReady.connect(lambda rk, d: self.episodesReady.emit(rk, d))
         self._artistPreviewReady.connect(self._on_artist_preview_ready,
                                         Qt.ConnectionType.QueuedConnection)
+        self._genresReady.connect(lambda sk, g: self.genresReady.emit(sk, g),
+                                  Qt.ConnectionType.QueuedConnection)
         self._artistDetailReady.connect(self._on_artist_detail_ready,
                                         Qt.ConnectionType.QueuedConnection)
         self._albumDetailReady.connect(self._on_album_detail_ready,
@@ -1094,23 +1099,30 @@ class PlexLibrary(QObject):
             sort, genre_key
         )
 
-    @Slot(result="QVariant")
-    def getMovieGenres(self) -> list:
-        """Return genres for the current movie library as [{key, title}, ...]."""
-        if self._client is None or not self._current_section_key:
-            return []
-        if not self._available:
-            return []
-        return self._client.get_genres(self._current_section_key)
+    @Slot()
+    def fetchGenres(self) -> None:
+        """Async: fetch genres for the current library section. Emits genresReady.
 
-    @Slot(result="QVariant")
-    def getShowGenres(self) -> list:
-        """Return genres for the current show library as [{key, title}, ...]."""
-        if self._client is None or not self._current_section_key:
-            return []
-        if not self._available:
-            return []
-        return self._client.get_genres(self._current_section_key)
+        Results are cached per section key — subsequent calls for the same
+        section emit immediately from cache without a network call.
+        """
+        section_key = self._current_section_key
+        if not section_key:
+            return
+        # Return from cache if available
+        cached = self._genres_cache.get(section_key)
+        if cached is not None:
+            self.genresReady.emit(section_key, cached)
+            return
+        if self._client is None:
+            self.genresReady.emit(section_key, [])
+            return
+        client = self._client
+        def _worker():
+            genres = client.get_genres(section_key)
+            self._genres_cache[section_key] = genres
+            self._genresReady.emit(section_key, genres)
+        self._executor.submit(_worker)
 
     @Slot(int, result=str)
     def getMovieRatingKeyAt(self, index: int) -> str:

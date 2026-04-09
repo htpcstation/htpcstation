@@ -51,6 +51,19 @@ FocusScope {
         function onSectionLoadFailed() {
             movieGridView._loading = false
         }
+        function onGenresReady(sectionKey, genres) {
+            sortFilterOverlay._genres = genres
+            // Sync genre selection index
+            sortFilterOverlay._genreIndex = 0
+            if (movieGridView._currentGenreKey !== "") {
+                for (var i = 0; i < genres.length; i++) {
+                    if (genres[i].key === movieGridView._currentGenreKey) {
+                        sortFilterOverlay._genreIndex = i + 1
+                        break
+                    }
+                }
+            }
+        }
     }
 
     // Human-readable sort label for the status bar
@@ -449,19 +462,8 @@ FocusScope {
             var si = sortKeys.indexOf(movieGridView._currentSort)
             _sortIndex = si >= 0 ? si : 0
 
-            // Load genres
-            _genres = plex.getMovieGenres()
-
-            // Sync genre selection
-            _genreIndex = 0
-            if (movieGridView._currentGenreKey !== "") {
-                for (var i = 0; i < _genres.length; i++) {
-                    if (_genres[i].key === movieGridView._currentGenreKey) {
-                        _genreIndex = i + 1  // +1 for "All" at index 0
-                        break
-                    }
-                }
-            }
+            // Fetch genres asynchronously — onGenresReady populates _genres
+            plex.fetchGenres()
 
             // Sync view selection
             var viewKeys = ["grid", "list"]
