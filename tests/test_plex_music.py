@@ -686,14 +686,17 @@ class TestGetAlbums:
         ]
         lib._client = mock_client
 
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
         mock_cache = MagicMock()
-        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        mock_cache._cache_path.return_value = mock_path
         lib._poster_cache = mock_cache
 
         result = lib.getAlbums("500")
 
-        mock_cache.get_poster.assert_called_once_with(
-            mock_client, "/library/metadata/600/thumb/1"
+        mock_cache._cache_path.assert_called_once_with(
+            "/library/metadata/600/thumb/1"
         )
         assert result[0]["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
 
@@ -1414,14 +1417,17 @@ class TestGetArtistAlbums:
         ]
         lib._client = mock_client
 
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
         mock_cache = MagicMock()
-        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        mock_cache._cache_path.return_value = mock_path
         lib._poster_cache = mock_cache
 
         result = lib.getArtistAlbums("500")
 
         album = next(e for e in result if e["type"] == "album")
-        mock_cache.get_poster.assert_called_once_with(mock_client, "/thumb/600")
+        mock_cache._cache_path.assert_called_once_with("/thumb/600")
         assert album["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
 
     def test_hub_with_no_metadata_emits_only_header(self) -> None:
@@ -1718,7 +1724,7 @@ class TestGetRecentlyAddedAlbums:
         assert result == []
 
     def test_poster_local_populated_when_thumb_present(self) -> None:
-        """getRecentlyAddedAlbums resolves poster via poster_cache when thumb is present."""
+        """getRecentlyAddedAlbums resolves poster via disk cache pre-resolve."""
         lib = _make_lib()
         mock_client = MagicMock()
         mock_client._get.return_value = {
@@ -1735,14 +1741,17 @@ class TestGetRecentlyAddedAlbums:
         }
         lib._client = mock_client
 
+        mock_path = MagicMock()
+        mock_path.exists.return_value = True
+        mock_path.as_uri.return_value = "file:///tmp/poster_cache/album.jpg"
         mock_cache = MagicMock()
-        mock_cache.get_poster.return_value = "file:///tmp/poster_cache/album.jpg"
+        mock_cache._cache_path.return_value = mock_path
         lib._poster_cache = mock_cache
 
         result = lib.getRecentlyAddedAlbums("3")
 
-        mock_cache.get_poster.assert_called_once_with(
-            mock_client, "/library/metadata/600/thumb/1"
+        mock_cache._cache_path.assert_called_once_with(
+            "/library/metadata/600/thumb/1"
         )
         assert result[0]["posterLocal"] == "file:///tmp/poster_cache/album.jpg"
 

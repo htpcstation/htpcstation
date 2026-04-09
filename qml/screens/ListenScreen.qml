@@ -230,6 +230,44 @@ FocusScope {
             listenScreen._playlistTracksLoading = false
             playlistTrackList.currentIndex = 0
         }
+
+        function onPosterUpdated(ratingKey, posterUrl) {
+            // Update poster via array swap + focus restore. slice() creates a
+            // new array reference so QML re-renders; we save and restore
+            // currentIndex + activeFocus so navigation is unaffected.
+            for (var i = 0; i < listenScreen._albums.length; i++) {
+                if (listenScreen._albums[i].ratingKey === ratingKey) {
+                    var savedIdx = albumList.currentIndex
+                    var hadFocus = albumList.activeFocus
+                    var arr = listenScreen._albums.slice()
+                    arr[i] = Object.assign({}, arr[i], { posterLocal: posterUrl })
+                    listenScreen._albums = arr
+                    albumList.currentIndex = savedIdx
+                    if (hadFocus) albumList.forceActiveFocus()
+                    return
+                }
+            }
+            for (var j = 0; j < listenScreen._recentAlbums.length; j++) {
+                if (listenScreen._recentAlbums[j].ratingKey === ratingKey) {
+                    var savedIdx2 = recentAlbumsList.currentIndex
+                    var hadFocus2 = recentAlbumsList.activeFocus
+                    var rarr = listenScreen._recentAlbums.slice()
+                    rarr[j] = Object.assign({}, rarr[j], { posterLocal: posterUrl })
+                    listenScreen._recentAlbums = rarr
+                    recentAlbumsList.currentIndex = savedIdx2
+                    if (hadFocus2) recentAlbumsList.forceActiveFocus()
+                    return
+                }
+            }
+            // Artist detail poster
+            if (listenScreen._artistData && listenScreen._artistData.ratingKey === ratingKey) {
+                listenScreen._artistData = Object.assign({}, listenScreen._artistData, { posterLocal: posterUrl })
+            }
+            // Album detail poster
+            if (listenScreen._albumData && listenScreen._albumData.ratingKey === ratingKey) {
+                listenScreen._albumData = Object.assign({}, listenScreen._albumData, { posterLocal: posterUrl })
+            }
+        }
     }
 
     // ── Duration formatting helpers ───────────────────────────────────────────

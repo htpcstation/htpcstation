@@ -2379,6 +2379,7 @@ class TestGetGenres:
     def test_get_movie_genres_calls_client(self) -> None:
         lib = self._make_lib()
         lib._current_section_key = "4"
+        lib._available = True
         mock_client = MagicMock()
         mock_client.get_genres.return_value = [
             {"key": "1", "title": "Action"},
@@ -2395,6 +2396,7 @@ class TestGetGenres:
     def test_get_show_genres_calls_client(self) -> None:
         lib = self._make_lib()
         lib._current_section_key = "3"
+        lib._available = True
         mock_client = MagicMock()
         mock_client.get_genres.return_value = [
             {"key": "5", "title": "Drama"},
@@ -4845,6 +4847,127 @@ class TestFetchArtistDetail:
         assert albums[0]["year"] == 2022
         assert albums[1]["year"] == 2010
 
+    def test_downloads_uncached_posters_and_reemits(self) -> None:
+        """After initial emit, uncached posters are downloaded and a second emit occurs."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "100",
+            "title": "Test Artist",
+            "summary": "",
+            "thumb": "/library/metadata/100/thumb/111",
+        }
+        mock_client.get_hubs.return_value = [
+            {
+                "hubIdentifier": "artist.albums",
+                "title": "Albums",
+                "Metadata": [
+                    {
+                        "ratingKey": "200",
+                        "title": "Album One",
+                        "year": 2020,
+                        "leafCount": 10,
+                        "type": "album",
+                        "thumb": "/library/metadata/200/thumb/222",
+                    }
+                ],
+            }
+        ]
+        lib._client = mock_client
+        mock_cache = MagicMock()
+        mock_cache._cache_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        mock_cache.get_poster.return_value = "file:///cache/poster.jpg"
+        lib._poster_cache = mock_cache
+
+        detail_received = []
+        lib.artistDetailReady.connect(lambda rk, d: detail_received.append((rk, d)))
+        poster_received = []
+        lib.posterUpdated.connect(lambda rk, url: poster_received.append((rk, url)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "100")
+
+        # Only one artistDetailReady emission (initial load)
+        assert len(detail_received) == 1
+        # Poster updates sent via lightweight posterUpdated signal
+        assert len(poster_received) == 2  # artist + album
+        assert ("100", "file:///cache/poster.jpg") in poster_received
+        assert ("200", "file:///cache/poster.jpg") in poster_received
+        # get_poster was called for both artist and album
+        assert mock_cache.get_poster.call_count == 2
+
+    def test_no_reemit_when_all_posters_cached(self) -> None:
+        """If all posters are already on disk, only one emit occurs."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "100",
+            "title": "Test Artist",
+            "summary": "",
+            "thumb": "/library/metadata/100/thumb/111",
+        }
+        mock_client.get_hubs.return_value = [
+            {
+                "hubIdentifier": "artist.albums",
+                "title": "Albums",
+                "Metadata": [
+                    {
+                        "ratingKey": "200",
+                        "title": "Album",
+                        "year": 2020,
+                        "leafCount": 5,
+                        "type": "album",
+                        "thumb": "/library/metadata/200/thumb/222",
+                    }
+                ],
+            }
+        ]
+        lib._client = mock_client
+        mock_cache = MagicMock()
+        cached_path = MagicMock()
+        cached_path.exists.return_value = True
+        cached_path.as_uri.return_value = "file:///cache/poster.jpg"
+        mock_cache._cache_path.return_value = cached_path
+        lib._poster_cache = mock_cache
+
+        received = []
+        lib.artistDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "100")
+
+        assert len(received) == 1
+        assert received[0][1]["artist"]["posterLocal"] == "file:///cache/poster.jpg"
+
+    def test_album_dicts_include_thumbPath(self) -> None:
+        """Album dicts include thumbPath for the poster download pass."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "100",
+            "title": "Artist",
+        }
+        mock_client.get_hubs.return_value = [
+            {
+                "hubIdentifier": "artist.albums",
+                "title": "Albums",
+                "Metadata": [
+                    {
+                        "ratingKey": "200",
+                        "title": "Album",
+                        "year": 2020,
+                        "leafCount": 5,
+                        "type": "album",
+                        "thumb": "/library/metadata/200/thumb/222",
+                    }
+                ],
+            }
+        ]
+        lib._client = mock_client
+
+        received = []
+        lib.artistDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchArtistDetail", "100")
+
+        albums = [a for a in received[0][1]["albums"] if a["type"] == "album"]
+        assert albums[0]["thumbPath"] == "/library/metadata/200/thumb/222"
+
 
 # ---------------------------------------------------------------------------
 # PlexLibrary.fetchAlbumDetail — Task 004 (async listen screen)
@@ -4952,6 +5075,66 @@ class TestFetchAlbumDetail:
         assert len(data["tracks"]) == 1
         assert data["tracks"][0]["ratingKey"] == "300"
 
+    def test_downloads_uncached_poster_and_reemits(self) -> None:
+        """After initial emit, uncached album poster is downloaded and a second emit occurs."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "200",
+            "title": "Test Album",
+            "year": 2021,
+            "leafCount": 2,
+            "parentTitle": "Test Artist",
+            "thumb": "/library/metadata/200/thumb/222",
+        }
+        mock_client.get_children.return_value = []
+        lib._client = mock_client
+        mock_cache = MagicMock()
+        mock_cache._cache_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        mock_cache.get_poster.return_value = "file:///cache/album.jpg"
+        lib._poster_cache = mock_cache
+
+        detail_received = []
+        lib.albumDetailReady.connect(lambda rk, d: detail_received.append((rk, d)))
+        poster_received = []
+        lib.posterUpdated.connect(lambda rk, url: poster_received.append((rk, url)))
+        _run_fetch_worker_with_events(lib, "fetchAlbumDetail", "200")
+
+        # Only one albumDetailReady emission (initial load)
+        assert len(detail_received) == 1
+        # Poster update sent via lightweight posterUpdated signal
+        assert len(poster_received) == 1
+        assert poster_received[0] == ("200", "file:///cache/album.jpg")
+        mock_cache.get_poster.assert_called_once_with(mock_client, "/library/metadata/200/thumb/222")
+
+    def test_no_reemit_when_poster_cached(self) -> None:
+        """If album poster is already on disk, only one emit occurs."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client.get_metadata.return_value = {
+            "ratingKey": "200",
+            "title": "Test Album",
+            "year": 2021,
+            "leafCount": 2,
+            "parentTitle": "Test Artist",
+            "thumb": "/library/metadata/200/thumb/222",
+        }
+        mock_client.get_children.return_value = []
+        lib._client = mock_client
+        mock_cache = MagicMock()
+        cached_path = MagicMock()
+        cached_path.exists.return_value = True
+        cached_path.as_uri.return_value = "file:///cache/album.jpg"
+        mock_cache._cache_path.return_value = cached_path
+        lib._poster_cache = mock_cache
+
+        received = []
+        lib.albumDetailReady.connect(lambda rk, d: received.append((rk, d)))
+        _run_fetch_worker_with_events(lib, "fetchAlbumDetail", "200")
+
+        assert len(received) == 1
+        assert received[0][1]["album"]["posterLocal"] == "file:///cache/album.jpg"
+
 
 # ---------------------------------------------------------------------------
 # PlexLibrary.fetchRecentAlbums — Task 004 (async listen screen)
@@ -5050,6 +5233,69 @@ class TestFetchRecentAlbums:
 
         assert len(received) == 1
         assert received[0] == []
+
+    def test_downloads_uncached_posters_and_reemits(self) -> None:
+        """After initial emit, uncached posters are downloaded and a second emit occurs."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "200",
+                        "title": "Recent Album",
+                        "year": 2023,
+                        "parentTitle": "Artist",
+                        "thumb": "/library/metadata/200/thumb/222",
+                    }
+                ]
+            }
+        }
+        lib._client = mock_client
+        mock_cache = MagicMock()
+        mock_cache._cache_path.return_value = MagicMock(exists=MagicMock(return_value=False))
+        mock_cache.get_poster.return_value = "file:///cache/recent.jpg"
+        lib._poster_cache = mock_cache
+
+        detail_received = []
+        lib.recentAlbumsReady.connect(lambda d: detail_received.append(d))
+        poster_received = []
+        lib.posterUpdated.connect(lambda rk, url: poster_received.append((rk, url)))
+        _run_fetch_worker_with_events(lib, "fetchRecentAlbums", "3")
+
+        # Only one recentAlbumsReady emission (initial load)
+        assert len(detail_received) == 1
+        # Poster update sent via lightweight posterUpdated signal
+        assert len(poster_received) == 1
+        assert poster_received[0] == ("200", "file:///cache/recent.jpg")
+        mock_cache.get_poster.assert_called_once_with(mock_client, "/library/metadata/200/thumb/222")
+
+    def test_recent_albums_include_thumbPath(self) -> None:
+        """Recent album dicts include thumbPath for the poster download pass."""
+        lib = self._make_lib()
+        mock_client = MagicMock()
+        mock_client._get.return_value = {
+            "MediaContainer": {
+                "Metadata": [
+                    {
+                        "type": "album",
+                        "ratingKey": "200",
+                        "title": "Album",
+                        "year": 2023,
+                        "parentTitle": "Artist",
+                        "thumb": "/library/metadata/200/thumb/222",
+                    }
+                ]
+            }
+        }
+        lib._client = mock_client
+
+        received = []
+        lib.recentAlbumsReady.connect(lambda d: received.append(d))
+        _run_fetch_worker_with_events(lib, "fetchRecentAlbums", "3")
+
+        assert received[0][0]["thumbPath"] == "/library/metadata/200/thumb/222"
 
 
 # ---------------------------------------------------------------------------
@@ -6556,3 +6802,308 @@ class TestSetupClientProbesFallback:
 
         _lib, config, _cls = self._make_lib_and_call_setup(probe_side_effect=probe_side_effect)
         config.set_plex_server_url.assert_called_once_with("http://192.168.0.2:32400")
+
+
+# ---------------------------------------------------------------------------
+# Local sort + genre lag fix (Task 005)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalSort:
+    """sort_movies / sort_shows sort the in-memory model locally."""
+
+    def test_sort_movies_by_title_asc(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="Zebra"),
+            PlexMovie(rating_key="2", title="Apple"),
+            PlexMovie(rating_key="3", title="Mango"),
+        ])
+
+        model.sort_movies("titleSort:asc")
+
+        titles = [model._movies[i].title for i in range(3)]
+        assert titles == ["Apple", "Mango", "Zebra"]
+
+    def test_sort_movies_by_title_desc(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="Apple"),
+            PlexMovie(rating_key="2", title="Zebra"),
+            PlexMovie(rating_key="3", title="Mango"),
+        ])
+
+        model.sort_movies("titleSort:desc")
+
+        titles = [model._movies[i].title for i in range(3)]
+        assert titles == ["Zebra", "Mango", "Apple"]
+
+    def test_sort_movies_by_year_desc(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="Old", year=1990),
+            PlexMovie(rating_key="2", title="New", year=2024),
+            PlexMovie(rating_key="3", title="Mid", year=2010),
+        ])
+
+        model.sort_movies("year:desc")
+
+        years = [model._movies[i].year for i in range(3)]
+        assert years == [2024, 2010, 1990]
+
+    def test_sort_movies_by_added_at_desc(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="A", added_at=100),
+            PlexMovie(rating_key="2", title="B", added_at=300),
+            PlexMovie(rating_key="3", title="C", added_at=200),
+        ])
+
+        model.sort_movies("addedAt:desc")
+
+        keys = [model._movies[i].rating_key for i in range(3)]
+        assert keys == ["2", "3", "1"]
+
+    def test_sort_movies_by_rating_desc(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="A", audience_rating=5.0),
+            PlexMovie(rating_key="2", title="B", audience_rating=9.0),
+            PlexMovie(rating_key="3", title="C", audience_rating=7.0),
+        ])
+
+        model.sort_movies("audienceRating:desc")
+
+        ratings = [model._movies[i].audience_rating for i in range(3)]
+        assert ratings == [9.0, 7.0, 5.0]
+
+    def test_sort_movies_unknown_key_is_noop(self) -> None:
+        from backend.plex_library import PlexMovieListModel
+        from backend.plex_models import PlexMovie
+
+        model = PlexMovieListModel()
+        model.set_movies([
+            PlexMovie(rating_key="1", title="B"),
+            PlexMovie(rating_key="2", title="A"),
+        ])
+
+        model.sort_movies("unknown:key")
+
+        assert model._movies[0].title == "B"
+
+    def test_sort_shows_by_title_asc(self) -> None:
+        from backend.plex_library import PlexShowListModel
+        from backend.plex_models import PlexShow
+
+        model = PlexShowListModel()
+        model.set_shows([
+            PlexShow(rating_key="1", title="Zoo"),
+            PlexShow(rating_key="2", title="Alpha"),
+        ])
+
+        model.sort_shows("titleSort:asc")
+
+        assert model._shows[0].title == "Alpha"
+        assert model._shows[1].title == "Zoo"
+
+    def test_sort_shows_by_year_desc(self) -> None:
+        from backend.plex_library import PlexShowListModel
+        from backend.plex_models import PlexShow
+
+        model = PlexShowListModel()
+        model.set_shows([
+            PlexShow(rating_key="1", title="Old", year=2000),
+            PlexShow(rating_key="2", title="New", year=2024),
+        ])
+
+        model.sort_shows("year:desc")
+
+        assert model._shows[0].year == 2024
+        assert model._shows[1].year == 2000
+
+    def test_sort_shows_addedAt_is_noop(self) -> None:
+        """PlexShow has no added_at field, so addedAt:desc is not supported."""
+        from backend.plex_library import PlexShowListModel
+        from backend.plex_models import PlexShow
+
+        model = PlexShowListModel()
+        model.set_shows([
+            PlexShow(rating_key="1", title="B"),
+            PlexShow(rating_key="2", title="A"),
+        ])
+
+        model.sort_shows("addedAt:desc")
+
+        # Order unchanged — addedAt not in show sort keys
+        assert model._shows[0].title == "B"
+
+
+class TestSortMoviesOffline:
+    """sortMovies applies local sort even when _client is None."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_sort_movies_offline_sorts_locally(self) -> None:
+        from backend.plex_models import PlexMovie
+
+        lib = self._make_lib()
+        lib._client = None
+        lib._current_section_key = "4"
+        lib._current_section_type = "movie"
+        lib._movies_model.set_movies([
+            PlexMovie(rating_key="1", title="Zebra"),
+            PlexMovie(rating_key="2", title="Apple"),
+        ])
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.sortMovies("az")
+
+        # Local sort applied
+        assert lib._movies_model._movies[0].title == "Apple"
+        assert lib._movies_model._movies[1].title == "Zebra"
+        # No network fetch submitted
+        assert len(submitted) == 0
+
+    def test_sort_movies_online_sorts_locally_and_submits(self) -> None:
+        from backend.plex_models import PlexMovie
+
+        lib = self._make_lib()
+        lib._current_section_key = "4"
+        lib._current_section_type = "movie"
+        lib._movies_model.set_movies([
+            PlexMovie(rating_key="1", title="Zebra"),
+            PlexMovie(rating_key="2", title="Apple"),
+        ])
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.sortMovies("az")
+
+        # Local sort applied immediately
+        assert lib._movies_model._movies[0].title == "Apple"
+        # Network fetch also submitted
+        assert len(submitted) == 1
+
+
+class TestSortShowsOffline:
+    """sortShows applies local sort even when _client is None."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_sort_shows_offline_sorts_locally(self) -> None:
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+        lib._current_section_key = "3"
+        lib._current_section_type = "show"
+        lib._shows_model.set_shows([
+            PlexShow(rating_key="1", title="Zoo"),
+            PlexShow(rating_key="2", title="Alpha"),
+        ])
+
+        submitted: list = []
+        lib._executor.submit = lambda fn, *args, **kwargs: submitted.append(fn)  # type: ignore[method-assign]
+
+        lib.sortShows("az")
+
+        assert lib._shows_model._shows[0].title == "Alpha"
+        assert lib._shows_model._shows[1].title == "Zoo"
+        assert len(submitted) == 0
+
+
+class TestGetGenresAvailability:
+    """getMovieGenres / getShowGenres return empty when server is unavailable."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+        return lib
+
+    def test_get_movie_genres_returns_empty_when_unavailable(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "4"
+        lib._client = MagicMock()
+        lib._available = False
+
+        result = lib.getMovieGenres()
+
+        assert result == []
+        lib._client.get_genres.assert_not_called()
+
+    def test_get_show_genres_returns_empty_when_unavailable(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "3"
+        lib._client = MagicMock()
+        lib._available = False
+
+        result = lib.getShowGenres()
+
+        assert result == []
+        lib._client.get_genres.assert_not_called()
+
+    def test_get_movie_genres_calls_client_when_available(self) -> None:
+        lib = self._make_lib()
+        lib._current_section_key = "4"
+        lib._client = MagicMock()
+        lib._client.get_genres.return_value = [{"key": "1", "title": "Action"}]
+        lib._available = True
+
+        result = lib.getMovieGenres()
+
+        assert len(result) == 1
+        lib._client.get_genres.assert_called_once_with("4")

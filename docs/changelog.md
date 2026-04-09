@@ -19,7 +19,9 @@ Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-
 - WatchScreen Refresh moved inline as last ListView sentinel entry (matches ListenScreen pattern)
 - Plex offline cache overhaul: cached server URL for offline client creation, cache-first selectLibrary (synchronous cache load + network backfill), incremental merge-by-rating_key cache saves (every page, never overwrites full cache with partial), poster pre-resolve from disk cache, empty network response ([], 0) guard on all worker functions
 - Server URL probe on startup: _setup_client probes primary URL, falls through to remote/relay if unreachable (enables external network access)
-- 2,069 tests passing (was 2,017)
+- Offline sort: sortMovies/sortShows sort in-memory model locally; getMovieGenres/getShowGenres return empty when unavailable (no main-thread block)
+- Async poster pre-resolve: fetchArtistDetail, fetchAlbumDetail, fetchRecentAlbums, and 3 legacy @Slot methods no longer download posters in loops — use disk cache pre-resolve instead
+- 2,084 tests passing (was 2,017)
 
 ---
 

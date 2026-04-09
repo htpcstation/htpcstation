@@ -22,7 +22,7 @@
 
 ## Current State
 
-Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,069 tests passing.**
+Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,084 tests passing.**
 
 **Tabs (in order):** Retro Games | PC Games | Moonlight | Plex Media | Plex Music | Settings
 
@@ -45,6 +45,8 @@ Fullscreen gamepad-navigable HTPC launcher. Qt6/QML + PySide6. **2,069 tests pas
   - `sectionLoadFailed` emitted when `_client is None` so QML shows offline toast.
   - Empty network responses `([], 0)` from `get_library_items` (soft failure after retry exhaustion) no longer overwrite cached models — treated as `sectionLoadFailed` in `_worker_load_section`, `_worker_load_more_movies`, and `_worker_load_more_shows`.
   - Server URL probe on startup (Task 004): `_setup_client()` probes the primary URL with a 3s `/identity` check before creating the client. If unreachable (e.g. on external network), falls through to remote/relay URLs from plex.tv resources. Config always caches the local URL for home network use.
+  - Offline sort (Task 005): `sortMovies`/`sortShows` sort the in-memory model locally (instant feedback) before submitting network backfill. `getMovieGenres`/`getShowGenres` return empty when server unavailable instead of blocking main thread with retries.
+  - Async poster pre-resolve (Task 006): `fetchArtistDetail`, `fetchAlbumDetail`, `fetchRecentAlbums`, and legacy `@Slot` methods (`getArtistAlbums`, `getAlbums`, `getRecentlyAddedAlbums`) no longer download posters sequentially. Replaced `get_poster()` with disk cache pre-resolve (`_cache_path().exists()`). Artist detail with 10 albums loads instantly instead of 10–50s.
 
 **Next milestone:** M7 — Local Music tab V1. See `docs/milestones.md`.
 

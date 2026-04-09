@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -199,6 +199,23 @@ class PlexMovieListModel(QAbstractListModel):
             self.SummaryRole: b"summary",
         }
 
+    def sort_movies(self, sort_key: str) -> None:
+        """Sort the in-memory movie list by *sort_key* (an API sort string)."""
+        key_func = {
+            "titleSort:asc":       lambda m: (m.title or "").lower(),
+            "titleSort:desc":      lambda m: (m.title or "").lower(),
+            "addedAt:desc":        lambda m: m.added_at,
+            "year:desc":           lambda m: m.year,
+            "year:asc":            lambda m: m.year,
+            "audienceRating:desc": lambda m: m.audience_rating,
+        }.get(sort_key)
+        if key_func is None:
+            return
+        reverse = sort_key.endswith(":desc")
+        self.beginResetModel()
+        self._movies.sort(key=key_func, reverse=reverse)
+        self.endResetModel()
+
     @Slot(int, result=str)
     def titleAt(self, index: int) -> str:
         """Return the title of the movie at *index*, or "" if out of range."""
@@ -294,6 +311,22 @@ class PlexShowListModel(QAbstractListModel):
             self.LeafCountRole: b"leafCount",
             self.ViewedLeafCountRole: b"viewedLeafCount",
         }
+
+    def sort_shows(self, sort_key: str) -> None:
+        """Sort the in-memory show list by *sort_key* (an API sort string)."""
+        key_func = {
+            "titleSort:asc":       lambda s: (s.title or "").lower(),
+            "titleSort:desc":      lambda s: (s.title or "").lower(),
+            "year:desc":           lambda s: s.year,
+            "year:asc":            lambda s: s.year,
+            "audienceRating:desc": lambda s: s.audience_rating,
+        }.get(sort_key)
+        if key_func is None:
+            return
+        reverse = sort_key.endswith(":desc")
+        self.beginResetModel()
+        self._shows.sort(key=key_func, reverse=reverse)
+        self.endResetModel()
 
     @Slot(int, result=str)
     def titleAt(self, index: int) -> str:
@@ -496,6 +529,7 @@ class PlexLibrary(QObject):
     recentAlbumsReady  = Signal("QVariant")        # list of album dicts
     playlistsReady     = Signal("QVariant")        # list of playlist dicts
     playlistTracksReady = Signal(str, "QVariant")  # (rating_key, list of track dicts)
+    posterUpdated      = Signal(str, str)           # (ratingKey, posterUrl) — lightweight poster update
 
     # Internal signals used to marshal results from worker threads to main thread
     _librariesReady = Signal(list, bool)  # (libraries, from_cache)
@@ -918,13 +952,21 @@ class PlexLibrary(QObject):
 
         sort_key: 'az', 'za', 'recent', 'year_desc', 'year_asc', 'rating'
         """
-        if self._client is None or not self._current_section_key:
+        if not self._current_section_key:
             return
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         api_sort = self._SORT_MAP.get(sort_key, "")
         self._section_sort[self._current_section_key] = api_sort
         self._save_sort_state()
+
+        # Instant local sort for cached/in-memory data
+        self._movies_model.sort_movies(api_sort)
+        self.moviesModelChanged.emit()
+
+        if self._client is None:
+            return
+
         self._movies_total = 0
         self._movies_loaded = 0
         client = self._client
@@ -981,13 +1023,21 @@ class PlexLibrary(QObject):
 
         sort_key: 'az', 'za', 'recent', 'year_desc', 'year_asc', 'rating'
         """
-        if self._client is None or not self._current_section_key:
+        if not self._current_section_key:
             return
         if self._current_section_key in ("_mylist", "_ondeck", "_livetv"):
             return
         api_sort = self._SORT_MAP.get(sort_key, "")
         self._section_sort[self._current_section_key] = api_sort
         self._save_sort_state()
+
+        # Instant local sort for cached/in-memory data
+        self._shows_model.sort_shows(api_sort)
+        self.showsModelChanged.emit()
+
+        if self._client is None:
+            return
+
         self._shows_total = 0
         self._shows_loaded = 0
         client = self._client
@@ -1039,12 +1089,16 @@ class PlexLibrary(QObject):
         """Return genres for the current movie library as [{key, title}, ...]."""
         if self._client is None or not self._current_section_key:
             return []
+        if not self._available:
+            return []
         return self._client.get_genres(self._current_section_key)
 
     @Slot(result="QVariant")
     def getShowGenres(self) -> list:
         """Return genres for the current show library as [{key, title}, ...]."""
         if self._client is None or not self._current_section_key:
+            return []
+        if not self._available:
             return []
         return self._client.get_genres(self._current_section_key)
 
@@ -1521,9 +1575,9 @@ class PlexLibrary(QObject):
             for item in hub.get("Metadata", []):
                 album = parse_album(item)
                 if album.thumb_path and self._poster_cache:
-                    album.poster_local = self._poster_cache.get_poster(
-                        self._client, album.thumb_path
-                    )
+                    cached_path = self._poster_cache._cache_path(album.thumb_path)
+                    if cached_path.exists():
+                        album.poster_local = cached_path.as_uri()
                 albums.append({
                     "type": "album",
                     "ratingKey": album.rating_key,
@@ -1550,9 +1604,9 @@ class PlexLibrary(QObject):
             if item.get("type") == "album":
                 album = parse_album(item)
                 if album.thumb_path and self._poster_cache:
-                    album.poster_local = self._poster_cache.get_poster(
-                        self._client, album.thumb_path
-                    )
+                    cached_path = self._poster_cache._cache_path(album.thumb_path)
+                    if cached_path.exists():
+                        album.poster_local = cached_path.as_uri()
                 albums.append({
                     "ratingKey": album.rating_key,
                     "title": album.title,
@@ -1656,7 +1710,9 @@ class PlexLibrary(QObject):
             if data:
                 artist = parse_artist(data)
                 if artist.thumb_path and poster_cache:
-                    artist.poster_local = poster_cache.get_poster(client, artist.thumb_path)
+                    cached_path = poster_cache._cache_path(artist.thumb_path)
+                    if cached_path.exists():
+                        artist.poster_local = cached_path.as_uri()
                 artist_dict = {
                     "ratingKey": artist.rating_key,
                     "title": artist.title,
@@ -1679,7 +1735,9 @@ class PlexLibrary(QObject):
                 for item in hub.get("Metadata", []):
                     album = parse_album(item)
                     if album.thumb_path and poster_cache:
-                        album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                        cached_path = poster_cache._cache_path(album.thumb_path)
+                        if cached_path.exists():
+                            album.poster_local = cached_path.as_uri()
                     hub_albums.append({
                         "type": "album",
                         "ratingKey": album.rating_key,
@@ -1687,11 +1745,48 @@ class PlexLibrary(QObject):
                         "year": album.year,
                         "leafCount": album.leaf_count,
                         "posterLocal": album.poster_local,
+                        "thumbPath": album.thumb_path,
                     })
                 hub_albums.sort(key=lambda a: a["year"] or 0, reverse=True)
                 albums.append({"type": "header", "title": clean_title})
                 albums.extend(hub_albums)
             self._artistDetailReady.emit(rating_key, {"artist": artist_dict, "albums": albums})
+
+            # Download uncached posters in parallel and re-emit progressively
+            download_tasks: list[tuple[dict, str]] = []
+
+            if data and artist_dict.get("posterLocal", "") == "" and poster_cache:
+                artist = parse_artist(data)
+                if artist.thumb_path:
+                    download_tasks.append((artist_dict, artist.thumb_path))
+
+            for album_entry in albums:
+                if album_entry.get("type") != "album":
+                    continue
+                if album_entry.get("posterLocal", ""):
+                    continue
+                thumb_path = album_entry.get("thumbPath", "")
+                if thumb_path:
+                    download_tasks.append((album_entry, thumb_path))
+
+            if download_tasks and poster_cache:
+                future_to_entry: dict[Future, tuple[str, str]] = {}
+                for entry_dict, thumb_path in download_tasks:
+                    entry_rk = entry_dict.get("ratingKey", "")
+                    future = self._poster_executor.submit(
+                        poster_cache.get_poster, client, thumb_path
+                    )
+                    future_to_entry[future] = (entry_rk, thumb_path)
+
+                for future in as_completed(future_to_entry):
+                    entry_rk, _thumb = future_to_entry[future]
+                    try:
+                        local_url = future.result()
+                        if local_url and entry_rk:
+                            self.posterUpdated.emit(entry_rk, local_url)
+                    except Exception:
+                        pass  # Download failed — poster stays as placeholder
+
         self._executor.submit(_worker)
 
     @Slot(str)
@@ -1703,11 +1798,15 @@ class PlexLibrary(QObject):
         poster_cache = self._poster_cache
         def _worker():
             album_dict = {}
+            thumb_path = ""
             data = client.get_metadata(rating_key)
             if data:
                 album = parse_album(data)
+                thumb_path = album.thumb_path
                 if album.thumb_path and poster_cache:
-                    album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                    cached_path = poster_cache._cache_path(album.thumb_path)
+                    if cached_path.exists():
+                        album.poster_local = cached_path.as_uri()
                 album_dict = {
                     "ratingKey": album.rating_key,
                     "title": album.title,
@@ -1735,6 +1834,13 @@ class PlexLibrary(QObject):
                         "mediaKey": track.media_key,
                     })
             self._albumDetailReady.emit(rating_key, {"album": album_dict, "tracks": tracks})
+
+            # Download uncached album poster via lightweight signal
+            if album_dict.get("posterLocal", "") == "" and thumb_path and poster_cache:
+                local_url = poster_cache.get_poster(client, thumb_path)
+                if local_url:
+                    self.posterUpdated.emit(rating_key, local_url)
+
         self._executor.submit(_worker)
 
     @Slot(str)
@@ -1753,15 +1859,46 @@ class PlexLibrary(QObject):
                         continue
                     album = parse_album(item)
                     if album.thumb_path and poster_cache:
-                        album.poster_local = poster_cache.get_poster(client, album.thumb_path)
+                        cached_path = poster_cache._cache_path(album.thumb_path)
+                        if cached_path.exists():
+                            album.poster_local = cached_path.as_uri()
                     result.append({
                         "ratingKey": album.rating_key,
                         "title": album.title,
                         "year": album.year,
                         "parentTitle": album.parent_title,
                         "posterLocal": album.poster_local,
+                        "thumbPath": album.thumb_path,
                     })
             self._recentAlbumsReady.emit(result)
+
+            # Download uncached posters in parallel and re-emit progressively
+            download_tasks: list[tuple[dict, str]] = []
+            for entry in result:
+                if entry.get("posterLocal", ""):
+                    continue
+                thumb_path = entry.get("thumbPath", "")
+                if thumb_path:
+                    download_tasks.append((entry, thumb_path))
+
+            if download_tasks and poster_cache:
+                future_to_entry: dict[Future, tuple[str, str]] = {}
+                for entry_dict, thumb_path in download_tasks:
+                    entry_rk = entry_dict.get("ratingKey", "")
+                    future = self._poster_executor.submit(
+                        poster_cache.get_poster, client, thumb_path
+                    )
+                    future_to_entry[future] = (entry_rk, thumb_path)
+
+                for future in as_completed(future_to_entry):
+                    entry_rk, _thumb = future_to_entry[future]
+                    try:
+                        local_url = future.result()
+                        if local_url and entry_rk:
+                            self.posterUpdated.emit(entry_rk, local_url)
+                    except Exception:
+                        pass  # Download failed — poster stays as placeholder
+
         self._executor.submit(_worker)
 
     @Slot()
@@ -1833,9 +1970,9 @@ class PlexLibrary(QObject):
                 continue
             album = parse_album(item)
             if album.thumb_path and self._poster_cache:
-                album.poster_local = self._poster_cache.get_poster(
-                    self._client, album.thumb_path
-                )
+                cached_path = self._poster_cache._cache_path(album.thumb_path)
+                if cached_path.exists():
+                    album.poster_local = cached_path.as_uri()
             result.append({
                 "ratingKey": album.rating_key,
                 "title": album.title,
