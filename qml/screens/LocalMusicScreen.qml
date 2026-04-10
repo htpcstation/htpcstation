@@ -26,6 +26,10 @@ FocusScope {
     // can return focus to the tab bar.
     signal back()
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -185,6 +189,11 @@ FocusScope {
         if (settings) {
             var savedMode = settings.localMusicViewMode
             if (savedMode) _viewMode = savedMode
+        }
+        if (navTarget && navTarget.folder_path) {
+            _selectedAlbumFolder = navTarget.folder_path
+            _albumReturnView = "menu"
+            currentView = "album"
         }
     }
 
@@ -1189,6 +1198,8 @@ FocusScope {
                             title: folderName[folderName.length - 1] || "Folder",
                             artist: "",
                             ratingKey: "",
+                            source: "local",
+                            folderPath: localMusicScreen._currentFolder,
                         }
                         homeScreen._playAlbum(tracks, albumData, item.trackIndex)
                         localMusicScreen._goToNowPlaying()
@@ -1203,6 +1214,8 @@ FocusScope {
                             title: fName[fName.length - 1] || "Folder",
                             artist: "",
                             ratingKey: "",
+                            source: "local",
+                            folderPath: localMusicScreen._currentFolder,
                         }
                         homeScreen._playAlbum(folderTracks, fAlbumData, 0)
                         localMusicScreen._goToNowPlaying()

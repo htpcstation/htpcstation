@@ -156,8 +156,10 @@ class MoonlightLibrary(QObject):
         moonlight_command: str = _DEFAULT_MOONLIGHT_COMMAND,
         host_uuid: str = "",
         parent: Optional[QObject] = None,
+        recently_played=None,
     ) -> None:
         super().__init__(parent)
+        self._recently_played = recently_played
 
         self._moonlight_command = moonlight_command
         self._selected_host_uuid: str = host_uuid
@@ -294,6 +296,20 @@ class MoonlightLibrary(QObject):
                 app_name,
                 exc,
             )
+
+        if self._recently_played:
+            app = next(
+                (a for a in self._all_apps if a.name == app_name),
+                None,
+            )
+            artwork = ("file://" + app.image_path) if (app and app.image_path) else ""
+            self._recently_played.record(
+                "moonlight",
+                app_name,
+                artwork,
+                {"host_address": host_address, "app_name": app_name},
+            )
+
         self._launcher.launch(host_address, app_name, self._moonlight_command)
 
     @Slot()

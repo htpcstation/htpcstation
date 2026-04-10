@@ -25,6 +25,10 @@ FocusScope {
     // return focus to the tab bar.
     signal back()
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -318,6 +322,18 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.retroGamesViewMode || "grid"
+        }
+        if (navTarget && navTarget.rom_path) {
+            var romPath = navTarget.rom_path
+            var count = library.gamesModel ? library.gamesModel.rowCount() : 0
+            for (var i = 0; i < count; i++) {
+                var g = library.getGame(i)
+                if (g && g.romPath === romPath) {
+                    selectedGameIndex = i
+                    currentView = "detail"
+                    break
+                }
+            }
         }
     }
 }

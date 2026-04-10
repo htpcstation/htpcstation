@@ -555,6 +555,8 @@ class LocalMusicLibrary(QObject):
                         "trackCount": len(album_data.get("tracks", [])),
                         "posterLocal": poster_local,
                         "genre": album_data.get("genre", ""),
+                        "source": "local",
+                        "folderPath": folder_path,
                     }
 
                     for track in album_data.get("tracks", []):

@@ -30,6 +30,10 @@ FocusScope {
     // Emitted when the user selects an artist (for task 004 to connect).
     signal artistSelected(string ratingKey)
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -376,6 +380,11 @@ FocusScope {
         if (settings) {
             var savedMode = settings.listenViewMode
             if (savedMode) _viewMode = savedMode
+        }
+        if (navTarget && navTarget.rating_key) {
+            _selectedAlbumKey = navTarget.rating_key
+            _albumReturnView = "menu"
+            currentView = "album"
         }
     }
 

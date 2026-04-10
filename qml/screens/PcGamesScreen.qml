@@ -24,6 +24,10 @@ FocusScope {
     // return focus to the tab bar.
     signal back()
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -544,6 +548,20 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.pcGamesViewMode || "grid"
+        }
+        if (navTarget && navTarget.app_id) {
+            var targetId = navTarget.app_id
+            var count = steam && steam.gamesModel ? steam.gamesModel.rowCount() : 0
+            for (var i = 0; i < count; i++) {
+                var game = steam.getGame(i)
+                if (game && String(game.appId) === String(targetId)) {
+                    isRecentSource = false
+                    isFavoritesSource = false
+                    selectedGameIndex = i
+                    currentView = "detail"
+                    break
+                }
+            }
         }
     }
 }

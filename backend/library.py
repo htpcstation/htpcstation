@@ -298,11 +298,13 @@ class GameLibrary(QObject):
         config: Config,
         launcher: Optional[Launcher] = None,
         parent: Optional[QObject] = None,
+        recently_played=None,
     ) -> None:
         super().__init__(parent)
 
         self._config = config
         self._launcher = launcher
+        self._recently_played = recently_played
         self._systems: list[System] = []
         self._systems_by_folder: dict[str, System] = {}
         self._current_system: str = ""
@@ -455,6 +457,15 @@ class GameLibrary(QObject):
         game = games[index]
         command = self._config.get_launch_command(game.system_folder, game.path)
         logger.info("launchGame: launching '%s' — %s", game.name, command)
+
+        if self._recently_played:
+            artwork = ("file://" + str(game.image_path)) if game.image_path else ""
+            self._recently_played.record(
+                "retro",
+                game.name,
+                artwork,
+                {"rom_path": str(game.path), "system_folder": game.system_folder},
+            )
 
         # Set active game optimistically before the async launch.  If the
         # process fails to start, _on_process_finished(-1, 0) will be called

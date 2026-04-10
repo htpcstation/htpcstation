@@ -23,6 +23,10 @@ FocusScope {
     // return focus to the tab bar.
     signal back()
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -1034,6 +1038,28 @@ FocusScope {
             _viewMode = settings.watchViewMode || "grid"
         }
         if (plex) _libraryEntries = _getVideoLibraries()
+        if (navTarget && navTarget.rating_key) {
+            if (navTarget.media_type === "movie") {
+                var targetRk = navTarget.rating_key
+                var count = plex ? plex.moviesCount() : 0
+                for (var i = 0; i < count; i++) {
+                    var rk = plex.getMovieRatingKeyAt(i)
+                    if (rk === targetRk) {
+                        selectedRatingKey = rk
+                        selectedMovieIndex = i
+                        selectedLibraryType = "movie"
+                        plex.fetchMovie(rk)
+                        currentView = "detail"
+                        break
+                    }
+                }
+            } else if (navTarget.media_type === "show") {
+                selectedLibraryType = "show"
+                selectedShowRatingKey = navTarget.rating_key
+                _showDetailOrigin = ""
+                currentView = "detail"
+            }
+        }
     }
 
     // ── Resume dialog overlay (declared last for highest z-order) ─────────────

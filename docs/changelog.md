@@ -4,6 +4,18 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP37 — Recently Played homescreen widget
+
+Task briefs: `misc/coding-team/recently-played-widget/` (001–004)
+
+- New `backend/recently_played.py`: `RecentlyPlayedManager` — unified cross-category history, JSON-persisted, de-dups on re-play, max 50 entries, `recentlyPlayed` context property
+- Launch hooks in all 6 categories (retro, Steam, Moonlight, Plex video, Plex music, local music); Plex video recorded on main thread in `_on_mpv_launch_ready`
+- `RecentlyPlayedWidget.qml`: horizontal 5-card row below tab row; artwork + title per card; empty state text; Down/Left/Right/B/A gamepad nav
+- Deep navigation: `Loader.setSource` with `navTarget` property; all 6 tab screens navigate to item detail/tracklist on load (best-effort)
+- 2,181 tests passing (was 2,047)
+
+---
+
 ## CP36 — UI Redesign + Plex cache/offline fixes + offline cache overhaul
 
 Task briefs: `misc/coding-team/ui-redesign/` (006–009), `misc/coding-team/fix-context-button-keycodes/` (004–005, 010–012), `misc/coding-team/plex-offline-cache/` (001–003)

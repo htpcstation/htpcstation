@@ -567,8 +567,10 @@ class PlexLibrary(QObject):
         config: Config,
         browser_launcher: Optional[BrowserLauncher] = None,
         parent: Optional[QObject] = None,
+        recently_played=None,
     ) -> None:
         super().__init__(parent)
+        self._recently_played = recently_played
 
         self._config = config
         self._browser_launcher = browser_launcher
@@ -679,6 +681,10 @@ class PlexLibrary(QObject):
         self._current_play_part_id: int = 0
         self._pending_play_queue_item_id: int = 0
         self._current_play_queue_item_id: int = 0
+        self._pending_record_title: str = ""
+        self._pending_record_artwork: str = ""
+        self._pending_record_media_type: str = ""
+        self._pending_record_nav_rating_key: str = ""
 
 
         # Timeline reporter is driven via _on_mpv_process_finished (above)
@@ -1402,6 +1408,28 @@ class PlexLibrary(QObject):
                     play_queue_item_id = int(items[0].get("playQueueItemID", 0) or 0)
                 logger.info("playWithMpv: playQueueItemID=%d", play_queue_item_id)
             self._pending_play_queue_item_id = play_queue_item_id
+            # Gather metadata for recently-played record (resolved before main-thread signal).
+            # For episodes, promote to show level: use show title, show poster, and show ratingKey.
+            item_type = meta.get("type", "")
+            if item_type == "episode":
+                record_title = meta.get("grandparentTitle", "") or meta.get("title", "")
+                record_media_type = "show"
+                record_nav_rating_key = str(meta.get("grandparentRatingKey", "") or rating_key)
+                thumb_path = meta.get("grandparentThumb", "") or meta.get("thumb", "")
+            else:
+                record_title = meta.get("title", "")
+                record_media_type = item_type
+                record_nav_rating_key = str(rating_key)
+                thumb_path = meta.get("thumb", "")
+            record_artwork = ""
+            if thumb_path and self._poster_cache is not None:
+                cached_path = self._poster_cache._cache_path(thumb_path)
+                if cached_path.exists():
+                    record_artwork = cached_path.as_uri()
+            self._pending_record_title = record_title
+            self._pending_record_artwork = record_artwork
+            self._pending_record_media_type = record_media_type
+            self._pending_record_nav_rating_key = record_nav_rating_key
             logger.info("playWithMpv: launching MPV for '%s' start_ms=%d", title, start_ms)
             self._mpvLaunchReady.emit(url, title, start_ms, duration_ms, part_id, intro_end_ms)
         self._executor.submit(_worker)
@@ -1424,6 +1452,16 @@ class PlexLibrary(QObject):
         self._current_play_duration_ms = duration_ms
         self._current_play_part_id = part_id
         self._current_play_queue_item_id = self._pending_play_queue_item_id
+        if self._recently_played:
+            self._recently_played.record(
+                "plexvideo",
+                self._pending_record_title,
+                self._pending_record_artwork,
+                {
+                    "rating_key": self._pending_record_nav_rating_key,
+                    "media_type": self._pending_record_media_type,
+                },
+            )
         self._mpv_active = True
         self._mpv_launcher.launch(url, title, start_ms)
         self.markersReady.emit(intro_end_ms)
@@ -1684,6 +1722,7 @@ class PlexLibrary(QObject):
                     "studio": album.studio,
                     "genre": album.genre,
                     "rating": album.rating,
+                    "source": "plex",
                 }
             tracks = []
             children = client.get_children(rating_key)

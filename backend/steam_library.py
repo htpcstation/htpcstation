@@ -203,8 +203,9 @@ class SteamLibrary(QObject):
     # Signature: (appId: str, metadata: object — GameMetadata dict or None)
     _metadataReady = Signal(str, object)
 
-    def __init__(self, parent: Optional[QObject] = None) -> None:
+    def __init__(self, parent: Optional[QObject] = None, recently_played=None) -> None:
         super().__init__(parent)
+        self._recently_played = recently_played
         self._game_running = False
 
         # All discovered games (unfiltered by source, unsorted beyond initial)
@@ -324,6 +325,18 @@ class SteamLibrary(QObject):
             return
         url = f"steam://rungameid/{app_id}"
         logger.info("SteamLibrary.launchGame: launching %s", url)
+
+        if self._recently_played:
+            game = next((g for g in self._all_games if g.app_id == app_id), None)
+            if game is not None:
+                artwork = ("file://" + game.image_path) if game.image_path else ""
+                self._recently_played.record(
+                    "steam",
+                    game.name,
+                    artwork,
+                    {"app_id": str(app_id)},
+                )
+
         self._game_running = True
         self.gameRunning.emit()
         QProcess.startDetached("xdg-open", [url])

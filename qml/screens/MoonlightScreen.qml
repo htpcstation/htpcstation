@@ -24,6 +24,10 @@ FocusScope {
     // return focus to the tab bar.
     signal back()
 
+    // Navigation target passed by HomeScreen when navigating from recently played.
+    // Unused until Task 004.
+    property var navTarget: null
+
     // Only process input when this screen is active.
     enabled: focus
 
@@ -557,6 +561,21 @@ FocusScope {
         // Trigger initial refresh if not yet loaded
         if (moonlight && !moonlight.loading && moonlight.appsModel.rowCount() === 0) {
             moonlight.refresh()
+        }
+
+        if (navTarget && navTarget.app_name) {
+            var targetName = navTarget.app_name
+            var count = moonlight && moonlight.appsModel ? moonlight.appsModel.rowCount() : 0
+            for (var i = 0; i < count; i++) {
+                var app = moonlight.getApp(i)
+                if (app && app.name === targetName) {
+                    isRecentSource = false
+                    isFavoritesSource = false
+                    selectedGameIndex = i
+                    currentView = "detail"
+                    break
+                }
+            }
         }
     }
 }

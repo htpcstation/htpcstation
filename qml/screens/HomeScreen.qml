@@ -189,6 +189,15 @@ FocusScope {
 
     function _playAlbum(tracks, albumData, startIndex) {
         if (!tracks || tracks.length === 0) return
+        if (recentlyPlayed) {
+            var src = albumData.source === "local" ? "localmusic" : "plexmusic"
+            var art = albumData.posterLocal || ""
+            var navKey = src === "localmusic" ? "folder_path" : "rating_key"
+            var navVal = src === "localmusic" ? (albumData.folderPath || "") : (albumData.ratingKey || "")
+            var navParams = {}
+            navParams[navKey] = navVal
+            recentlyPlayed.record(src, albumData.title || albumData.name || "", art, navParams)
+        }
         _playbackTracks = tracks
         _playbackAlbumData = albumData
         _playingAlbumKey = albumData.ratingKey || ""
@@ -382,7 +391,9 @@ FocusScope {
                         // do nothing
                     } else if (event.key === Qt.Key_Down) {
                         event.accepted = true
-                        // do nothing
+                        if (recentlyPlayedWidget.items.length > 0) {
+                            recentlyPlayedWidget.forceActiveFocus()
+                        }
                     } else if (keys.isAccept(event)) {
                         event.accepted = true
                         homeScreen._lastFocusedButton = index
@@ -435,6 +446,69 @@ FocusScope {
                     visible: buttonItem.activeFocus
                 }
             }
+        }
+    }
+
+    // ── Divider between tab bar and Recently Played Widget ───────────────────
+    Rectangle {
+        id: tabDivider
+        anchors.top: buttonRow.bottom
+        anchors.topMargin: root.vpx(48)
+        anchors.left: buttonRow.left
+        anchors.right: buttonRow.right
+        height: root.vpx(1)
+        color: Theme.colorAccent
+        visible: homeScreen._launcherVisible
+        opacity: homeScreen._launcherOpacity
+        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+    }
+
+    // ── Recently Played Widget ────────────────────────────────────────────────
+    RecentlyPlayedWidget {
+        id: recentlyPlayedWidget
+        anchors.top: tabDivider.bottom
+        anchors.topMargin: root.vpx(48)
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: root.vpx(32)
+        anchors.left: parent.left
+        anchors.leftMargin: root.vpx(48)
+        anchors.right: parent.right
+        anchors.rightMargin: root.vpx(48)
+        visible: homeScreen._launcherVisible
+        opacity: homeScreen._launcherOpacity
+        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+        focus: false
+        items: recentlyPlayed ? recentlyPlayed.getRecent() : []
+    }
+
+    Connections {
+        target: recentlyPlayed
+        function onChanged() { recentlyPlayedWidget.items = recentlyPlayed ? recentlyPlayed.getRecent() : [] }
+    }
+
+    Connections {
+        target: recentlyPlayedWidget
+        function onBack() {
+            var btn = buttonRepeater.itemAt(homeScreen._lastFocusedButton)
+            if (btn) btn.forceActiveFocus()
+        }
+        function onActivated(source, navParams) {
+            var slugMap = {
+                "retro":      "retrogames",
+                "steam":      "pcgames",
+                "moonlight":  "moonlight",
+                "plexvideo":  "plexmedia",
+                "plexmusic":  "plexmusic",
+                "localmusic": "localmusic"
+            }
+            var targetSlug = slugMap[source] || ""
+            var tabIndex = homeScreen.tabSlugs.indexOf(targetSlug)
+            if (tabIndex < 0) return
+            homeScreen._lastFocusedButton = tabIndex
+            homeScreen._activeTab = tabIndex
+            contentLoader.setSource(homeScreen.tabSources[tabIndex], { "navTarget": navParams })
+            homeScreen._launcherOpacity = 0.0
+            tabEnterTimer.restart()
         }
     }
 

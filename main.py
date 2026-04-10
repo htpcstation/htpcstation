@@ -69,6 +69,7 @@ from backend.local_music_library import LocalMusicLibrary
 from backend.moonlight_library import MoonlightLibrary
 from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
+from backend.recently_played import RecentlyPlayedManager
 from backend.settings_manager import SettingsManager
 from backend.steam_library import SteamLibrary
 
@@ -108,18 +109,22 @@ def main() -> None:
     keys = Keys()
     engine.rootContext().setContextProperty("keys", keys)
 
+    # Recently-played history — exposed to QML as `recentlyPlayed`
+    recently_played = RecentlyPlayedManager(config)
+    engine.rootContext().setContextProperty("recentlyPlayed", recently_played)
+
     # Emulator process launcher
     launcher = Launcher()
 
     # Game library — exposed to QML as `library`
-    library = GameLibrary(config, launcher)
+    library = GameLibrary(config, launcher, recently_played=recently_played)
     engine.rootContext().setContextProperty("library", library)
 
     # Browser launcher for Plex Web kiosk mode
     browser_launcher = BrowserLauncher(config.browser_command, button_layout=config.button_layout)
 
     # Plex library — exposed to QML as `plex`
-    plex_library = PlexLibrary(config, browser_launcher)
+    plex_library = PlexLibrary(config, browser_launcher, recently_played=recently_played)
     engine.rootContext().setContextProperty("plex", plex_library)
 
     # Live TV library — exposed to QML as `liveTV`
@@ -136,13 +141,14 @@ def main() -> None:
     engine.rootContext().setContextProperty("localMusic", local_music)
 
     # Steam library — exposed to QML as `steam`
-    steam = SteamLibrary()
+    steam = SteamLibrary(recently_played=recently_played)
     engine.rootContext().setContextProperty("steam", steam)
 
     # Moonlight library — exposed to QML as `moonlight`
     moonlight = MoonlightLibrary(
         moonlight_command=config.moonlight_command,
         host_uuid=config.moonlight_host_uuid,
+        recently_played=recently_played,
     )
     engine.rootContext().setContextProperty("moonlight", moonlight)
 
