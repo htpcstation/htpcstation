@@ -765,11 +765,26 @@ setup_venv() {
         echo "  ${GREEN}✓${RESET} Venv created."
     fi
 
-    echo "  Installing/updating pip dependencies from requirements.txt..."
-    if "$VENV_DIR/bin/pip" install -q -r "$REPO_DIR/requirements.txt"; then
-        echo "  ${GREEN}✓${RESET} Dependencies installed."
+    echo "  Installing pip dependencies..."
+    local pip_errors=0
+    while IFS= read -r pkg || [ -n "$pkg" ]; do
+        # Skip blank lines and comments
+        case "$pkg" in
+            ""|\#*) continue ;;
+        esac
+        local pkg_name="${pkg%%[>=<\[]*}"
+        printf "  Installing %-20s" "${pkg_name}..."
+        if "$VENV_DIR/bin/pip" install -q "$pkg" 2>/dev/null; then
+            echo " ${GREEN}✓${RESET}"
+        else
+            echo " ${RED}✗${RESET}"
+            pip_errors=$((pip_errors + 1))
+        fi
+    done < "$REPO_DIR/requirements.txt"
+    if [ "$pip_errors" -eq 0 ]; then
+        echo "  ${GREEN}✓${RESET} All pip dependencies installed."
     else
-        echo "  ${YELLOW}⚠ pip install encountered errors. System packages may cover the deps.${RESET}"
+        echo "  ${YELLOW}⚠ ${pip_errors} pip package(s) failed. System packages may cover them.${RESET}"
     fi
 
     # Write the run wrapper script
