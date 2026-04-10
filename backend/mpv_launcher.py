@@ -442,13 +442,10 @@ class LibMpvPlayer(QObject):
     def _gpu_context() -> str:
         """Return the correct MPV gpu-context for the current display server.
 
-        On Wayland, use 'wayland'. On Xorg (or Xwayland), use 'x11'.
-        Defaults to 'x11' if the session type cannot be determined.
+        Uses 'auto' to let mpv select the best available context (EGL, GLX,
+        Wayland, etc.) for the running display server and GPU drivers.
         """
-        session = os.environ.get("XDG_SESSION_TYPE", "").lower()
-        if session == "wayland" and os.environ.get("WAYLAND_DISPLAY"):
-            return "wayland"
-        return "x11"
+        return "auto"
 
     @staticmethod
     def _hwdec_mode() -> str:
