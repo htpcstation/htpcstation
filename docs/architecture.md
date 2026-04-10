@@ -56,6 +56,11 @@ htpcstation/
     moonlight_models.py                # MoonlightHost, MoonlightApp dataclasses
     moonlight_parser.py                # Moonlight QSettings config parser, host discovery, TCP probe
     moonlight_play_history.py          # Play timestamp recording/reading (play_history.json)
+    recently_played.py                 # RecentlyPlayedManager QObject: cross-category play history,
+                                       # persisted to ~/.config/htpcstation/recently_played.json.
+                                       # Max 50 entries. De-dups by (source, nav_params). record() slot,
+                                       # getRecent() slot (top 5), changed signal. Exposed as
+                                       # recentlyPlayed context property. Always called on main thread.
     mpv_launcher.py                    # LibMpvPlayer: python-mpv in-process player, VA-API hwdec,
                                        # Wayland/Xorg auto-detect, programmatic keybinds, property
                                        # observers (time-pos, pause), live TV variant with reconnect options
@@ -128,6 +133,9 @@ htpcstation/
                                         # MediaPlayer + AudioOutput, global X play/pause, MPV running state,
                                         # subtitle overlay trigger. 80ms opacity fade on tab enter/exit.
                                         # Home icon row at height/4 (25% from top).
+                                        # RecentlyPlayedWidget below tab bar; accent-color divider separates
+                                        # them. slugMap maps source strings → tab slugs for deep nav.
+                                        # onActivated(source, navParams) handles widget card presses.
       RetroGamesScreen.qml             # System list + game grid + detail (3-state)
       GameGridView.qml
       GameDetailView.qml
@@ -160,6 +168,12 @@ htpcstation/
       ListenScreen.qml                 # Plex Music: menu, artists, albums, tracks, now playing
       LocalVideosScreen.qml            # 5-view FocusScope: categories → videos/shows → seasons →
                                        # episodes. Lazy scan on selectCategory(). B = back one level.
+                                       # navTarget support: "movie" branch constructs _selectedMovieData
+                                       # directly from nav_params; "show" branch constructs
+                                       # _selectedShowData. No model search — data comes from navTarget.
+      RecentlyPlayedWidget.qml         # Horizontal 5-card row below HomeScreen tab bar. Visible in
+                                       # launcher state only. Artwork + title per card. Empty state text.
+                                       # Down from tab bar → widget; B → back to tab bar; A → deep nav.
       ControllerMappingDialog.qml       # Full-screen wizard: 14 inputs, raw mode, co-firing collection,
                                         # hold-to-skip (skippable actions), Start+Select cancel,
                                         # auto-save on completion
@@ -211,12 +225,21 @@ htpcstation/
     test_tmdb_config_cache_paths.py    # 18 tests (tmdb_api_key config round-trip, cache path constants)
     test_tmdb_scraper.py               # 32 tests (TmdbScraper: search_movie, search_tv_show, download_poster,
                                        # scrape_movies, scrape_tv_shows — all HTTP mocked)
+    test_recently_played.py            # 21 tests (RecentlyPlayedManager: record, de-dup, getRecent, persist)
+    test_hook_launches.py              # 15 tests (record() called on launch for all 6 categories)
 ```
 
 **Test isolation:** `tests/conftest.py` has an autouse fixture `isolate_plex_cache` that
 patches `_PLEX_CACHE_DIR`, `_POSTER_CACHE_DIR`, and `_CACHE_DIR` (live TV) to `tmp_path`
 for every test, and stubs `_migrate_cache_dirs` to a no-op. Tests never touch
 `~/.config/htpcstation/` at runtime.
+
+**Local video cache isolation is NOT covered by `conftest.py`** — `_MOVIES_CACHE_DIR` and
+`_TV_SHOWS_CACHE_DIR` are separate module-level constants in `local_video_library.py`. Any
+test that exercises `selectCategory()` enrichment or scrape integration with the real cache
+paths must `monkeypatch` these constants explicitly (e.g.
+`monkeypatch.setattr(lvl, "_MOVIES_CACHE_DIR", tmp_path / "movies")`). Failure to do so
+writes and then deletes the user's real `library.json` on every test run.
 
 ---
 
@@ -278,6 +301,27 @@ Button hint conventions:
 - **`PlexClient`** — talks to local media server. Always uses admin token. Sends full identity headers (`X-Plex-Client-Identifier`, `X-Plex-Product`, etc.) on every request. `get_stream_url(ratingKey)` returns `(url, view_offset_ms)`. `report_timeline()` is fire-and-forget (timeout=5s, never raises). `persist_stream_selection()` PUTs audio/subtitle choice with `allParts=1`. `get_transient_token()` returns short-lived delegation token for stream URLs.
 - **`PlexLibrary`** — orchestrates both. Stores `_active_token` (user-specific) for browser deep links separately from admin token. Caches user token/title/content-rating-filter. On-deck skipped for managed users (server rejects their tokens). Owns `PlexTimelineReporter` — started/stopped via `processStarted`/`processFinished`. Stores `_current_play_part_id`, `_audio_id_map`, `_sub_id_map` for track persistence. `_mpvLaunchReady` signal carries 6 args: `(url, title, start_ms, duration_ms, part_id, intro_end_ms)`. Public signals: `markersReady(intro_end_ms: int)`, `mpvPositionChanged(int ms)`. Slot: `seekMpv(ms: int)`.
 - **Poster cache:** `_poster_executor` (10 workers) separate from `_executor` (2 workers). Cached posters pre-resolved on worker thread before emitting to QML — no placeholder flash on warm load.
+
+### Recently Played Widget
+
+**Files:** `backend/recently_played.py`, `qml/screens/RecentlyPlayedWidget.qml`, `qml/screens/HomeScreen.qml`
+
+- `RecentlyPlayedManager` is passed to all 6 launching backends at startup and exposed as `recentlyPlayed` context property.
+- `record(source, title, artwork, nav_params)` — always called on the main thread. De-dups by `(source, nav_params)` dict equality: replaying an item moves it to the front. Max 50 entries. Atomic JSON write via `tempfile.mkstemp` + `os.replace`. Emits `changed` signal after every write.
+- `getRecent()` — returns top 5 as `QVariantList` of dicts with keys `source`, `title`, `artwork`, `nav_params`.
+- **Thread safety:** `record()` must always be called on the main thread. Plex video is the only async case: `_pending_record_*` fields are populated on the worker thread, then read in `_on_mpv_launch_ready` (main-thread signal handler). All other backends call `record()` from the QML `_playAlbum()` (Plex music, local music) or their `launchGame()`/`launchApp()` slots (retro, Steam, Moonlight).
+- **Deep navigation (navTarget):** Pressing A on a widget card calls `HomeScreen.onActivated(source, navParams)`. HomeScreen maps `source` via `slugMap` to the target tab slug, finds the tab index, and calls `Loader.setSource(url, {navTarget: navParams})`. Each tab screen reads `navTarget` in `onActiveFocusChanged` (after all init) and navigates to the item's detail view. Guard: `_navTargetApplied: bool` — only fires once per screen instance (Loader recreates the screen on each tab switch, so the guard resets naturally).
+- **navTarget nav_params by source:**
+
+| source | Required nav_params keys | Navigation action |
+|---|---|---|
+| `"retro"` | `rom_path`, `system_folder`, `system_display_name` | `library.selectSystem(system_folder)` then search gamesModel |
+| `"steam"` | `app_id` | search `steam.gamesModel` (synchronous — `steam.refresh()` is sync) |
+| `"moonlight"` | `host_address`, `app_name`, `image_path`, `host_name` | construct `_navTargetAppData` directly — no model search |
+| `"plexvideo"` | `rating_key`, `media_type` ("movie"/"show") | movie: `plex.fetchMovie(rating_key)` direct (no model search); show: set `selectedShowRatingKey` direct |
+| `"plexmusic"` | `rating_key` | `_selectedAlbumKey = rating_key`, `currentView = "album"` |
+| `"local"` | `folder_path` | `_selectedAlbumFolder = folder_path`, `currentView = "album"` |
+| `"localvideo"` | movie: `path`, `title`, `poster_path`, `year`, `genre`, `description`; show: `show_path`, `show_name`, `show_poster_path`, `show_year`, `show_description` | construct `_selectedMovieData` / `_selectedShowData` directly |
 
 ### Local Video Library
 
@@ -491,6 +535,8 @@ To use a custom poster image: drop any `.jpg`/`.jpeg`/`.png`/`.webp` file named 
 - **Focus scale must target inner content, not delegate root** — Applying `scale` to a `FocusScope` delegate root inside a `clip: true` ListView/GridView clips the scaled item at its original bounds. Apply scale to the inner card `Rectangle` instead. Grid delegates need `z: activeFocus ? 1 : 0` so focused items render above neighbours. Use `Theme.focusScale` and `Theme.focusScaleDuration` tokens.
 - **ListView/GridView highlight centering** — All list/grid views use `highlightRangeMode: ApplyRange` with `preferredHighlightBegin: height * 0.35` and `preferredHighlightEnd: height * 0.65`. Use `ApplyRange` (not `StrictlyEnforceRange`) so short lists still allow focus at edges. Add these three properties to any new ListView/GridView.
 - **`HomeScreen` tab content is loaded on demand** — `Loader.source` starts as `""`. Set it imperatively on A-press; clear it in `returnFocusToTabBar()` to destroy the screen and stop network calls. Do not bind `Loader.source` to any property.
+- **navTarget must be applied in `onActiveFocusChanged`, not `Component.onCompleted`** — `Component.onCompleted` fires during component construction before focus is granted. 80ms later, `tabEnterTimer` calls `forceActiveFocus()`, which triggers `onActiveFocusChanged` and runs initialization code (`_routeFocus()`, `selectLibrary()`, `steam.refresh()`, etc.) that resets `currentView` back to the default list. Any navTarget navigation set in `Component.onCompleted` is silently overwritten. Always place the navTarget block at the very end of the `if (activeFocus)` block in `onActiveFocusChanged`, after all existing init. Use `property bool _navTargetApplied: false` as a one-shot guard — `onActiveFocusChanged` may fire again if the user returns to the screen.
+- **navTarget model searches fail on cold start when the model loads async** — For screens where the model is populated by an async operation (Plex network load, Moonlight refresh), the model will be empty when `onActiveFocusChanged` fires on the first tab visit after app restart. Do not search an async model in the navTarget block. Instead: (a) call any synchronous slot that populates the model before searching (e.g. `library.selectSystem()` for retro games which is a synchronous local scan), or (b) skip the model search entirely and navigate directly by setting the required properties from navTarget fields (e.g. `plex.fetchMovie(navTarget.rating_key)` without needing `selectedMovieIndex`). The pattern of directly constructing a data object from navTarget fields (as in `LocalVideosScreen._selectedMovieData` and `MoonlightScreen._navTargetAppData`) avoids model dependency entirely and is the most robust approach.
 
 ### Plex
 - **Managed user tokens get 401 from server** — Always use admin token for server API calls. User token only for browser deep links.

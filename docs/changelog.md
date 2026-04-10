@@ -4,6 +4,26 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP40 — Recently Played widget: Local Videos integration + cold-start nav fixes
+
+Task briefs: `misc/coding-team/recently-played-widget/` (007)
+
+- **Local Videos integration** (`LocalVideosScreen.qml`, `HomeScreen.qml`):
+  - Movie plays recorded via `recentlyPlayed.record("localvideo", ...)` at `movieDetail.onPlay`; nav_params include `path`, `title`, `poster_path`, `year`, `genre`, `description`.
+  - TV show episode plays recorded at `showDetail.onPlayEpisode`; records the show (not episode) with `show_path`, `show_name`, `show_poster_path`, `show_year`, `show_description`.
+  - Deep nav: `onActiveFocusChanged` navTarget block constructs `_selectedMovieData` / `_selectedShowData` directly from nav_params; `currentView = "movieDetail"` / `"showDetail"`.
+  - B-back from widget-launched detail returns to HomeScreen (`_navTargetApplied` guard).
+  - `slugMap` in HomeScreen: added `"localvideo": "localvideos"`.
+- **Fix: tests wiping real local video cache** — `TestSelectCategoryEnrichment` wrote and deleted the real `~/.config/htpcstation/local_videos_cache/{movies,tv_shows}/library.json` on every test run. Fixed by `monkeypatch`-ing `_MOVIES_CACHE_DIR` / `_TV_SHOWS_CACHE_DIR` to `tmp_path` in both affected tests.
+- **Fix: widget cold-start navigation broken for retro games, Plex movies, Moonlight** — All three failed after app restart because the navTarget block searched a model that was not yet populated:
+  - *Retro games* (`RetroGamesScreen.qml`, `library.py`): `library.gamesModel` is only populated after `library.selectSystem(folderName)` is called; on cold start no system is selected. Fix: call `library.selectSystem(navTarget.system_folder)` in the navTarget block before searching the model. Added `system_display_name` to the navTarget dict at record time so the detail header is correct.
+  - *Plex movies* (`WatchScreen.qml`): `plex.moviesCount()` is 0 on startup (async network load). Fix: skip the model search entirely — navigate directly via `plex.fetchMovie(navTarget.rating_key)` with `selectedMovieIndex = -1`, matching the existing show branch pattern.
+  - *Moonlight* (`MoonlightScreen.qml`, `moonlight_library.py`): `moonlight.refresh()` is async; `appsModel` is always empty when the navTarget block runs. Fix: store `image_path` and `host_name` in navTarget at record time; construct `_navTargetAppData` directly from navTarget fields without searching the model; update `appData` binding to prefer `_navTargetAppData` when set.
+  - *PC Games*: confirmed OK — `steam.refresh()` is a synchronous slot (local ACF filesystem scan), model is populated before the navTarget block runs.
+- 2,410 tests passing (was 2,365).
+
+---
+
 ## CP39 — Local Videos TMDb scraping
 
 Task briefs: `misc/coding-team/local-videos-scraping/` (001–006)
@@ -150,3 +170,7 @@ Task briefs: `misc/coding-team/homescreen-themes/`
 | 34 | UI Layout Refresh: sub-header hints, keyboard shortcuts, gamepad fixes | `subheader-hints/` |
 | 35 | Plex cache, performance, and test isolation | `plex-cache-refresh/`, `test-suite-cleanup/` |
 | 36 | UI Redesign (theme, animations, fades) + Plex cache/offline fixes | `ui-redesign/` (006–009), `fix-context-button-keycodes/` (004–005, 010–012) |
+| 37 | Recently Played homescreen widget | `recently-played-widget/` (001–004) |
+| 38 | Local Videos tab | `local-videos/` (001–004) |
+| 39 | Local Videos TMDb scraping | `local-videos-scraping/` (001–006) |
+| 40 | Recently Played: Local Videos integration + cold-start nav fixes | `recently-played-widget/` (007) |
