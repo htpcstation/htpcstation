@@ -67,6 +67,8 @@ FocusScope {
 
     // Guard: navTarget navigation fires only once (on first active focus).
     property bool _navTargetApplied: false
+    // App data constructed directly from navTarget (bypasses model search).
+    property var _navTargetAppData: null
 
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
@@ -95,18 +97,18 @@ FocusScope {
             if (navTarget && !_navTargetApplied) {
                 _navTargetApplied = true
                 if (navTarget.app_name) {
-                    var targetName = navTarget.app_name
-                    var count = moonlight && moonlight.appsModel ? moonlight.appsModel.rowCount() : 0
-                    for (var i = 0; i < count; i++) {
-                        var app = moonlight.getApp(i)
-                        if (app && app.name === targetName) {
-                            isRecentSource = false
-                            isFavoritesSource = false
-                            selectedGameIndex = i
-                            currentView = "detail"
-                            break
-                        }
+                    moonlightScreen._navTargetAppData = {
+                        "name":        navTarget.app_name,
+                        "hostAddress": navTarget.host_address || "",
+                        "hostName":    navTarget.host_name    || "",
+                        "imagePath":   navTarget.image_path   || "",
+                        "favorite":    false
                     }
+                    isRecentSource = false
+                    isFavoritesSource = false
+                    selectedGameIndex = -1
+                    currentView = "detail"
+                    _routeFocus()
                 }
             }
         }
@@ -392,8 +394,12 @@ FocusScope {
                  && !moonlightScreen.isFavoritesSource
 
         appData: moonlightScreen.currentView === "detail" && !moonlightScreen.isRecentSource
-                 && !moonlightScreen.isFavoritesSource && moonlightScreen.selectedGameIndex >= 0
-                 ? (moonlight ? moonlight.getApp(moonlightScreen.selectedGameIndex) : ({}))
+                 && !moonlightScreen.isFavoritesSource
+                 ? (moonlightScreen._navTargetAppData !== null
+                    ? moonlightScreen._navTargetAppData
+                    : (moonlightScreen.selectedGameIndex >= 0 && moonlight
+                       ? moonlight.getApp(moonlightScreen.selectedGameIndex)
+                       : ({})))
                  : ({})
 
         onBack: {

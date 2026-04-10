@@ -256,7 +256,12 @@ class TestMoonlightLibraryLaunchHook:
         assert source == "moonlight"
         assert title == "Cyberpunk 2077"
         assert artwork == "file:///path/to/cyberpunk.jpg"
-        assert nav_params == {"host_address": "192.168.1.100", "app_name": "Cyberpunk 2077"}
+        assert nav_params == {
+            "host_address": "192.168.1.100",
+            "app_name": "Cyberpunk 2077",
+            "image_path": "/path/to/cyberpunk.jpg",
+            "host_name": "",  # no paired host in test fixture
+        }
 
     def test_no_record_when_recently_played_is_none(self) -> None:
         """launchApp does not raise when recently_played is None."""

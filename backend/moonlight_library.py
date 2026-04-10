@@ -303,11 +303,20 @@ class MoonlightLibrary(QObject):
                 None,
             )
             artwork = ("file://" + app.image_path) if (app and app.image_path) else ""
+            host = next(
+                (h for h in self._paired_hosts if h.address == host_address),
+                None,
+            )
             self._recently_played.record(
                 "moonlight",
                 app_name,
                 artwork,
-                {"host_address": host_address, "app_name": app_name},
+                {
+                    "host_address": host_address,
+                    "app_name": app_name,
+                    "image_path": app.image_path if app else "",
+                    "host_name": host.display_name if host else "",
+                },
             )
 
         self._launcher.launch(host_address, app_name, self._moonlight_command)
