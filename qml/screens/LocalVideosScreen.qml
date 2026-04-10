@@ -53,9 +53,9 @@ FocusScope {
                         "path":        navTarget.path,
                         "title":       navTarget.title       || "",
                         "posterPath":  navTarget.poster_path || "",
-                        "year":        0,
-                        "genre":       "",
-                        "description": ""
+                        "year":        navTarget.year        || 0,
+                        "genre":       navTarget.genre       || "",
+                        "description": navTarget.description || ""
                     }
                     localVideosScreen.currentView = "movieDetail"
                     _routeFocus()
@@ -64,8 +64,8 @@ FocusScope {
                         "name":        navTarget.show_name        || "",
                         "path":        navTarget.show_path        || "",
                         "posterPath":  navTarget.show_poster_path || "",
-                        "year":        0,
-                        "description": "",
+                        "year":        navTarget.show_year        || 0,
+                        "description": navTarget.show_description || "",
                         "seasonCount": 0
                     }
                     localVideosScreen.currentView = "showDetail"
@@ -300,9 +300,12 @@ FocusScope {
                     art,
                     {
                         "type":        "movie",
-                        "path":        localVideosScreen._selectedMovieData.path  || "",
-                        "title":       localVideosScreen._selectedMovieData.title || "",
-                        "poster_path": localVideosScreen._selectedMovieData.posterPath || ""
+                        "path":        localVideosScreen._selectedMovieData.path        || "",
+                        "title":       localVideosScreen._selectedMovieData.title       || "",
+                        "poster_path": localVideosScreen._selectedMovieData.posterPath  || "",
+                        "year":        localVideosScreen._selectedMovieData.year        || 0,
+                        "genre":       localVideosScreen._selectedMovieData.genre       || "",
+                        "description": localVideosScreen._selectedMovieData.description || ""
                     }
                 )
             }
@@ -385,9 +388,11 @@ FocusScope {
                     art,
                     {
                         "type":             "show",
-                        "show_path":        localVideosScreen._selectedShowData.path       || "",
-                        "show_name":        localVideosScreen._selectedShowData.name       || "",
-                        "show_poster_path": localVideosScreen._selectedShowData.posterPath || ""
+                        "show_path":        localVideosScreen._selectedShowData.path        || "",
+                        "show_name":        localVideosScreen._selectedShowData.name        || "",
+                        "show_poster_path": localVideosScreen._selectedShowData.posterPath  || "",
+                        "show_year":        localVideosScreen._selectedShowData.year        || 0,
+                        "show_description": localVideosScreen._selectedShowData.description || ""
                     }
                 )
             }
