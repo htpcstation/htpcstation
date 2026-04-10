@@ -2341,9 +2341,10 @@ class PlexLibrary(QObject):
         self.playlistTracksReady.emit(rating_key, data)
 
     def _on_artists_ready(self, artists: list, total: int) -> None:
-        # Only replace if incoming data is at least as large as current model
-        # (avoids replacing cached model with smaller network response).
-        if len(artists) >= len(self._artists_model._artists):
+        # Only replace if incoming data is strictly larger than current model
+        # (avoids resetting the model when the same count comes back from the
+        # network, which would destroy GridView scroll/focus state).
+        if len(artists) > len(self._artists_model._artists):
             self._artists_model.set_artists(artists)
             self.artistsModelChanged.emit()
 

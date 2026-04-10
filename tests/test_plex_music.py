@@ -1237,3 +1237,25 @@ class TestWorkerLoadSectionArtistCache:
 
         assert len(emitted) == 1, f"Expected 1 emission, got {len(emitted)}"
         assert emitted[0][0].title == "Fresh Artist"
+
+
+# ---------------------------------------------------------------------------
+# _on_artists_ready — model reset guard
+# ---------------------------------------------------------------------------
+
+
+class TestOnArtistsReadyGuard:
+    def test_on_artists_ready_skips_when_same_count(self) -> None:
+        """When incoming artist count equals model count, set_artists is NOT called."""
+        lib = _make_lib()
+        lib._client = None  # prevent poster fetch attempts
+
+        # Pre-populate the model with 3 artists
+        existing = _make_artists(3)
+        lib._artists_model.set_artists(existing)
+
+        # Call _on_artists_ready with the same count
+        incoming = _make_artists(3)
+        with patch.object(lib._artists_model, "set_artists") as mock_set:
+            lib._on_artists_ready(incoming, 3)
+            mock_set.assert_not_called()
