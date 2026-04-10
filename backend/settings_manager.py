@@ -80,6 +80,9 @@ class SettingsManager(QObject):
     moonlightViewModeChanged = Signal()
     watchViewModeChanged = Signal()
     listenViewModeChanged = Signal()
+    localMusicDirectoryChanged = Signal()
+    localMusicViewModeChanged = Signal()
+    sortLocalMusicArtistsChanged = Signal()
     showMoonlightTabChanged = Signal()
     tabVisibilityChanged = Signal()
     themeNameChanged = Signal()
@@ -218,6 +221,18 @@ class SettingsManager(QObject):
 
     def _get_show_listen_tab(self) -> bool:
         return self._config.show_listen_tab
+
+    def _get_local_music_directory(self) -> str:
+        return str(self._config.local_music_directory) if self._config.local_music_directory else ""
+
+    def _get_show_local_music_tab(self) -> bool:
+        return self._config.show_local_music_tab
+
+    def _get_local_music_view_mode(self) -> str:
+        return self._config.local_music_view_mode
+
+    def _get_sort_local_music_artists(self) -> str:
+        return self._config.sort_local_music_artists
 
     def _get_theme_name(self) -> str:
         return self._config.theme_name
@@ -407,6 +422,26 @@ class SettingsManager(QObject):
         bool,
         fget=_get_show_listen_tab,
         notify=tabVisibilityChanged,
+    )
+    localMusicDirectory = Property(
+        str,
+        fget=_get_local_music_directory,
+        notify=localMusicDirectoryChanged,
+    )
+    showLocalMusicTab = Property(
+        bool,
+        fget=_get_show_local_music_tab,
+        notify=tabVisibilityChanged,
+    )
+    localMusicViewMode = Property(
+        str,
+        fget=_get_local_music_view_mode,
+        notify=localMusicViewModeChanged,
+    )
+    sortLocalMusicArtists = Property(
+        str,
+        fget=_get_sort_local_music_artists,
+        notify=sortLocalMusicArtistsChanged,
     )
     themeName = Property(
         str,
@@ -629,6 +664,34 @@ class SettingsManager(QObject):
         """Set the Listen tab visibility."""
         self._config.set_show_listen_tab(enabled)
         self.tabVisibilityChanged.emit()
+
+    @Slot(str)
+    def setLocalMusicDirectory(self, path: str) -> None:
+        """Set the local music directory. Validates that the path exists."""
+        expanded = Path(path).expanduser()
+        if not expanded.is_dir():
+            logger.warning("setLocalMusicDirectory: path does not exist: %s", path)
+            return
+        self._config.set_local_music_directory(expanded)
+        self.localMusicDirectoryChanged.emit()
+
+    @Slot(bool)
+    def setShowLocalMusicTab(self, enabled: bool) -> None:
+        """Set the Local Music tab visibility."""
+        self._config.set_show_local_music_tab(enabled)
+        self.tabVisibilityChanged.emit()
+
+    @Slot(str)
+    def setLocalMusicViewMode(self, mode: str) -> None:
+        """Persist the view mode for the Local Music screen ('grid' or 'list')."""
+        self._config.set_local_music_view_mode(mode)
+        self.localMusicViewModeChanged.emit()
+
+    @Slot(str)
+    def setSortLocalMusicArtists(self, key: str) -> None:
+        """Persist the sort preference for the local music artists grid."""
+        self._config.set_sort_local_music_artists(key)
+        self.sortLocalMusicArtistsChanged.emit()
 
     @Slot(str)
     def setAccentColor(self, color: str) -> None:

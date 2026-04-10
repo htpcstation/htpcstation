@@ -361,6 +361,7 @@ class Config:
         self.cores_directory: Path = Path(_DEFAULT_CORES_DIRECTORY).expanduser()
         self.retroarch_cfg_path: Path = DEFAULT_RETROARCH_CFG
         self.rom_directory: Optional[Path] = None
+        self.local_music_directory: Optional[Path] = None
         # RetroArch hotkey configuration
         self._hotkey_modifier_evdev: int | None = None   # evdev code of modifier button
         self._hotkey_modifier_sdl: dict | None = None    # SDL record for modifier button
@@ -397,6 +398,7 @@ class Config:
         self._show_moonlight_tab: bool = True
         self._show_watch_tab: bool = True
         self._show_listen_tab: bool = True
+        self._show_local_music_tab: bool = True
         # Music library selection
         self._music_library_key: str = ""
         # Plex player selection: "mpv" or "browser"
@@ -411,6 +413,7 @@ class Config:
         self._sort_plex_movies: str = ""
         self._sort_plex_shows: str = ""
         self._sort_plex_artists: str = ""
+        self._sort_local_music_artists: str = "az"
         self._filter_plex_movie_genre: str = ""
         self._filter_plex_show_genre: str = ""
         # View mode preferences
@@ -419,6 +422,7 @@ class Config:
         self._moonlight_view_mode: str = "grid"
         self._watch_view_mode: str = "grid"
         self._listen_view_mode: str = "grid"
+        self._local_music_view_mode: str = "grid"
         # Theme
         self._theme_name: str = "default"
         self._accent_color: str = "#e94560"
@@ -570,6 +574,11 @@ class Config:
         return self._sort_plex_artists
 
     @property
+    def sort_local_music_artists(self) -> str:
+        """Persisted sort key for the local music artists grid."""
+        return self._sort_local_music_artists
+
+    @property
     def filter_plex_movie_genre(self) -> str:
         """Persisted genre filter key for Plex movies. Empty string means no filter."""
         return self._filter_plex_movie_genre
@@ -603,6 +612,11 @@ class Config:
     def listen_view_mode(self) -> str:
         """Persisted view mode for the Listen screen. Either 'grid' or 'list'."""
         return self._listen_view_mode
+
+    @property
+    def local_music_view_mode(self) -> str:
+        """Persisted view mode for the Local Music screen. Either 'grid' or 'list'."""
+        return self._local_music_view_mode
 
     @property
     def theme_name(self) -> str:
@@ -648,6 +662,11 @@ class Config:
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
         self.rom_directory = Path(path).expanduser()
+        self.save()
+
+    def set_local_music_directory(self, path: "str | Path") -> None:
+        """Set the local music directory and persist the config."""
+        self.local_music_directory = Path(path).expanduser()
         self.save()
 
     def set_plex_token(self, token: str) -> None:
@@ -722,6 +741,11 @@ class Config:
         self._sort_plex_artists = key
         self.save()
 
+    def set_sort_local_music_artists(self, key: str) -> None:
+        """Set the sort preference for the local music artists grid and persist the config."""
+        self._sort_local_music_artists = key
+        self.save()
+
     def set_filter_plex_movie_genre(self, key: str) -> None:
         """Set the genre filter for Plex movies and persist the config."""
         self._filter_plex_movie_genre = key
@@ -755,6 +779,11 @@ class Config:
     def set_listen_view_mode(self, mode: str) -> None:
         """Set the view mode for the Listen screen and persist the config."""
         self._listen_view_mode = mode if mode in ("grid", "list") else "grid"
+        self.save()
+
+    def set_local_music_view_mode(self, mode: str) -> None:
+        """Set the view mode for the Local Music screen and persist the config."""
+        self._local_music_view_mode = mode if mode in ("grid", "list") else "grid"
         self.save()
 
     @property
@@ -893,6 +922,11 @@ class Config:
         """Whether the Listen tab is visible. Defaults to True."""
         return self._show_listen_tab
 
+    @property
+    def show_local_music_tab(self) -> bool:
+        """Whether the Local Music tab is visible. Defaults to True."""
+        return self._show_local_music_tab
+
     def set_show_retro_games_tab(self, enabled: bool) -> None:
         """Set the Retro Games tab visibility and persist the config."""
         self._show_retro_games_tab = enabled
@@ -918,6 +952,11 @@ class Config:
         self._show_listen_tab = enabled
         self.save()
 
+    def set_show_local_music_tab(self, enabled: bool) -> None:
+        """Set the Local Music tab visibility and persist the config."""
+        self._show_local_music_tab = enabled
+        self.save()
+
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
         try:
@@ -927,6 +966,7 @@ class Config:
             return
         data: dict = {
             "rom_directory": str(self.rom_directory) if self.rom_directory else "",
+            "local_music_directory": str(self.local_music_directory) if self.local_music_directory else "",
             "retroarch": {
                 "command": self.retroarch_command,
                 "cores_directory": str(self.cores_directory),
@@ -975,6 +1015,7 @@ class Config:
                 "moonlight_view_mode": self._moonlight_view_mode,
                 "watch_view_mode": self._watch_view_mode,
                 "listen_view_mode": self._listen_view_mode,
+                "local_music_view_mode": self._local_music_view_mode,
                 "theme_name": self._theme_name,
                 "accent_color": self._accent_color,
                 "focus_ring_color": self._focus_ring_color,
@@ -986,6 +1027,7 @@ class Config:
                 "plex_movies": self._sort_plex_movies,
                 "plex_shows": self._sort_plex_shows,
                 "plex_artists": self._sort_plex_artists,
+                "local_music_artists": self._sort_local_music_artists,
                 "plex_movie_genre": self._filter_plex_movie_genre,
                 "plex_show_genre": self._filter_plex_show_genre,
             },
@@ -995,6 +1037,7 @@ class Config:
                 "show_moonlight": self._show_moonlight_tab,
                 "show_watch": self._show_watch_tab,
                 "show_listen": self._show_listen_tab,
+                "show_local_music": self._show_local_music_tab,
             },
         }
         # Safety guard: never overwrite a config that has credentials with a blank one.
@@ -1034,6 +1077,11 @@ class Config:
         rom_dir_raw: str = raw.get("rom_directory", "")
         if rom_dir_raw:
             self.rom_directory = Path(rom_dir_raw).expanduser()
+
+        # local_music_directory
+        music_dir_raw: str = raw.get("local_music_directory", "")
+        if music_dir_raw:
+            self.local_music_directory = Path(music_dir_raw).expanduser()
 
         # retroarch section
         retroarch = raw.get("retroarch", {})
@@ -1159,6 +1207,8 @@ class Config:
             self._watch_view_mode = raw_watch_view_mode if raw_watch_view_mode in ("grid", "list") else "grid"
             raw_listen_view_mode = ui.get("listen_view_mode", "grid")
             self._listen_view_mode = raw_listen_view_mode if raw_listen_view_mode in ("grid", "list") else "grid"
+            raw_local_music_view_mode = ui.get("local_music_view_mode", "grid")
+            self._local_music_view_mode = raw_local_music_view_mode if raw_local_music_view_mode in ("grid", "list") else "grid"
             raw_theme_name = ui.get("theme_name", "default").strip()
             self._theme_name = raw_theme_name if raw_theme_name else "default"
             raw_accent = ui.get("accent_color", "").strip()
@@ -1177,6 +1227,7 @@ class Config:
             self._sort_plex_movies = sort_prefs.get("plex_movies", "")
             self._sort_plex_shows = sort_prefs.get("plex_shows", "")
             self._sort_plex_artists = sort_prefs.get("plex_artists", "")
+            self._sort_local_music_artists = sort_prefs.get("local_music_artists", "az")
             self._filter_plex_movie_genre = sort_prefs.get("plex_movie_genre", "")
             self._filter_plex_show_genre = sort_prefs.get("plex_show_genre", "")
 
@@ -1193,6 +1244,8 @@ class Config:
                 self._show_watch_tab = bool(tabs["show_watch"])
             if "show_listen" in tabs:
                 self._show_listen_tab = bool(tabs["show_listen"])
+            if "show_local_music" in tabs:
+                self._show_local_music_tab = bool(tabs["show_local_music"])
 
 
 def ensure_config_dir() -> None:

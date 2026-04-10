@@ -1677,6 +1677,7 @@ class PlexLibrary(QObject):
                         "parentTitle": track.parent_title,
                         "grandparentTitle": track.grandparent_title,
                         "mediaKey": track.media_key,
+                        "streamUrl": "",
                     })
             self._albumDetailReady.emit(rating_key, {"album": album_dict, "tracks": tracks})
 
@@ -1796,6 +1797,7 @@ class PlexLibrary(QObject):
                     "parentTitle": track.parent_title,
                     "grandparentTitle": track.grandparent_title,
                     "mediaKey": track.media_key,
+                    "streamUrl": "",
                 })
             self._playlistTracksReady.emit(rating_key, result)
         self._executor.submit(_worker)

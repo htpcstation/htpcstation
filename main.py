@@ -65,6 +65,7 @@ from backend.keys import Keys
 from backend.launcher import Launcher
 from backend.library import GameLibrary
 from backend.live_tv_library import LiveTvLibrary
+from backend.local_music_library import LocalMusicLibrary
 from backend.moonlight_library import MoonlightLibrary
 from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
@@ -129,6 +130,10 @@ def main() -> None:
     engine.rootContext().setContextProperty("liveTV", live_tv)
     app.aboutToQuit.connect(live_tv.shutdown)
     app.aboutToQuit.connect(plex_library.shutdown)
+
+    # Local music library — exposed to QML as `localMusic`
+    local_music = LocalMusicLibrary(config)
+    engine.rootContext().setContextProperty("localMusic", local_music)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary()

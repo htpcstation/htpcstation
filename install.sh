@@ -31,6 +31,7 @@ TAB_RETRO=false
 TAB_PC=false
 TAB_WATCH=false
 TAB_LISTEN=false
+TAB_LOCAL_MUSIC=false
 
 ROM_DIR=""
 PLEX_SERVER_URL=""
@@ -237,7 +238,6 @@ detect_environment() {
     # Existing config
     if [ -f "$CONFIG_FILE" ]; then
         EXISTING_CONFIG=1
-        echo "  ${YELLOW}⚠ Existing config found at ${CONFIG_FILE}${RESET}"
     fi
 }
 
@@ -260,6 +260,7 @@ interview() {
     echo "    [2] PC Games     (requires Steam and/or Moonlight)"
     echo "    [3] Plex Media   (requires Plex)"
     echo "    [4] Plex Music   (requires Plex)"
+    echo "    [5] Music        (local files)"
     printf "  Enter numbers separated by spaces, or press Enter for all: " > /dev/tty
     read -r tab_input < /dev/tty
 
@@ -268,6 +269,7 @@ interview() {
         TAB_PC=true
         TAB_WATCH=true
         TAB_LISTEN=true
+        TAB_LOCAL_MUSIC=true
     else
         for num in $tab_input; do
             case "$num" in
@@ -275,6 +277,7 @@ interview() {
                 2) TAB_PC=true ;;
                 3) TAB_WATCH=true ;;
                 4) TAB_LISTEN=true ;;
+                5) TAB_LOCAL_MUSIC=true ;;
                 *) echo "  ${YELLOW}⚠ Unknown tab number: ${num} — ignored.${RESET}" ;;
             esac
         done
@@ -502,7 +505,15 @@ check_dependencies() {
     # libmpv — package name differs by distro
     local libmpv_pkg
     case "$DISTRO_FAMILY" in
-        debian)  libmpv_pkg="libmpv1" ;;
+        debian)
+            if check_pkg_installed "libmpv2" 2>/dev/null; then
+                libmpv_pkg="libmpv2"
+            elif apt-cache show libmpv2 >/dev/null 2>&1; then
+                libmpv_pkg="libmpv2"
+            else
+                libmpv_pkg="libmpv1"
+            fi
+            ;;
         fedora)  libmpv_pkg="mpv-libs" ;;
         arch)    libmpv_pkg="mpv" ;;
         *)       libmpv_pkg="" ;;
@@ -524,7 +535,14 @@ check_dependencies() {
     if check_python_import "PySide6" "PySide6" 2>/dev/null; then
         report_dep "PySide6" "ok"
     else
-        report_dep "PySide6" "missing" "$(install_cmd "python3-pyside6")"
+        local pyside6_hint
+        case "$DISTRO_FAMILY" in
+            debian)  pyside6_hint="pip install PySide6 (installed via venv)" ;;
+            fedora)  pyside6_hint="$(install_cmd "python3-pyside6")" ;;
+            arch)    pyside6_hint="$(install_cmd "pyside6")" ;;
+            *)       pyside6_hint="pip install PySide6" ;;
+        esac
+        report_dep "PySide6" "missing" "$pyside6_hint"
     fi
 
     # python-mpv
@@ -773,11 +791,12 @@ write_config() {
     echo ""
 
     # Build JSON booleans
-    local tab_retro_json tab_pc_json tab_watch_json tab_listen_json
-    if $TAB_RETRO;  then tab_retro_json="true";  else tab_retro_json="false";  fi
-    if $TAB_PC;     then tab_pc_json="true";     else tab_pc_json="false";     fi
-    if $TAB_WATCH;  then tab_watch_json="true";  else tab_watch_json="false";  fi
-    if $TAB_LISTEN; then tab_listen_json="true"; else tab_listen_json="false"; fi
+    local tab_retro_json tab_pc_json tab_watch_json tab_listen_json tab_local_music_json
+    if $TAB_RETRO;       then tab_retro_json="true";       else tab_retro_json="false";       fi
+    if $TAB_PC;          then tab_pc_json="true";          else tab_pc_json="false";          fi
+    if $TAB_WATCH;       then tab_watch_json="true";       else tab_watch_json="false";       fi
+    if $TAB_LISTEN;      then tab_listen_json="true";      else tab_listen_json="false";      fi
+    if $TAB_LOCAL_MUSIC; then tab_local_music_json="true"; else tab_local_music_json="false"; fi
 
     # plex.server_url only if watch/listen enabled
     local plex_server_url_val=""
@@ -808,7 +827,8 @@ write_config() {
     "show_retro_games": ${tab_retro_json},
     "show_pc_games": ${tab_pc_json},
     "show_watch": ${tab_watch_json},
-    "show_listen": ${tab_listen_json}
+    "show_listen": ${tab_listen_json},
+    "show_local_music": ${tab_local_music_json}
   },
   "rom_directory": "${rom_dir_val}",
   "retroarch": {
@@ -1106,7 +1126,8 @@ print_summary() {
     $TAB_RETRO  && tabs_list="${tabs_list:+${tabs_list}, }Retro Games" || true
     $TAB_PC     && tabs_list="${tabs_list:+${tabs_list}, }PC Games"    || true
     $TAB_WATCH  && tabs_list="${tabs_list:+${tabs_list}, }Plex Media"  || true
-    $TAB_LISTEN && tabs_list="${tabs_list:+${tabs_list}, }Plex Music"  || true
+    $TAB_LISTEN      && tabs_list="${tabs_list:+${tabs_list}, }Plex Music"    || true
+    $TAB_LOCAL_MUSIC && tabs_list="${tabs_list:+${tabs_list}, }Music (Local)" || true
     [ -z "$tabs_list" ] && tabs_list="(none)" || true
 
     echo "  OS:           ${distro_display}"
@@ -1148,6 +1169,12 @@ main() {
     echo ""
     echo "${BOLD}  HTPC Station Installer${RESET}"
     echo ""
+
+    if [ -f "$CONFIG_FILE" ]; then
+        EXISTING_CONFIG=1
+        echo "  ${YELLOW}⚠ Existing config found at ${CONFIG_FILE}${RESET}"
+        echo ""
+    fi
 
     detect_environment
     interview

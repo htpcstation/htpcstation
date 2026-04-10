@@ -43,6 +43,7 @@ FocusScope {
                     settings: [
                         { type: "text", label: "ROMs Directory", settingKey: "romDirectory" },
                         { type: "text", label: "Cores Directory", settingKey: "coresDirectory" },
+                        { type: "text", label: "Music Directory", settingKey: "localMusicDirectory" },
                     ]
                 },
                 {
@@ -107,6 +108,7 @@ FocusScope {
                         { type: "toggle",  label: "Moonlight",    settingKey: "showMoonlightTab" },
                         { type: "toggle",  label: "Plex Media",   settingKey: "showWatchTab" },
                         { type: "toggle",  label: "Plex Music",   settingKey: "showListenTab" },
+                        { type: "toggle",  label: "Local Music",  settingKey: "showLocalMusicTab" },
                     ]
                 }
             ]
@@ -207,6 +209,8 @@ FocusScope {
         if (key === "showMoonlightTab")   return settings.showMoonlightTab
         if (key === "showWatchTab")       return settings.showWatchTab
         if (key === "showListenTab")      return settings.showListenTab
+        if (key === "showLocalMusicTab")  return settings.showLocalMusicTab
+        if (key === "localMusicDirectory") return settings.localMusicDirectory
         if (key === "autoSkipIntro")      return settings.autoSkipIntro
 
         return ""
@@ -259,6 +263,11 @@ FocusScope {
             settings.setShowListenTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
+        else if (key === "showLocalMusicTab") {
+            settings.setShowLocalMusicTab(value)
+            if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "localMusicDirectory") settings.setLocalMusicDirectory(value)
         else if (key === "autoSkipIntro") {
             settings.setAutoSkipIntro(value)
         }
