@@ -35,8 +35,15 @@ FocusScope {
     // Current season tab index
     property int _currentSeasonIndex: 0
 
-    Component.onCompleted: {
-        if (localVideos) localVideos.selectSeason(0)
+    // Load episodes for season 0 each time this view becomes visible.
+    // Component.onCompleted fires at app startup (seasonsModel is empty then),
+    // so onVisibleChanged is used instead — it fires every time the view is
+    // entered, at which point selectShow() has already populated seasonsModel.
+    onVisibleChanged: {
+        if (visible) {
+            _currentSeasonIndex = 0
+            if (localVideos) localVideos.selectSeason(0)
+        }
     }
 
     // Route focus to season tabs when this view gains focus
