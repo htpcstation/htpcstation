@@ -853,7 +853,7 @@ class TestScrapeSlots:
         finished: list[str] = []
 
         # Connect the signal to a list to capture emissions
-        lib._emit_scrape_finished = lambda name: finished.append(name)  # type: ignore[method-assign]
+        lib._emit_scrape_finished = lambda name, cat_type: finished.append(name)  # type: ignore[method-assign]
 
         scraper_mock = MagicMock()
         with patch("backend.local_video_library.TmdbScraper", return_value=scraper_mock):
@@ -863,25 +863,25 @@ class TestScrapeSlots:
         # _emit_scrape_finished was invoked via QMetaObject on the main thread;
         # since there's no event loop running in tests, invoke directly to verify logic
         lib.scrapeFinished.connect(finished.append)
-        lib._emit_scrape_finished("Movies")
+        lib._emit_scrape_finished("Movies", "movies")
         assert "Movies" in finished
 
     def test_emit_scrape_finished_calls_selectCategory(self, tmp_path: Path) -> None:
-        config = _make_config(tmp_path)
+        cats = [{"name": "Movies", "type": "flat", "paths": []}]
+        config = _make_config(tmp_path, categories=cats)
         lib = _make_library(tmp_path, config)
-        lib._current_category_index = 0
 
         with patch.object(lib, "selectCategory") as mock_select:
-            lib._emit_scrape_finished("Movies")
+            lib._emit_scrape_finished("Movies", "movies")
             mock_select.assert_called_once_with(0)
 
-    def test_emit_scrape_finished_no_reload_when_index_negative(self, tmp_path: Path) -> None:
-        config = _make_config(tmp_path)
+    def test_emit_scrape_finished_no_reload_when_no_matching_category(self, tmp_path: Path) -> None:
+        # Config has no categories at all; walking finds no match → selectCategory not called
+        config = _make_config(tmp_path, categories=[])
         lib = _make_library(tmp_path, config)
-        lib._current_category_index = -1
 
         with patch.object(lib, "selectCategory") as mock_select:
-            lib._emit_scrape_finished("Movies")
+            lib._emit_scrape_finished("Movies", "movies")
             mock_select.assert_not_called()
 
 

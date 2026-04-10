@@ -305,26 +305,32 @@ class TmdbScraper:
         on_progress: Callable | None = None,
     ) -> None:
         """Scrape TMDb metadata for a list of VideoFile items."""
+        logger.info("scrape_movies: %d items to process", len(items))
         total = len(items)
         for done, item in enumerate(items, start=1):
             key = Path(item.path).stem
+            logger.debug("scrape_movies: processing key=%r", key)
 
             if cache.is_tombstoned(key):
+                logger.debug("scrape_movies: skipping tombstoned key=%r", key)
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
 
             existing = cache.get_entry(key)
             if existing is not None and existing.get("tmdb_id") is not None:
+                logger.debug("scrape_movies: skipping already-scraped key=%r", key)
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
 
             title, year = _parse_movie_title(key)
             result = self.search_movie(title, year)
+            logger.debug("scrape_movies: search title=%r year=%s → %s", title, year, result.get("id") if result else "no result")
 
             if result is None:
                 cache.write_tombstone(key)
+                logger.info("scrape_movies: no TMDb result for key=%r, writing tombstone", key)
                 if on_progress is not None:
                     on_progress(done, total)
                 time.sleep(0.26)
@@ -346,6 +352,7 @@ class TmdbScraper:
                     entry["poster_scraped"] = str(dest)
 
             cache.set_entry(key, entry)
+            logger.info("scrape_movies: saved key=%r tmdb_id=%s poster=%s", key, entry["tmdb_id"], bool(entry["poster_scraped"]))
 
             if on_progress is not None:
                 on_progress(done, total)
@@ -359,9 +366,11 @@ class TmdbScraper:
         on_progress: Callable | None = None,
     ) -> None:
         """Scrape TMDb metadata for a list of Show items."""
+        logger.info("scrape_tv_shows: %d shows to process", len(shows))
         total = len(shows)
         for done, show in enumerate(shows, start=1):
             key = show.name
+            logger.debug("scrape_tv_shows: processing key=%r", key)
 
             if cache.is_tombstoned(key):
                 if on_progress is not None:
@@ -375,9 +384,11 @@ class TmdbScraper:
                 continue
 
             result = self.search_tv_show(show.name)
+            logger.debug("scrape_tv_shows: search name=%r → %s", show.name, result.get("id") if result else "no result")
 
             if result is None:
                 cache.write_tombstone(key)
+                logger.info("scrape_tv_shows: no TMDb result for key=%r, writing tombstone", key)
                 if on_progress is not None:
                     on_progress(done, total)
                 time.sleep(0.26)
@@ -400,6 +411,7 @@ class TmdbScraper:
                     entry["poster_scraped"] = str(dest)
 
             cache.set_entry(key, entry)
+            logger.info("scrape_tv_shows: saved key=%r tmdb_id=%s poster=%s", key, entry["tmdb_id"], bool(entry["poster_scraped"]))
 
             if on_progress is not None:
                 on_progress(done, total)
@@ -564,6 +576,8 @@ def _enrich_from_cache(items: list, cache: LocalVideoCache) -> None:
     hasattr checks — no brittle isinstance coupling.
     """
     cache.load()  # reload from disk to pick up any scrapes done since last load
+    logger.debug("_enrich_from_cache: %d items, cache=%s", len(items), cache._cache_dir)
+    enriched = 0
     for item in items:
         # Determine cache key: Show uses folder name; VideoFile uses file stem
         if hasattr(item, "path") and not hasattr(item, "seasons"):
@@ -576,6 +590,12 @@ def _enrich_from_cache(items: list, cache: LocalVideoCache) -> None:
             item.poster_path = poster
 
         meta = cache.resolve_metadata(key)
+        if meta.get("tmdb_id") is not None or any(meta.get(f) for f in ("title", "description", "year")):
+            enriched += 1
+            logger.debug("  enriched key=%r tmdb_id=%s year=%s", key, meta.get("tmdb_id"), meta.get("year"))
+        else:
+            logger.debug("  no cache entry for key=%r", key)
+
         if meta.get("title") and hasattr(item, "title"):
             item.title = meta["title"]
         if meta.get("description"):
@@ -585,6 +605,8 @@ def _enrich_from_cache(items: list, cache: LocalVideoCache) -> None:
         genres = meta.get("genres", [])
         if genres and hasattr(item, "genre"):
             item.genre = ", ".join(genres)
+
+    logger.info("_enrich_from_cache: %d/%d items enriched from %s", enriched, len(items), cache._cache_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -977,6 +999,7 @@ class LocalVideoLibrary(QObject):
         self._video_genre = ""
         self._show_sort = ""
         cat = cats[index]
+        logger.debug("selectCategory: index=%d name=%r type=%r", index, cat.get("name"), cat.get("type"))
         if cat["type"] == "flat":
             items = _scan_flat(cat["paths"])
             cache = _movies_cache() if index == 0 else _custom_category_cache(cat["name"])
@@ -987,6 +1010,7 @@ class LocalVideoLibrary(QObject):
             self._reset_model(self._seasons, [])
             self._reset_model(self._episodes, [])
             self.videosModelChanged.emit()
+            logger.debug("selectCategory: model reset with %d items", len(items))
         else:
             shows = _scan_tv_shows(cat["paths"])
             cache = _tv_shows_cache() if index == 1 else _custom_category_cache(cat["name"])
@@ -997,6 +1021,7 @@ class LocalVideoLibrary(QObject):
             self._reset_model(self._seasons, [])
             self._reset_model(self._episodes, [])
             self.showsModelChanged.emit()
+            logger.debug("selectCategory: model reset with %d items", len(shows))
         self.currentCategoryIndexChanged.emit()
 
     @Slot(int)
@@ -1167,6 +1192,18 @@ class LocalVideoLibrary(QObject):
             cache = _tv_shows_cache()
             display_name = "TV Shows"
 
+        if not items:
+            if cat is None:
+                logger.warning(
+                    "_start_scrape: no '%s' category found (type=%s) in local_video_categories — nothing to scrape",
+                    "Movies" if category_type == "movies" else "TV Shows",
+                    "flat" if category_type == "movies" else "tv_shows",
+                )
+            else:
+                logger.warning("_start_scrape: category %r has no scannable items", cat.get("name"))
+
+        logger.info("_start_scrape: category_type=%s items=%d cache=%s", category_type, len(items), cache._cache_dir)
+
         cache.ensure_dirs()
         cache.load()
         scraper = TmdbScraper(api_key)
@@ -1201,6 +1238,7 @@ class LocalVideoLibrary(QObject):
                     "_emit_scrape_finished",
                     Qt.ConnectionType.QueuedConnection,
                     Q_ARG(str, display_name),
+                    Q_ARG(str, category_type),
                 )
 
         self._scrape_thread = threading.Thread(target=_run, daemon=True)
@@ -1210,12 +1248,21 @@ class LocalVideoLibrary(QObject):
     def _emit_scrape_progress(self, done: int, total: int) -> None:
         self.scrapeProgressChanged.emit(done, total)
 
-    @Slot(str)
-    def _emit_scrape_finished(self, display_name: str) -> None:
+    @Slot(str, str)
+    def _emit_scrape_finished(self, display_name: str, category_type: str) -> None:
+        logger.info("_emit_scrape_finished: display_name=%r category_type=%r", display_name, category_type)
         self.scrapeFinished.emit(display_name)
-        # Reload current category so newly scraped art/metadata shows immediately
-        if self._current_category_index >= 0:
-            self.selectCategory(self._current_category_index)
+        # Reload the category that was just scraped.
+        # Walk categories to find the matching one by type, then call selectCategory.
+        cats = self._config.local_video_categories
+        target_type = "flat" if category_type == "movies" else "tv_shows"
+        for i, cat in enumerate(cats):
+            if cat.get("type") == target_type:
+                logger.info("_emit_scrape_finished: reloading category index=%d name=%r", i, cat.get("name"))
+                self.selectCategory(i)
+                break
+        else:
+            logger.warning("_emit_scrape_finished: no %r category found to reload", target_type)
 
     @Slot(str)
     def _emit_scrape_error(self, message: str) -> None:
