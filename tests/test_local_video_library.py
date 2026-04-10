@@ -660,8 +660,13 @@ class TestEnrichFromCache:
 
 
 class TestSelectCategoryEnrichment:
-    def test_movies_category_uses_movies_cache(self, tmp_path: Path) -> None:
+    def test_movies_category_uses_movies_cache(self, tmp_path: Path, monkeypatch) -> None:
         """After selectCategory(0), VideoFile has poster_path from movies cache."""
+        import backend.local_video_library as lvl
+
+        fake_movies_dir = tmp_path / "cache" / "movies"
+        monkeypatch.setattr(lvl, "_MOVIES_CACHE_DIR", fake_movies_dir)
+
         media_dir = tmp_path / "media"
         media_dir.mkdir()
         (media_dir / "Inception.mkv").write_bytes(b"")
@@ -671,31 +676,28 @@ class TestSelectCategoryEnrichment:
         (tmp_path / "cfg").mkdir(exist_ok=True)
         lib = _make_library(tmp_path / "cfg", config)
 
-        # Prepare a movies cache entry with a real poster file
-        from backend.local_video_library import _MOVIES_CACHE_DIR
-        poster_path = _MOVIES_CACHE_DIR / "artwork_scraped" / "Inception.jpg"
+        # Prepare a movies cache entry with a fake poster file
+        poster_path = fake_movies_dir / "artwork_scraped" / "Inception.jpg"
         poster_path.parent.mkdir(parents=True, exist_ok=True)
         poster_path.write_bytes(b"")
-        lib_file = _MOVIES_CACHE_DIR / "library.json"
+        lib_file = fake_movies_dir / "library.json"
         lib_file.write_text(
             json.dumps({"Inception": {"poster_scraped": str(poster_path)}}),
             encoding="utf-8",
         )
 
-        try:
-            lib.selectCategory(0)
-            assert lib._videos.rowCount() == 1
-            idx = lib._videos.index(0, 0)
-            assert lib._videos.data(idx, VideoListModel.PosterPathRole) == str(poster_path)
-        finally:
-            # Clean up side effects on shared cache dir
-            if lib_file.exists():
-                lib_file.unlink()
-            if poster_path.exists():
-                poster_path.unlink()
+        lib.selectCategory(0)
+        assert lib._videos.rowCount() == 1
+        idx = lib._videos.index(0, 0)
+        assert lib._videos.data(idx, VideoListModel.PosterPathRole) == str(poster_path)
 
-    def test_tv_shows_category_uses_tv_shows_cache(self, tmp_path: Path) -> None:
+    def test_tv_shows_category_uses_tv_shows_cache(self, tmp_path: Path, monkeypatch) -> None:
         """After selectCategory(1), Show has poster_path from tv_shows cache."""
+        import backend.local_video_library as lvl
+
+        fake_tv_dir = tmp_path / "cache" / "tv_shows"
+        monkeypatch.setattr(lvl, "_TV_SHOWS_CACHE_DIR", fake_tv_dir)
+
         media_dir = tmp_path / "media"
         show_dir = media_dir / "Breaking Bad" / "Season 1"
         show_dir.mkdir(parents=True)
@@ -709,26 +711,19 @@ class TestSelectCategoryEnrichment:
         (tmp_path / "cfg").mkdir(exist_ok=True)
         lib = _make_library(tmp_path / "cfg", config)
 
-        from backend.local_video_library import _TV_SHOWS_CACHE_DIR
-        poster_path = _TV_SHOWS_CACHE_DIR / "artwork_scraped" / "Breaking Bad.jpg"
+        poster_path = fake_tv_dir / "artwork_scraped" / "Breaking Bad.jpg"
         poster_path.parent.mkdir(parents=True, exist_ok=True)
         poster_path.write_bytes(b"")
-        lib_file = _TV_SHOWS_CACHE_DIR / "library.json"
+        lib_file = fake_tv_dir / "library.json"
         lib_file.write_text(
             json.dumps({"Breaking Bad": {"poster_scraped": str(poster_path)}}),
             encoding="utf-8",
         )
 
-        try:
-            lib.selectCategory(1)
-            assert lib._shows.rowCount() == 1
-            idx = lib._shows.index(0, 0)
-            assert lib._shows.data(idx, ShowListModel.PosterPathRole) == str(poster_path)
-        finally:
-            if lib_file.exists():
-                lib_file.unlink()
-            if poster_path.exists():
-                poster_path.unlink()
+        lib.selectCategory(1)
+        assert lib._shows.rowCount() == 1
+        idx = lib._shows.index(0, 0)
+        assert lib._shows.data(idx, ShowListModel.PosterPathRole) == str(poster_path)
 
     def test_custom_category_uses_custom_cache(self, tmp_path: Path) -> None:
         """selectCategory(2) uses _custom_category_cache, not _movies_cache."""
