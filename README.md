@@ -34,7 +34,8 @@ HTPC Station is not a media player or emulator - it's the glue that ties them to
 
 | | |
 |---|---|
-| ![Retro Games - Grid](docs/screenshots/game-grid.png) | ![Music - Artists](docs/screenshots/artists.png) |
+| ![Homescreen](docs/screenshots/home.png) | ![Retro Games - Grid](docs/screenshots/game-grid.png) |
+| ![Movies](docs/screenshots/movies.png) | ![Music - Artists](docs/screenshots/artists.png) |
 | ![Movie Details](docs/screenshots/movie.png) | ![Music - Now Playing](docs/screenshots/music.png) | 
 
 ---
