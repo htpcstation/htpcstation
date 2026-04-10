@@ -196,10 +196,6 @@ class LibMpvPlayer(QObject):
         self._player.pause = False
 
         self._cancel_requested.clear()
-        # Suppress video output during buffering so a cancel during load never
-        # shows a flash. Video is re-enabled in _wait_and_signal once we confirm
-        # the user has not cancelled.
-        self._player["vid"] = "no"
         self._player.play(url)
 
         # Wait for playback to start on a daemon thread, then signal main thread
@@ -208,7 +204,6 @@ class LibMpvPlayer(QObject):
                 self._player.wait_until_playing(timeout=30)
             except Exception:  # noqa: BLE001
                 # Timed out or stopped before first frame — clear the loading overlay.
-                self._player["vid"] = "auto"
                 if self.is_running():
                     QMetaObject.invokeMethod(
                         self,
@@ -222,8 +217,6 @@ class LibMpvPlayer(QObject):
             if self._cancel_requested.is_set():
                 self._player.stop()
                 return
-            # Re-enable video now that we know the user wants to watch.
-            self._player["vid"] = "auto"
             QMetaObject.invokeMethod(
                 self,
                 "_on_playback_started",
