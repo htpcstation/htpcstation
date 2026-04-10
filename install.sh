@@ -34,8 +34,6 @@ TAB_LISTEN=false
 
 ROM_DIR=""
 PLEX_SERVER_URL=""
-PLEX_LOCAL=false
-PLEX_PASS=false
 HAS_HDHOMERUN=false
 HAS_STEAM=false
 HAS_MOONLIGHT=false
@@ -257,7 +255,7 @@ interview() {
     echo ""
 
     # Q1 — Tabs
-    echo "  Which tabs do you want to enable?"
+    echo "  Which tabs do you want to enable? This can be changed later in Settings."
     echo "    [1] Retro Games  (requires RetroArch + ROMs)"
     echo "    [2] PC Games     (requires Steam and/or Moonlight)"
     echo "    [3] Plex Media   (requires Plex)"
@@ -347,22 +345,7 @@ interview() {
         PLEX_SERVER_URL="${PLEX_SERVER_URL%/}"
         echo "  Plex server URL: ${BOLD}${PLEX_SERVER_URL}${RESET}"
 
-        # Q4 — Plex hosting
-        echo ""
-        if prompt_yn "  Do you host your own Plex server on this network?" Y; then
-            PLEX_LOCAL=true
-        else
-            PLEX_LOCAL=false
-        fi
-
-        # Q5 — Plex Pass
-        if prompt_yn "  Do you have a Plex Pass subscription?" N; then
-            PLEX_PASS=true
-        else
-            PLEX_PASS=false
-        fi
-
-        # Q6 — HDHomeRun (only if TAB_WATCH)
+        # Q4 — HDHomeRun (only if TAB_WATCH)
         if $TAB_WATCH; then
             if prompt_yn "  Do you have an HDHomeRun tuner for Live TV?" N; then
                 HAS_HDHOMERUN=true
@@ -1154,9 +1137,6 @@ print_summary() {
     fi
     echo "  • Launch the app: ./htpcstation.sh"
     echo "  • Sign in to Plex from the Settings tab"
-    if $PLEX_PASS; then
-        echo "  • Some Plex features require Plex Pass (hardware transcoding)"
-    fi
     if $HAS_HDHOMERUN; then
         echo "  • Live TV: HDHomeRun tuner will be auto-detected on the Watch tab"
     fi
