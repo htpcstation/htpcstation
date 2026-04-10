@@ -422,20 +422,12 @@ FocusScope {
                 _navTargetApplied = true
                 if (navTarget.rating_key) {
                     if (navTarget.media_type === "movie") {
-                        var targetRk = navTarget.rating_key
-                        var count = plex ? plex.moviesCount() : 0
-                        for (var i = 0; i < count; i++) {
-                            var rk = plex.getMovieRatingKeyAt(i)
-                            if (rk === targetRk) {
-                                selectedRatingKey = rk
-                                selectedMovieIndex = i
-                                selectedLibraryType = "movie"
-                                plex.fetchMovie(rk)
-                                currentView = "detail"
-                                _routeFocus()
-                                break
-                            }
-                        }
+                        selectedRatingKey = navTarget.rating_key
+                        selectedMovieIndex = -1
+                        selectedLibraryType = "movie"
+                        plex.fetchMovie(navTarget.rating_key)
+                        currentView = "detail"
+                        _routeFocus()
                     } else if (navTarget.media_type === "show") {
                         selectedLibraryType = "show"
                         selectedShowRatingKey = navTarget.rating_key

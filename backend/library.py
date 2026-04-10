@@ -460,11 +460,17 @@ class GameLibrary(QObject):
 
         if self._recently_played:
             artwork = ("file://" + str(game.image_path)) if game.image_path else ""
+            system = self._systems_by_folder.get(game.system_folder)
+            system_display_name = system.display_name if system is not None else game.system_folder
             self._recently_played.record(
                 "retro",
                 game.name,
                 artwork,
-                {"rom_path": str(game.path), "system_folder": game.system_folder},
+                {
+                    "rom_path": str(game.path),
+                    "system_folder": game.system_folder,
+                    "system_display_name": system_display_name,
+                },
             )
 
         # Set active game optimistically before the async launch.  If the

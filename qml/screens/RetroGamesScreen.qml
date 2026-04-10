@@ -55,7 +55,10 @@ FocusScope {
             _routeFocus()
             if (navTarget && !_navTargetApplied) {
                 _navTargetApplied = true
-                if (navTarget.rom_path) {
+                if (navTarget.rom_path && navTarget.system_folder) {
+                    library.selectSystem(navTarget.system_folder)
+                    retroGamesScreen.selectedSystemName =
+                        navTarget.system_display_name || navTarget.system_folder
                     var romPath = navTarget.rom_path
                     var count = library.gamesModel ? library.gamesModel.rowCount() : 0
                     for (var i = 0; i < count; i++) {
@@ -63,6 +66,7 @@ FocusScope {
                         if (g && g.romPath === romPath) {
                             selectedGameIndex = i
                             currentView = "detail"
+                            _routeFocus()
                             break
                         }
                     }
