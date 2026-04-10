@@ -524,6 +524,125 @@ class TestGetWatchHistory:
 
 
 # ---------------------------------------------------------------------------
+# PlexClient.get_transcode_url
+# ---------------------------------------------------------------------------
+
+
+class TestGetTranscodeUrl:
+    """Verify get_transcode_url builds correct HLS transcode URLs."""
+
+    _METADATA = {
+        "ratingKey": "999",
+        "viewOffset": 45000,
+        "Media": [{"videoCodec": "hevc", "Part": [{"key": "/library/parts/1"}]}],
+    }
+
+    def test_builds_correct_url_1080p(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123", client_id="my-id")
+        client.get_metadata = MagicMock(return_value=self._METADATA)
+
+        url, offset = client.get_transcode_url("999")
+
+        assert offset == 45000
+        assert url.startswith("http://plex:32400/video/:/transcode/universal/start.m3u8?")
+        assert "videoResolution=1920x1080" in url
+        assert "maxVideoBitrate=20000" in url
+        assert "X-Plex-Token=tok123" in url
+        assert "X-Plex-Client-Identifier=my-id" in url
+        assert "protocol=hls" in url
+        assert "directPlay=0" in url
+        assert "directStream=0" in url
+        assert "path=%2Flibrary%2Fmetadata%2F999" in url
+
+    def test_builds_correct_url_720p(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value=self._METADATA)
+
+        url, _ = client.get_transcode_url("999", max_resolution="720p")
+
+        assert "videoResolution=1280x720" in url
+        assert "maxVideoBitrate=4000" in url
+
+    def test_builds_correct_url_480p(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value=self._METADATA)
+
+        url, _ = client.get_transcode_url("999", max_resolution="480p")
+
+        assert "videoResolution=854x480" in url
+        assert "maxVideoBitrate=2000" in url
+
+    def test_returns_empty_on_metadata_failure(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value={})
+
+        url, offset = client.get_transcode_url("999")
+
+        assert url == ""
+        assert offset == 0
+
+    def test_returns_empty_on_unknown_resolution(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value=self._METADATA)
+
+        url, offset = client.get_transcode_url("999", max_resolution="4k")
+
+        assert url == ""
+        assert offset == 0
+        # Should not even call get_metadata for invalid resolution
+        client.get_metadata.assert_not_called()
+
+    def test_zero_view_offset_when_not_set(self) -> None:
+        metadata = {
+            "ratingKey": "999",
+            "Media": [{"videoCodec": "h264"}],
+        }
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value=metadata)
+
+        _, offset = client.get_transcode_url("999")
+
+        assert offset == 0
+
+
+# ---------------------------------------------------------------------------
+# PlexClient.get_media_video_codec
+# ---------------------------------------------------------------------------
+
+
+class TestGetMediaVideoCodec:
+    """Verify get_media_video_codec extracts the codec from metadata."""
+
+    def test_returns_codec(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value={
+            "Media": [{"videoCodec": "hevc"}],
+        })
+
+        assert client.get_media_video_codec("123") == "hevc"
+
+    def test_returns_empty_on_no_media(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value={"Media": []})
+
+        assert client.get_media_video_codec("123") == ""
+
+    def test_returns_empty_on_metadata_failure(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value={})
+
+        assert client.get_media_video_codec("123") == ""
+
+    def test_returns_empty_when_codec_missing(self) -> None:
+        client = PlexClient("http://plex:32400", "tok123")
+        client.get_metadata = MagicMock(return_value={
+            "Media": [{"bitrate": 5000}],
+        })
+
+        assert client.get_media_video_codec("123") == ""
+
+
+# ---------------------------------------------------------------------------
 # PlexClient._get — retry logic and error classification
 # ---------------------------------------------------------------------------
 

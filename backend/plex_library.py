@@ -29,6 +29,7 @@ from PySide6.QtCore import (
 )
 
 from backend.browser_launcher import BrowserLauncher
+from backend.hw_detect import detect_vaapi_codecs
 from backend.lrc_parser import parse_lrc, parse_plain
 from backend.config import Config, CONFIG_DIR
 from backend.mpv_launcher import LibMpvPlayer
@@ -1337,7 +1338,27 @@ class PlexLibrary(QObject):
         self._pending_play_rating_key = rating_key
         client = self._client
         def _worker():
-            url, _ = client.get_stream_url(rating_key)
+            # Auto-detect and cache hardware-decodable codecs on first playback
+            if not self._config.hw_decode_codecs:
+                codecs = detect_vaapi_codecs()
+                self._config.set_hw_decode_codecs(codecs)
+                logger.info("playWithMpv: detected hw decode codecs: %s", codecs)
+
+            # Decide between direct stream and server-side transcode
+            transcode_mode = self._config.plex_transcode_mode
+            if transcode_mode == "direct":
+                url, _ = client.get_stream_url(rating_key)
+            elif transcode_mode in ("480p", "720p", "1080p"):
+                url, _ = client.get_transcode_url(rating_key, transcode_mode)
+            else:  # "auto"
+                codec = client.get_media_video_codec(rating_key)
+                hw_codecs = self._config.hw_decode_codecs
+                if codec and codec in hw_codecs:
+                    url, _ = client.get_stream_url(rating_key)
+                    logger.info("Auto: direct stream (codec %s is hw-decodable)", codec)
+                else:
+                    url, _ = client.get_transcode_url(rating_key, "1080p")
+                    logger.info("Auto: transcoding (codec %s not in hw codecs %s)", codec, hw_codecs)
             if not url:
                 self._mpvLaunchReady.emit("", "", 0, 0, 0, 0)
                 return

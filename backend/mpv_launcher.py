@@ -98,6 +98,7 @@ class LibMpvPlayer(QObject):
             input_vo_keyboard=True,
             input_gamepad="yes",
             cache="yes",
+            ytdl="no",
             log_handler=_mpv_log,
             loglevel="info" if logger.isEnabledFor(logging.DEBUG) else "warn",
         )

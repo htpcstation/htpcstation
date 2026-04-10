@@ -745,6 +745,20 @@ class SettingsManager(QObject):
         self._config.set_auto_skip_intro(enabled)
         self.autoSkipIntroChanged.emit()
 
+    # -- Transcode mode ---------------------------------------------------
+
+    transcodeModeChanged = Signal()
+
+    def _get_transcode_mode(self) -> str:
+        return self._config.plex_transcode_mode
+
+    transcodeMode = Property(str, fget=_get_transcode_mode, notify=transcodeModeChanged)
+
+    @Slot(str)
+    def setTranscodeMode(self, mode: str) -> None:
+        """Set the Plex transcode mode."""
+        self._config.set_plex_transcode_mode(mode)
+        self.transcodeModeChanged.emit()
 
     @Slot(str)
     def setButtonLayout(self, layout: str) -> None:

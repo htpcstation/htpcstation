@@ -63,6 +63,8 @@ def _make_lib(tmp_path: Path):
         config.plex_server_id = "server123"
         config.plex_token = "tok"
         config.plex_user_id = None
+        config.plex_transcode_mode = "direct"
+        config.hw_decode_codecs = ["h264"]
         lib = PlexLibrary(config)
 
     return lib

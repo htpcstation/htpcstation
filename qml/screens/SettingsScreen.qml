@@ -80,6 +80,7 @@ FocusScope {
                 { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
                 { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
                 { type: "toggle",  label: "Auto-Skip Intro",   settingKey: "autoSkipIntro" },
+                { type: "select",  label: "Video Quality",     settingKey: "transcodeMode" },
             ]
         },
         {
@@ -212,6 +213,10 @@ FocusScope {
         if (key === "showLocalMusicTab")  return settings.showLocalMusicTab
         if (key === "localMusicDirectory") return settings.localMusicDirectory
         if (key === "autoSkipIntro")      return settings.autoSkipIntro
+        if (key === "transcodeMode") {
+            var modeMap = { "direct": "Direct Play", "auto": "Auto", "480p": "480p", "720p": "720p", "1080p": "1080p" }
+            return modeMap[settings.transcodeMode] || "Auto"
+        }
 
         return ""
     }
@@ -227,7 +232,10 @@ FocusScope {
             settings.setPlexServerId(value, label || "")
         }
         else if (key === "plexUser") {
-            if (plex) plex.selectUser(parseInt(value))
+            if (plex) {
+                plex.selectUser(parseInt(value))
+                plex.refresh()
+            }
             settings.setPlexUserId(parseInt(value), label || "")
         }
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
@@ -270,6 +278,9 @@ FocusScope {
         else if (key === "localMusicDirectory") settings.setLocalMusicDirectory(value)
         else if (key === "autoSkipIntro") {
             settings.setAutoSkipIntro(value)
+        }
+        else if (key === "transcodeMode") {
+            settings.setTranscodeMode(value)
         }
 
     }
@@ -599,6 +610,15 @@ FocusScope {
                     return [
                         { id: "standard",  label: "Standard (A=East)" },
                         { id: "alternate", label: "Alternate (A=South)" },
+                    ]
+                }
+                if (rowData.settingKey === "transcodeMode") {
+                    return [
+                        { id: "direct", label: "Direct Play" },
+                        { id: "auto",   label: "Auto" },
+                        { id: "480p",   label: "480p" },
+                        { id: "720p",   label: "720p" },
+                        { id: "1080p",  label: "1080p" },
                     ]
                 }
                 if (rowData.settingKey === "moonlightHost") {

@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 from typing import Callable, Optional
+from urllib.parse import urlencode
 
 import requests
 
@@ -286,6 +287,88 @@ class PlexClient:
         view_offset = int(data.get("viewOffset", 0) or 0)
         url = f"{self._server_url}{part_key}?X-Plex-Token={self._token}"
         return (url, view_offset)
+
+    # Resolution presets for transcoding: (videoResolution, maxVideoBitrate)
+    _TRANSCODE_PROFILES: dict[str, tuple[str, int]] = {
+        "1080p": ("1920x1080", 20000),
+        "720p": ("1280x720", 4000),
+        "480p": ("854x480", 2000),
+    }
+
+    def get_transcode_url(self, rating_key: str, max_resolution: str = "1080p") -> tuple[str, int]:
+        """Return (transcode_url, view_offset_ms) for HLS server-side transcoding.
+
+        Builds a /video/:/transcode/universal/start.m3u8 URL with the
+        required Plex client identification and profile params.
+
+        max_resolution: "480p", "720p", or "1080p" (default).
+        Returns ("", 0) if the metadata fetch fails or the resolution is unknown.
+        """
+        profile = self._TRANSCODE_PROFILES.get(max_resolution)
+        if profile is None:
+            logger.warning("get_transcode_url: unknown resolution %r", max_resolution)
+            return ("", 0)
+
+        data = self.get_metadata(rating_key)
+        if not data:
+            return ("", 0)
+
+        view_offset = int(data.get("viewOffset", 0) or 0)
+        video_resolution, max_bitrate = profile
+
+        import uuid as _uuid
+        session_id = str(_uuid.uuid4())
+
+        # Plex requires X-Plex-* identifiers as query params (not just headers)
+        # and rejects X-Plex-Platform=Linux — use "Chrome" to identify as a
+        # streaming-capable client.
+        params = {
+            "hasMDE": 1,
+            "path": f"/library/metadata/{rating_key}",
+            "mediaIndex": 0,
+            "partIndex": 0,
+            "protocol": "hls",
+            "fastSeek": 1,
+            "directPlay": 0,
+            "directStream": 1,
+            "directStreamAudio": 1,
+            "maxVideoBitrate": max_bitrate,
+            "videoResolution": video_resolution,
+            "subtitles": "burn",
+            "subtitleSize": 100,
+            "audioBoost": 100,
+            "location": "lan",
+            "autoAdjustQuality": 0,
+            "mediaBufferSize": 102400,
+            "session": session_id,
+            "X-Plex-Incomplete-Segments": 1,
+            "X-Plex-Token": self._token,
+            "X-Plex-Client-Identifier": self._client_id,
+            "X-Plex-Session-Identifier": session_id,
+            "X-Plex-Product": "HTPC Station",
+            "X-Plex-Platform": "Chrome",
+            "X-Plex-Client-Profile-Extra": (
+                "append-transcode-target-codec("
+                "type=videoProfile&context=streaming"
+                "&protocol=hls&videoCodec=h264)"
+            ),
+        }
+        url = f"{self._server_url}/video/:/transcode/universal/start.m3u8?{urlencode(params)}"
+        logger.info("get_transcode_url: built transcode URL for %s at %s", rating_key, max_resolution)
+        return (url, view_offset)
+
+    def get_media_video_codec(self, rating_key: str) -> str:
+        """Return the video codec of the first media entry (e.g. "h264", "hevc", "av1").
+
+        Returns "" if metadata fetch fails or no Media entries exist.
+        """
+        data = self.get_metadata(rating_key)
+        if not data:
+            return ""
+        media = data.get("Media", [])
+        if not media:
+            return ""
+        return media[0].get("videoCodec", "")
 
     def get_authenticated_url(self, path: str) -> str:
         """Build a plain authenticated URL for any Plex path (not a poster).

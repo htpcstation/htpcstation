@@ -405,6 +405,10 @@ class Config:
         self._plex_player: str = "mpv"
         # Auto-skip intro markers during Plex playback
         self._auto_skip_intro: bool = False
+        # Plex transcode mode: "direct", "auto", "480p", "720p", "1080p"
+        self._plex_transcode_mode: str = "auto"
+        # Cached list of VA-API hardware decode codecs
+        self._hw_decode_codecs: list[str] = []
 
         # Sort preferences
         self._sort_retro_games: str = "az"
@@ -542,6 +546,28 @@ class Config:
         self._auto_skip_intro = bool(enabled)
         self.save()
 
+    @property
+    def plex_transcode_mode(self) -> str:
+        """Plex transcode mode. One of 'direct', 'auto', '480p', '720p', '1080p'."""
+        return self._plex_transcode_mode
+
+    def set_plex_transcode_mode(self, mode: str) -> None:
+        """Set the Plex transcode mode and persist the config."""
+        if mode not in ("direct", "auto", "480p", "720p", "1080p"):
+            logger.warning("set_plex_transcode_mode: invalid value %r — ignored", mode)
+            return
+        self._plex_transcode_mode = mode
+        self.save()
+
+    @property
+    def hw_decode_codecs(self) -> list[str]:
+        """Cached list of VA-API hardware decode codecs."""
+        return list(self._hw_decode_codecs)
+
+    def set_hw_decode_codecs(self, codecs: list[str]) -> None:
+        """Set the cached hardware decode codecs and persist the config."""
+        self._hw_decode_codecs = sorted(set(codecs))
+        self.save()
 
     @property
     def sort_retro_games(self) -> str:
@@ -997,6 +1023,8 @@ class Config:
                 "music_library_key": self._music_library_key,
                 "player": self._plex_player,
                 "auto_skip_intro": self._auto_skip_intro,
+                "transcode_mode": self._plex_transcode_mode,
+                "hw_decode_codecs": self._hw_decode_codecs,
             },
             "browser": {
                 "command": self._browser_command,
@@ -1169,6 +1197,12 @@ class Config:
             if player in ("mpv", "browser"):
                 self._plex_player = player
             self._auto_skip_intro = bool(plex.get("auto_skip_intro", False))
+            transcode_mode = plex.get("transcode_mode", "auto")
+            if transcode_mode in ("direct", "auto", "480p", "720p", "1080p"):
+                self._plex_transcode_mode = transcode_mode
+            hw_codecs = plex.get("hw_decode_codecs", [])
+            if isinstance(hw_codecs, list):
+                self._hw_decode_codecs = [c for c in hw_codecs if isinstance(c, str)]
             self._plex_server_url = plex.get("server_url", "")
 
         # browser section
