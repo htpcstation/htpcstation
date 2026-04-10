@@ -661,7 +661,8 @@ FocusScope {
                         trackList.currentIndex = 0
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        listenScreen.currentView = listenScreen._albumReturnView
+                        if (listenScreen._navTargetApplied) listenScreen.back()
+                        else listenScreen.currentView = listenScreen._albumReturnView
                     }
                 } else {
                     // Track list is focused
@@ -693,7 +694,8 @@ FocusScope {
                         listenScreen._goToNowPlaying()
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        listenScreen.currentView = listenScreen._albumReturnView
+                        if (listenScreen._navTargetApplied) listenScreen.back()
+                        else listenScreen.currentView = listenScreen._albumReturnView
                     }
                 }
             }

@@ -750,11 +750,15 @@ FocusScope {
         movieData: watchScreen.selectedMovieData
 
         onBack: {
-            var savedIdx = watchScreen._focusMemory["movie"]
-            watchScreen.currentView = "content"
-            if (savedIdx !== undefined) {
-                if (watchScreen._viewMode === "list") movieList.currentIndex = savedIdx
-                else movieGrid.currentIndex = savedIdx
+            if (watchScreen._navTargetApplied) {
+                watchScreen.back()
+            } else {
+                var savedIdx = watchScreen._focusMemory["movie"]
+                watchScreen.currentView = "content"
+                if (savedIdx !== undefined) {
+                    if (watchScreen._viewMode === "list") movieList.currentIndex = savedIdx
+                    else movieGrid.currentIndex = savedIdx
+                }
             }
         }
 
@@ -831,25 +835,29 @@ FocusScope {
         showRatingKey: watchScreen.selectedShowRatingKey
 
         onBack: {
-            var origin = watchScreen._showDetailOrigin
-            if (origin === "mylist") {
-                watchScreen.selectedLibraryType = "mylist"
-                watchScreen.currentView = "content"
-                var myIdx = watchScreen._focusMemory["mylist"]
-                if (myIdx !== undefined) {
-                    if (watchScreen._viewMode === "list") myListListView.currentIndex = myIdx
-                    else myListGridView.currentIndex = myIdx
-                }
+            if (watchScreen._navTargetApplied) {
+                watchScreen.back()
             } else {
-                // "show" or any other origin — restore show grid/list
-                watchScreen.currentView = "content"
-                var showIdx = watchScreen._focusMemory["show"]
-                if (showIdx !== undefined) {
-                    if (watchScreen._viewMode === "list") showList.currentIndex = showIdx
-                    else showGrid.currentIndex = showIdx
+                var origin = watchScreen._showDetailOrigin
+                if (origin === "mylist") {
+                    watchScreen.selectedLibraryType = "mylist"
+                    watchScreen.currentView = "content"
+                    var myIdx = watchScreen._focusMemory["mylist"]
+                    if (myIdx !== undefined) {
+                        if (watchScreen._viewMode === "list") myListListView.currentIndex = myIdx
+                        else myListGridView.currentIndex = myIdx
+                    }
+                } else {
+                    // "show" or any other origin — restore show grid/list
+                    watchScreen.currentView = "content"
+                    var showIdx = watchScreen._focusMemory["show"]
+                    if (showIdx !== undefined) {
+                        if (watchScreen._viewMode === "list") showList.currentIndex = showIdx
+                        else showGrid.currentIndex = showIdx
+                    }
                 }
+                watchScreen._showDetailOrigin = ""
             }
-            watchScreen._showDetailOrigin = ""
         }
 
         onPlayEpisode: (ratingKey) => {

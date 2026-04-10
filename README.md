@@ -1,4 +1,4 @@
-**Note: This is still very much a WIP** 
+**Note: This is still very much a WIP. Features and fixes are being added regularly.** 
 
 # HTPC Station
 
@@ -8,13 +8,10 @@ HTPC Station is a fullscreen, gamepad-first interface for Linux that brings toge
 * Retro Games (RetroArch)
 * PC Games (Steam)
 * Game streaming (Moonlight)
-* Movies & TV (Plex)
-* Music (Plex)
-
--- all in one fast, couch-friendly UI.
+* Movies & TV (Plex, Local)
+* Music (Plex, Local)
 
 No desktop clutter. No Mouse/keyboard required (but it also works great with a keyboard)
-
 
 ## Why This Exists
 
@@ -42,20 +39,13 @@ HTPC Station is not a media player or emulator - it's the glue that ties them to
 
 ## What You Can Do Today
 
-**Games**
-
 - Browse, sort, and launch your ROM collection with artwork, metadata, and video previews. 
 - Configure controller mapping and RetroArch hotkeys in a user-friendly interface.
 - Scan and jump into your Steam library.
 - Use Moonlight to stream games from a Sunshine or Apollo host on your local network.
-
-**Plex**
-
-- Easily sign-in, browse, and watch your Plex media via direct-play.
-- Seamlessly switch between Local vs. Remote Plex playback automatically.
-- Browse and playback Live TV using an HDHomeRun tuner and Plex DVR.  
-- Music has a full Now Playing screen with album art, track info, playback controls, and synced lyrics.
-- Music keeps playing in the background while you browse other tabs or play a game.
+- Browse, watch, listen to your content on Plex.
+- Browse the channel guide and playback Live TV using an HDHomeRun tuner and Plex DVR.
+- Add local libraries for Music and Videos with rich metadata support.
 
 ### Controller and Navigation
 
@@ -73,14 +63,8 @@ HTPC Station is not a media player or emulator - it's the glue that ties them to
 
 - A Linux PC (x86_64). Works well on low-power hardware like old thin clients.
 - A gamepad or a keyboard.
-- Python 3.10 or newer.
-- **For retro games:** RetroArch installed (Flatpak recommended), plus ROMs with Batocera/Knulli/EmulationStation scraped metadata (`gamelist.xml` and artwork). HTPC Station does not scrape ROMs — prepare your library first.
-- **For Steam games:** Steam installed (Flatpak or native).
-- **For game streaming:** Moonlight installed (Flatpak recommended) and a Sunshine or Apollo host.
-- **For Plex video playback:** MPV and its shared library installed (`sudo dnf install mpv mpv-libs` on Fedora, `sudo apt-get install mpv libmpv2` on Debian/Ubuntu). Hardware acceleration requires VA-API drivers — see the dependency checker output for your specific hardware and distro.
-- **For Plex Live TV:** An HDHomeRun tuner connected through Plex DVR.
-- **For Plex music and browser fallback:** Brave browser (Flatpak recommended).
-- **For Plex:** A Plex account with access to a Plex Media Server. Local network direct-play is preferred.
+- **For Plex:** A Plex account with access to a Plex Media Server. Local network / remote play are both supported via auto-detect.
+- **For Live TV:** An HDHomeRun tuner connected through Plex DVR.
 
 ### Installation
 
@@ -170,7 +154,6 @@ MPV Bindings
 
 ## Future Goals
 
-- Local  Music and Video libraries.
 - Enhanced playlist options for music + videos, including shuffle videos.
 - Streaming service integration via the browser extension framework.
 - Tab management improvements so hiding or showing tabs does not require a restart.

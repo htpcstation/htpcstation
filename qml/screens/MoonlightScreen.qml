@@ -396,7 +396,10 @@ FocusScope {
                  ? (moonlight ? moonlight.getApp(moonlightScreen.selectedGameIndex) : ({}))
                  : ({})
 
-        onBack: moonlightScreen.currentView = "games"
+        onBack: {
+            if (moonlightScreen._navTargetApplied) moonlightScreen.back()
+            else moonlightScreen.currentView = "games"
+        }
         onLaunch: (hostAddress, appName) => {
             if (moonlight) moonlight.launchApp(hostAddress, appName)
         }

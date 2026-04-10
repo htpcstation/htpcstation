@@ -395,7 +395,10 @@ FocusScope {
                   ? (steam ? steam.getGame(pcGamesScreen.selectedGameIndex) : ({}))
                   : ({})
 
-        onBack: pcGamesScreen.currentView = "games"
+        onBack: {
+            if (pcGamesScreen._navTargetApplied) pcGamesScreen.back()
+            else pcGamesScreen.currentView = "games"
+        }
         onLaunch: (appId) => {
             if (steam) steam.launchGame(appId)
         }

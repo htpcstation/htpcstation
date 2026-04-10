@@ -726,7 +726,8 @@ FocusScope {
                         trackList.currentIndex = 0
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        localMusicScreen.currentView = localMusicScreen._albumReturnView
+                        if (localMusicScreen._navTargetApplied) localMusicScreen.back()
+                        else localMusicScreen.currentView = localMusicScreen._albumReturnView
                     }
                 } else {
                     // Track list is focused
@@ -755,7 +756,8 @@ FocusScope {
                         localMusicScreen._goToNowPlaying()
                     } else if (keys.isCancel(event)) {
                         event.accepted = true
-                        localMusicScreen.currentView = localMusicScreen._albumReturnView
+                        if (localMusicScreen._navTargetApplied) localMusicScreen.back()
+                        else localMusicScreen.currentView = localMusicScreen._albumReturnView
                     }
                 }
             }

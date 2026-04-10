@@ -277,7 +277,10 @@ FocusScope {
                   ? library.getGame(retroGamesScreen.selectedGameIndex)
                   : ({})
 
-        onBack: retroGamesScreen.currentView = "games"
+        onBack: {
+            if (retroGamesScreen._navTargetApplied) retroGamesScreen.back()
+            else retroGamesScreen.currentView = "games"
+        }
         onLaunch: library.launchGame(retroGamesScreen.selectedGameIndex)
         onToggleFavorite: library.toggleFavorite(retroGamesScreen.selectedGameIndex)
         onNavigatePrev: {
