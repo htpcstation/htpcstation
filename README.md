@@ -143,26 +143,26 @@ MPV Bindings
 
 | Button | MPV Action |
 |---|---|
-| Accept (A on most controllers) | Play / Pause |
-| Context 1 (X) | Show playback progress |
-| Context 2 (Y) | Open subtitle track selector |
-| D-pad Left / Right | Seek ±10 seconds |
-| D-pad Up / Down | Volume ±5 |
-| LB | Cycle audio track |
-| RB | Show track list |
-| Start | Quit (return to HTPC Station) |
+| A / Space | Play / Pause |
+| X / O | Show playback progress |
+| Y / J | Cycle subtitle track |
+| Left / Right | Seek ±10 seconds |
+| Up/Down / 0/9 | Volume ±5 |
+| LB / # | Cycle audio track |
+| RB / — | Show track list |
+| Start / Q/Escape | Quit (return to HTPC Station) |
 
 ---
 
 ## Current Limitations
 
-- ROM scraping is not yet supported. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library. Importing from Batocera or Knulli works great.
+- ROM scraping is not yet supported. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game metadata. Importing from Batocera or Knulli works great.
 - Continue Watching is hidden for managed and kids Plex profiles. This is a Plex platform limitation with no known workaround.
 - Changing which tabs are visible requires restarting the app.
 - Moonlight host pairing must be done through Moonlight's own interface. You can open it from Settings by pressing "Open Moonlight."
 - Large Plex audio playlists (over 1,000 tracks) are hidden to avoid performance issues.
 - Live TV requires an HDHomeRun tuner connected through Plex DVR. Channels not available on the tuner show "Not available" in the guide.
-- AV1 video content requires hardware decode support (Intel Gen 12+ / Tiger Lake or newer). On older hardware, AV1 plays via software decode and may stutter on high-bitrate files.
+- AV1 video content requires hardware decode support (Intel Gen 12+ / Tiger Lake or newer). On older hardware, set Video Quality to "Auto" in Settings — the app will detect unsupported codecs and request server-side transcoding to H.264.
 - Only tested on Linux x86_64 with Xorg and Wayland (via XWayland for the Qt app; MPV uses native Wayland context).
 
 ---
@@ -197,7 +197,7 @@ For those interested in what's under the hood:
 | PC game launch | Steam URI protocol (`steam://rungameid/`) |
 | Game streaming | Moonlight CLI (Flatpak) |
 | Media browsing | Plex Media Server API |
-| Video playback | libmpv (in-process, via python-mpv) with VA-API hardware decode (direct Plex stream URLs) |
+| Video playback | libmpv (in-process, via python-mpv) with VA-API hardware decode + auto Plex server-side transcode |
 | Live TV | HDHomeRun direct streams via Plex DVR + HDHomeRun guide API (`api.hdhomerun.com`) |
 | Music playback | Qt MediaPlayer + AudioOutput (direct Plex audio streams) |
 | Gamepad input | evdev with synthetic Qt key events |
