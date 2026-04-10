@@ -7140,3 +7140,120 @@ class TestSortShowsOffline:
         assert len(submitted) == 0
 
 
+# ---------------------------------------------------------------------------
+# PlexLibrary — force-replace on sort/filter prevents duplicates (sort-duplicates/001)
+# ---------------------------------------------------------------------------
+
+
+class TestForceReplaceOnSort:
+    """Verify that sort/filter sets force_replace so _on_*_ready replaces the
+    model even when the first page is smaller than the cached model."""
+
+    def _make_lib(self):
+        from backend.plex_library import PlexLibrary
+        from backend.config import Config
+
+        with patch("backend.plex_library.PlexClient"), \
+             patch("backend.plex_library.PlexAccount", _make_plex_account_mock()), \
+             patch("backend.config.CONFIG_FILE"), \
+             patch("backend.config.CONFIG_DIR"):
+            config = MagicMock(spec=Config)
+            config.plex_server_id = "server123"
+            config.plex_token = "tok"
+            config.plex_user_id = None
+            lib = PlexLibrary(config)
+            _flush_setup(lib)
+        return lib
+
+    # -- Movies --
+
+    def test_sort_movies_forces_model_replace(self) -> None:
+        """After sortMovies, a first page smaller than the model replaces it."""
+        from backend.plex_models import PlexMovie
+
+        lib = self._make_lib()
+        lib._client = None  # prevent poster fetches
+
+        # Pre-populate model with 500 items (simulating cache)
+        cached = [PlexMovie(rating_key=str(i), title=f"M{i}") for i in range(500)]
+        lib._movies_model.set_movies(cached)
+        assert lib._movies_model.rowCount() == 500
+
+        # Simulate sortMovies setting the flag
+        lib._movies_force_replace = True
+        lib._movies_loaded = 0
+
+        # First page arrives with only 50 items
+        page = [PlexMovie(rating_key=str(i), title=f"Sorted{i}") for i in range(50)]
+        lib._on_movies_ready(page, 500)
+
+        # Model must be replaced (not skipped)
+        assert lib._movies_model.rowCount() == 50
+        assert lib._movies_model._movies[0].title == "Sorted0"
+        # Flag cleared after use
+        assert lib._movies_force_replace is False
+
+    def test_lazy_refresh_skips_replace_for_movies(self) -> None:
+        """Without force flag, first page smaller than model is skipped."""
+        from backend.plex_models import PlexMovie
+
+        lib = self._make_lib()
+        lib._client = None
+
+        cached = [PlexMovie(rating_key=str(i), title=f"M{i}") for i in range(500)]
+        lib._movies_model.set_movies(cached)
+
+        # No force flag (lazy refresh scenario)
+        lib._movies_force_replace = False
+        lib._movies_loaded = 0
+
+        page = [PlexMovie(rating_key=str(i), title=f"Fresh{i}") for i in range(50)]
+        lib._on_movies_ready(page, 500)
+
+        # Model NOT replaced — still has 500 cached items
+        assert lib._movies_model.rowCount() == 500
+        assert lib._movies_model._movies[0].title == "M0"
+
+    # -- Shows --
+
+    def test_sort_shows_forces_model_replace(self) -> None:
+        """After sortShows, a first page smaller than the model replaces it."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+
+        cached = [PlexShow(rating_key=str(i), title=f"S{i}") for i in range(500)]
+        lib._shows_model.set_shows(cached)
+        assert lib._shows_model.rowCount() == 500
+
+        lib._shows_force_replace = True
+        lib._shows_loaded = 0
+
+        page = [PlexShow(rating_key=str(i), title=f"Sorted{i}") for i in range(50)]
+        lib._on_shows_ready(page, 500)
+
+        assert lib._shows_model.rowCount() == 50
+        assert lib._shows_model._shows[0].title == "Sorted0"
+        assert lib._shows_force_replace is False
+
+    def test_lazy_refresh_skips_replace_for_shows(self) -> None:
+        """Without force flag, first page smaller than model is skipped."""
+        from backend.plex_models import PlexShow
+
+        lib = self._make_lib()
+        lib._client = None
+
+        cached = [PlexShow(rating_key=str(i), title=f"S{i}") for i in range(500)]
+        lib._shows_model.set_shows(cached)
+
+        lib._shows_force_replace = False
+        lib._shows_loaded = 0
+
+        page = [PlexShow(rating_key=str(i), title=f"Fresh{i}") for i in range(50)]
+        lib._on_shows_ready(page, 500)
+
+        assert lib._shows_model.rowCount() == 500
+        assert lib._shows_model._shows[0].title == "S0"
+
+

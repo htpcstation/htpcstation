@@ -582,6 +582,8 @@ class PlexLibrary(QObject):
         self._shows_total: int = 0
         self._shows_loaded: int = 0
         self._shows_loading_more: bool = False
+        self._movies_force_replace: bool = False
+        self._shows_force_replace: bool = False
         self._machine_identifier: str = ""
         self._section_sort: dict[str, str] = {}   # sort param per section key
         self._section_genre: dict[str, str] = {}  # genre filter per section key
@@ -988,6 +990,7 @@ class PlexLibrary(QObject):
 
         self._movies_total = 0
         self._movies_loaded = 0
+        self._movies_force_replace = True
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
@@ -1008,6 +1011,7 @@ class PlexLibrary(QObject):
         self._save_sort_state()
         self._movies_total = 0
         self._movies_loaded = 0
+        self._movies_force_replace = True
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
@@ -1059,6 +1063,7 @@ class PlexLibrary(QObject):
 
         self._shows_total = 0
         self._shows_loaded = 0
+        self._shows_force_replace = True
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
@@ -1094,6 +1099,7 @@ class PlexLibrary(QObject):
         self._save_sort_state()
         self._shows_total = 0
         self._shows_loaded = 0
+        self._shows_force_replace = True
         client = self._client
         section_key = self._current_section_key
         section_type = self._current_section_type
@@ -2257,9 +2263,12 @@ class PlexLibrary(QObject):
             # First page — only replace if the model doesn't already have more
             # data (e.g. from cache). Avoids replacing a 500-item cached model
             # with a 50-item first page, which causes scroll/focus jumps.
-            if len(movies) >= len(self._movies_model._movies):
+            # Force-replace is set by sort/filter actions so the stale model is
+            # always replaced even when the first page is smaller.
+            if self._movies_force_replace or len(movies) >= len(self._movies_model._movies):
                 self._movies_model.set_movies(movies)
                 self.moviesModelChanged.emit()
+            self._movies_force_replace = False
             self._save_state_cache("last_movie_section", self._current_section_key)
         else:
             # Subsequent pages — append
@@ -2291,10 +2300,12 @@ class PlexLibrary(QObject):
         self._shows_loading_more = False
         if self._shows_loaded == 0:
             # First page — only replace if the model doesn't already have more
-            # data (e.g. from cache).
-            if len(shows) >= len(self._shows_model._shows):
+            # data (e.g. from cache).  Force-replace is set by sort/filter
+            # actions so the stale model is always replaced.
+            if self._shows_force_replace or len(shows) >= len(self._shows_model._shows):
                 self._shows_model.set_shows(shows)
                 self.showsModelChanged.emit()
+            self._shows_force_replace = False
             self._save_state_cache("last_show_section", self._current_section_key)
         else:
             # Subsequent pages — append
