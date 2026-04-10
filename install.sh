@@ -41,6 +41,7 @@ HAS_STEAM=false
 HAS_MOONLIGHT=false
 
 MISSING_DEPS=0
+MISSING_DEP_CMDS=()
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$REPO_DIR/venv"
@@ -148,7 +149,7 @@ detect_environment() {
     if echo "$lspci_out" | grep -qi "Intel"; then
         has_intel=true
     fi
-    if echo "$lspci_out" | grep -qiE "AMD|ATI"; then
+    if echo "$lspci_out" | grep -qiwE "AMD|ATI"; then
         has_amd=true
     fi
     if echo "$lspci_out" | grep -qiE "NVIDIA|nvidia"; then
@@ -485,6 +486,7 @@ report_dep() {
         missing)
             echo "  ${RED}✗${RESET} ${name}  (missing)${hint:+ — install: ${hint}}"
             MISSING_DEPS=$((MISSING_DEPS + 1))
+            [ -n "$hint" ] && MISSING_DEP_CMDS+=("$hint")
             ;;
         unknown)
             echo "  ${YELLOW}?${RESET} ${name}  (status unknown — distro not recognised)"
@@ -561,6 +563,13 @@ check_dependencies() {
         report_dep "evdev" "ok"
     else
         report_dep "evdev" "missing" "$(install_cmd "python3-evdev")"
+    fi
+
+    # mutagen
+    if check_python_import "mutagen" "mutagen" 2>/dev/null; then
+        report_dep "mutagen" "ok"
+    else
+        report_dep "mutagen" "missing" "$(install_cmd "python3-mutagen")"
     fi
 
     # lspci
@@ -661,6 +670,40 @@ check_dependencies() {
     fi
 }
 
+# ── Offer to install missing dependencies ────────────────────────────────────
+offer_install_missing() {
+    if [ "${#MISSING_DEP_CMDS[@]}" -eq 0 ]; then
+        return
+    fi
+
+    echo ""
+    echo "${BOLD}  Would you like to install missing dependencies?${RESET}"
+    echo ""
+
+    local failed_cmds=()
+
+    for cmd in "${MISSING_DEP_CMDS[@]}"; do
+        if prompt_yn "  Install: ${cmd}?" "y"; then
+            echo "  Running: ${cmd}"
+            if eval "$cmd"; then
+                echo "  ${GREEN}✓${RESET} Success"
+            else
+                echo "  ${RED}✗${RESET} Command failed: ${cmd}"
+                failed_cmds+=("$cmd")
+            fi
+        else
+            failed_cmds+=("$cmd")
+        fi
+    done
+
+    # Rebuild MISSING_DEPS and MISSING_DEP_CMDS to reflect current state
+    MISSING_DEPS="${#failed_cmds[@]}"
+    MISSING_DEP_CMDS=()
+    if [ "${#failed_cmds[@]}" -gt 0 ]; then
+        MISSING_DEP_CMDS=("${failed_cmds[@]}")
+    fi
+}
+
 # ── Phase 4: setup_venv ───────────────────────────────────────────────────────
 setup_venv() {
     echo ""
@@ -670,10 +713,54 @@ setup_venv() {
     echo ""
 
     if [ -d "$VENV_DIR" ]; then
-        echo "  Python venv already exists at ${VENV_DIR} — skipping creation."
-    else
+        if [ -x "$VENV_DIR/bin/python3" ] && [ -x "$VENV_DIR/bin/pip" ]; then
+            echo "  Python venv already exists at ${VENV_DIR} — skipping creation."
+        else
+            echo "  ${YELLOW}⚠ Existing venv at ${VENV_DIR} appears broken (missing python3 or pip). Recreating...${RESET}"
+            rm -rf "$VENV_DIR"
+        fi
+    fi
+
+    if [ ! -d "$VENV_DIR" ]; then
+        # Check if python3-venv / ensurepip is available
+        if ! python3 -m ensurepip --version >/dev/null 2>&1; then
+            local venv_pkg install_cmd_str
+            case "$DISTRO_FAMILY" in
+                debian)
+                    venv_pkg="$(python3 -c "import sys; print(f'python3.{sys.version_info.minor}-venv')")"
+                    install_cmd_str="sudo apt install ${venv_pkg}"
+                    ;;
+                fedora)
+                    venv_pkg="python3-virtualenv"
+                    install_cmd_str="sudo dnf install ${venv_pkg}"
+                    ;;
+                arch)
+                    venv_pkg="python-virtualenv"
+                    install_cmd_str="sudo pacman -S ${venv_pkg}"
+                    ;;
+                *)
+                    venv_pkg="python3-venv"
+                    install_cmd_str="# install: ${venv_pkg}"
+                    ;;
+            esac
+
+            if prompt_yn "  python3-venv is required but not installed. Run '${install_cmd_str}'?" Y; then
+                echo "  Installing ${venv_pkg}..."
+                if ! eval "$install_cmd_str"; then
+                    echo "  ${RED}✗ Failed to install ${venv_pkg}. Cannot create venv.${RESET}"
+                    return
+                fi
+            else
+                echo "  Skipping venv creation."
+                return
+            fi
+        fi
+
         echo "  Creating Python venv at ${VENV_DIR}..."
-        python3 -m venv "$VENV_DIR"
+        if ! python3 -m venv "$VENV_DIR"; then
+            echo "  ${RED}✗ Failed to create venv at ${VENV_DIR}.${RESET}"
+            return
+        fi
         echo "  ${GREEN}✓${RESET} Venv created."
     fi
 
@@ -1052,7 +1139,14 @@ print_summary() {
         echo "  Plex server:  ${PLEX_SERVER_URL}"
     fi
     echo ""
-    echo "  Missing deps: ${MISSING_DEPS}  (see above for install commands)"
+    if [ "$MISSING_DEPS" -gt 0 ]; then
+        echo "  Missing deps: ${MISSING_DEPS}"
+        for cmd in "${MISSING_DEP_CMDS[@]}"; do
+            echo "    ${cmd}"
+        done
+    else
+        echo "  Missing deps: 0"
+    fi
     echo ""
     echo "  Next steps:"
     if [ "$MISSING_DEPS" -gt 0 ]; then
@@ -1078,6 +1172,7 @@ main() {
     detect_environment
     interview
     check_dependencies
+    offer_install_missing
     setup_venv
     write_config
     if $TAB_RETRO && check_flatpak "org.libretro.RetroArch"; then
