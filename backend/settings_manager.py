@@ -85,6 +85,7 @@ class SettingsManager(QObject):
     sortLocalMusicArtistsChanged = Signal()
     showMoonlightTabChanged = Signal()
     tabVisibilityChanged = Signal()
+    localVideoCategoriesChanged = Signal()
     themeNameChanged = Signal()
     accentColorChanged = Signal()
     focusRingColorChanged = Signal()
@@ -227,6 +228,12 @@ class SettingsManager(QObject):
 
     def _get_show_local_music_tab(self) -> bool:
         return self._config.show_local_music_tab
+
+    def _get_local_video_categories(self) -> list:
+        return self._config.local_video_categories
+
+    def _get_show_local_videos_tab(self) -> bool:
+        return self._config.show_local_videos_tab
 
     def _get_local_music_view_mode(self) -> str:
         return self._config.local_music_view_mode
@@ -431,6 +438,16 @@ class SettingsManager(QObject):
     showLocalMusicTab = Property(
         bool,
         fget=_get_show_local_music_tab,
+        notify=tabVisibilityChanged,
+    )
+    localVideoCategories = Property(
+        "QVariantList",
+        fget=_get_local_video_categories,
+        notify=localVideoCategoriesChanged,
+    )
+    showLocalVideosTab = Property(
+        bool,
+        fget=_get_show_local_videos_tab,
         notify=tabVisibilityChanged,
     )
     localMusicViewMode = Property(
@@ -680,6 +697,30 @@ class SettingsManager(QObject):
         """Set the Local Music tab visibility."""
         self._config.set_show_local_music_tab(enabled)
         self.tabVisibilityChanged.emit()
+
+    @Slot(bool)
+    def setShowLocalVideosTab(self, enabled: bool) -> None:
+        """Set the Local Videos tab visibility."""
+        self._config.set_show_local_videos_tab(enabled)
+        self.tabVisibilityChanged.emit()
+
+    @Slot(str, "QVariantList", str)
+    def addLocalVideoCategory(self, name: str, paths: list, type_: str) -> None:
+        """Add a new local video category."""
+        self._config.add_local_video_category(name, [str(p) for p in paths], type_)
+        self.localVideoCategoriesChanged.emit()
+
+    @Slot(int)
+    def removeLocalVideoCategory(self, index: int) -> None:
+        """Remove a local video category by index."""
+        self._config.remove_local_video_category(index)
+        self.localVideoCategoriesChanged.emit()
+
+    @Slot(int, str, "QVariantList", str)
+    def updateLocalVideoCategory(self, index: int, name: str, paths: list, type_: str) -> None:
+        """Update a local video category by index."""
+        self._config.update_local_video_category(index, name, [str(p) for p in paths], type_)
+        self.localVideoCategoriesChanged.emit()
 
     @Slot(str)
     def setLocalMusicViewMode(self, mode: str) -> None:

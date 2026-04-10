@@ -399,6 +399,12 @@ class Config:
         self._show_watch_tab: bool = True
         self._show_listen_tab: bool = True
         self._show_local_music_tab: bool = True
+        # Local video categories
+        self._local_video_categories: list[dict] = [
+            {"name": "Movies",   "paths": [], "type": "flat"},
+            {"name": "TV Shows", "paths": [], "type": "tv_shows"},
+        ]
+        self._show_local_videos_tab: bool = True
         # Music library selection
         self._music_library_key: str = ""
         # Plex player selection: "mpv" or "browser"
@@ -983,6 +989,38 @@ class Config:
         self._show_local_music_tab = enabled
         self.save()
 
+    # -- Local video categories -------------------------------------------
+
+    @property
+    def local_video_categories(self) -> list[dict]:
+        """Return a shallow copy of the local video categories list."""
+        return list(self._local_video_categories)
+
+    @property
+    def show_local_videos_tab(self) -> bool:
+        """Whether the Local Videos tab is visible. Defaults to True."""
+        return self._show_local_videos_tab
+
+    def set_show_local_videos_tab(self, enabled: bool) -> None:
+        """Set the Local Videos tab visibility and persist the config."""
+        self._show_local_videos_tab = enabled
+        self.save()
+
+    def add_local_video_category(self, name: str, paths: list[str], type_: str) -> None:
+        """Append a new local video category and persist the config."""
+        self._local_video_categories.append({"name": name, "paths": paths, "type": type_})
+        self.save()
+
+    def remove_local_video_category(self, index: int) -> None:
+        """Remove a local video category by index and persist the config."""
+        del self._local_video_categories[index]
+        self.save()
+
+    def update_local_video_category(self, index: int, name: str, paths: list[str], type_: str) -> None:
+        """Replace a local video category entry by index and persist the config."""
+        self._local_video_categories[index] = {"name": name, "paths": paths, "type": type_}
+        self.save()
+
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
         try:
@@ -1066,6 +1104,10 @@ class Config:
                 "show_watch": self._show_watch_tab,
                 "show_listen": self._show_listen_tab,
                 "show_local_music": self._show_local_music_tab,
+                "show_local_videos": self._show_local_videos_tab,
+            },
+            "local_videos": {
+                "categories": list(self._local_video_categories),
             },
         }
         # Safety guard: never overwrite a config that has credentials with a blank one.
@@ -1280,6 +1322,29 @@ class Config:
                 self._show_listen_tab = bool(tabs["show_listen"])
             if "show_local_music" in tabs:
                 self._show_local_music_tab = bool(tabs["show_local_music"])
+            if "show_local_videos" in tabs:
+                self._show_local_videos_tab = bool(tabs["show_local_videos"])
+
+        # local_videos section
+        local_videos = raw.get("local_videos")
+        if isinstance(local_videos, dict):
+            raw_categories = local_videos.get("categories")
+            if isinstance(raw_categories, list):
+                loaded_categories: list[dict] = []
+                for entry in raw_categories:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = entry.get("name")
+                    paths = entry.get("paths")
+                    type_ = entry.get("type")
+                    if not isinstance(name, str):
+                        continue
+                    if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                        continue
+                    if type_ not in ("flat", "tv_shows"):
+                        continue
+                    loaded_categories.append({"name": name, "paths": paths, "type": type_})
+                self._local_video_categories = loaded_categories
 
 
 def ensure_config_dir() -> None:

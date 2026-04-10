@@ -196,6 +196,9 @@ class LibMpvPlayer(QObject):
         # pause=yes default; force it off before loading the new file.
         self._player.pause = False
 
+        # Reset vid in case _on_end_file set it to "no" to release the surface.
+        self._player["vid"] = "auto"
+
         self._cancel_requested.clear()
         self._player.play(url)
 

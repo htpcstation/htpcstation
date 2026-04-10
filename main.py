@@ -66,6 +66,7 @@ from backend.launcher import Launcher
 from backend.library import GameLibrary
 from backend.live_tv_library import LiveTvLibrary
 from backend.local_music_library import LocalMusicLibrary
+from backend.local_video_library import LocalVideoLibrary
 from backend.moonlight_library import MoonlightLibrary
 from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
@@ -140,6 +141,10 @@ def main() -> None:
     local_music = LocalMusicLibrary(config)
     engine.rootContext().setContextProperty("localMusic", local_music)
 
+    # Local video library — exposed to QML as `localVideos`
+    local_videos = LocalVideoLibrary(config)
+    engine.rootContext().setContextProperty("localVideos", local_videos)
+
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary(recently_played=recently_played)
     engine.rootContext().setContextProperty("steam", steam)
@@ -185,6 +190,7 @@ def main() -> None:
 
     # Pass the Qt native window handle to the MPV player (libmpv renders inside it)
     plex_library.set_wid(int(window.winId()))
+    local_videos.set_wid(int(window.winId()))
 
     # Hide the window when an external process launches, restore when it exits
     def _hide_window():
@@ -239,6 +245,9 @@ def main() -> None:
     plex_library.mpvStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
     plex_library.mpvFinished.connect(lambda: gamepad_manager.setExternalAppActive(False))
     plex_library.mpvFinished.connect(_show_window_after_mpv)
+    local_videos.playbackStarted.connect(lambda: gamepad_manager.setExternalAppActive(True))
+    local_videos.playbackFinished.connect(lambda: gamepad_manager.setExternalAppActive(False))
+    local_videos.playbackFinished.connect(_show_window_after_mpv)
 
     # Start+Select combo: kill the browser process (equivalent to Alt+F4).
     # The browser extension can't close kiosk windows via window.close(),

@@ -32,8 +32,9 @@ FocusScope {
         { name: "Moonlight",   source: "MoonlightScreen.qml",  setting: "showMoonlightTab",  slug: "moonlight"  },
         { name: "Plex Media",  source: "WatchScreen.qml",      setting: "showWatchTab",       slug: "plexmedia"  },
         { name: "Plex Music",  source: "ListenScreen.qml",     setting: "showListenTab",      slug: "plexmusic"  },
-        { name: "Music",       source: "LocalMusicScreen.qml", setting: "showLocalMusicTab",  slug: "localmusic" },
-        { name: "Settings",    source: "SettingsScreen.qml",   setting: null,                 slug: "settings"   },
+        { name: "Music",       source: "LocalMusicScreen.qml",  setting: "showLocalMusicTab",   slug: "localmusic"  },
+        { name: "Videos",      source: "LocalVideosScreen.qml", setting: "showLocalVideosTab",  slug: "localvideos" },
+        { name: "Settings",    source: "SettingsScreen.qml",    setting: null,                  slug: "settings"    },
     ]
 
     // Tab visibility — built once on startup from saved settings.

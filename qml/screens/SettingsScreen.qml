@@ -110,6 +110,25 @@ FocusScope {
                         { type: "toggle",  label: "Plex Media",   settingKey: "showWatchTab" },
                         { type: "toggle",  label: "Plex Music",   settingKey: "showListenTab" },
                         { type: "toggle",  label: "Local Music",  settingKey: "showLocalMusicTab" },
+                        { type: "toggle",  label: "Videos",       settingKey: "showLocalVideosTab" },
+                    ]
+                }
+            ]
+        },
+        {
+            name: "Videos",
+            subcategories: [
+                {
+                    name: "Default Categories",
+                    settings: [
+                        { type: "text", label: "Movies Path",   settingKey: "localVideoMoviesPath" },
+                        { type: "text", label: "TV Shows Path", settingKey: "localVideoTvShowsPath" },
+                    ]
+                },
+                {
+                    name: "Custom Categories",
+                    settings: [
+                        { type: "button", label: "Manage Custom Categories...", action: "videoCategories" },
                     ]
                 }
             ]
@@ -211,6 +230,15 @@ FocusScope {
         if (key === "showWatchTab")       return settings.showWatchTab
         if (key === "showListenTab")      return settings.showListenTab
         if (key === "showLocalMusicTab")  return settings.showLocalMusicTab
+        if (key === "showLocalVideosTab") return settings.showLocalVideosTab
+        if (key === "localVideoMoviesPath") {
+            var movieCats = settings ? settings.localVideoCategories : []
+            return movieCats.length > 0 && movieCats[0].paths && movieCats[0].paths.length > 0 ? movieCats[0].paths[0] : ""
+        }
+        if (key === "localVideoTvShowsPath") {
+            var tvCats = settings ? settings.localVideoCategories : []
+            return tvCats.length > 1 && tvCats[1].paths && tvCats[1].paths.length > 0 ? tvCats[1].paths[0] : ""
+        }
         if (key === "localMusicDirectory") return settings.localMusicDirectory
         if (key === "autoSkipIntro")      return settings.autoSkipIntro
         if (key === "transcodeMode") {
@@ -275,6 +303,20 @@ FocusScope {
             settings.setShowLocalMusicTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
+        else if (key === "showLocalVideosTab") {
+            settings.setShowLocalVideosTab(value)
+            if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
+        }
+        else if (key === "localVideoMoviesPath") {
+            var moviesCats = settings.localVideoCategories
+            var moviesName = moviesCats.length > 0 ? moviesCats[0].name : "Movies"
+            settings.updateLocalVideoCategory(0, moviesName, [value], "flat")
+        }
+        else if (key === "localVideoTvShowsPath") {
+            var tvCatsSet = settings.localVideoCategories
+            var tvName = tvCatsSet.length > 1 ? tvCatsSet[1].name : "TV Shows"
+            settings.updateLocalVideoCategory(1, tvName, [value], "tv_shows")
+        }
         else if (key === "localMusicDirectory") settings.setLocalMusicDirectory(value)
         else if (key === "autoSkipIntro") {
             settings.setAutoSkipIntro(value)
@@ -293,6 +335,10 @@ FocusScope {
         }
         if (retroarchHotkeysScreen.visible) {
             retroarchHotkeysScreen.forceActiveFocus()
+            return
+        }
+        if (videoCategoriesScreen.visible) {
+            videoCategoriesScreen.forceActiveFocus()
             return
         }
         if (_focusZone === "tabs") {
@@ -568,6 +614,8 @@ FocusScope {
                 } else if (action === "clearRetroRecent") {
                     if (library) library.clearRecentlyPlayed()
                     settingsScreen._showToast("Retro game history cleared")
+                } else if (action === "videoCategories") {
+                    videoCategoriesScreen.open()
                 }
             }
         }
@@ -915,6 +963,687 @@ FocusScope {
             retroarchHotkeysScreen.visible = false
             settingsScreen._focusZone = "content"
             settingsScreen._routeFocus()
+        }
+    }
+
+    // ── Video Categories sub-screen ──────────────────────────────────────────
+    FocusScope {
+        id: videoCategoriesScreen
+        anchors.fill: parent
+        visible: false
+        z: 10
+        enabled: focus
+
+        // List model: custom categories only (index 2+ from settings.localVideoCategories)
+        property var _listModel: []
+
+        // Form state
+        property bool _formVisible: false
+        property bool _formIsEdit: false
+        property int  _formEditIndex: -1   // index into _listModel (not the settings array)
+        property string _formName: ""
+        property string _formPath: ""
+        property string _formType: "flat"  // "flat" | "tv_shows"
+
+        // Focused row in the list (when form is hidden)
+        property int _focusedRow: 0
+
+        // Form field focus: 0=name, 1=path, 2=type, 3=save, 4=cancel
+        property int _formFocusedField: 0
+
+        function open() {
+            _refreshList()
+            videoCategoriesScreen._focusedRow = 0
+            videoCategoriesScreen._formVisible = false
+            visible = true
+            forceActiveFocus()
+        }
+
+        function close() {
+            visible = false
+            settingsScreen._routeFocus()
+        }
+
+        function _refreshList() {
+            var all = settings ? settings.localVideoCategories : []
+            var custom = []
+            for (var i = 2; i < all.length; i++)
+                custom.push(all[i])
+            videoCategoriesScreen._listModel = custom
+        }
+
+        function _openAddForm() {
+            videoCategoriesScreen._formIsEdit = false
+            videoCategoriesScreen._formEditIndex = -1
+            videoCategoriesScreen._formName = ""
+            videoCategoriesScreen._formPath = ""
+            videoCategoriesScreen._formType = "flat"
+            videoCategoriesScreen._formFocusedField = 0
+            videoCategoriesScreen._formVisible = true
+        }
+
+        function _openEditForm(listIndex) {
+            var cat = videoCategoriesScreen._listModel[listIndex]
+            if (!cat) return
+            videoCategoriesScreen._formIsEdit = true
+            videoCategoriesScreen._formEditIndex = listIndex
+            videoCategoriesScreen._formName = cat.name || ""
+            videoCategoriesScreen._formPath = (cat.paths && cat.paths.length > 0) ? cat.paths[0] : ""
+            videoCategoriesScreen._formType = cat.type || "flat"
+            videoCategoriesScreen._formFocusedField = 0
+            videoCategoriesScreen._formVisible = true
+        }
+
+        function _saveForm() {
+            var nm = videoCategoriesScreen._formName.trim()
+            var ph = videoCategoriesScreen._formPath.trim()
+            if (nm === "") return
+            if (!settings) return
+            if (videoCategoriesScreen._formIsEdit) {
+                var settingsIdx = videoCategoriesScreen._formEditIndex + 2
+                settings.updateLocalVideoCategory(settingsIdx, nm, [ph], videoCategoriesScreen._formType)
+            } else {
+                settings.addLocalVideoCategory(nm, [ph], videoCategoriesScreen._formType)
+            }
+            videoCategoriesScreen._formVisible = false
+        }
+
+        function _cancelForm() {
+            videoCategoriesScreen._formVisible = false
+        }
+
+        function _deleteRow(listIndex) {
+            if (!settings) return
+            settings.removeLocalVideoCategory(listIndex + 2)
+            // _refreshList() will be called by the Connections block
+        }
+
+        // ── Key handling ──────────────────────────────────────────────────────
+        Keys.onPressed: (event) => {
+            if (videoCategoriesScreen._formVisible) {
+                _handleFormKey(event)
+            } else {
+                _handleListKey(event)
+            }
+        }
+
+        function _handleListKey(event) {
+            var rowCount = videoCategoriesScreen._listModel.length + 1  // categories + "Add" row
+            if (event.key === Qt.Key_Up) {
+                event.accepted = true
+                if (videoCategoriesScreen._focusedRow > 0)
+                    videoCategoriesScreen._focusedRow--
+            } else if (event.key === Qt.Key_Down) {
+                event.accepted = true
+                if (videoCategoriesScreen._focusedRow < rowCount - 1)
+                    videoCategoriesScreen._focusedRow++
+            } else if (keys.isAccept(event)) {
+                event.accepted = true
+                var addRowIndex = videoCategoriesScreen._listModel.length
+                if (videoCategoriesScreen._focusedRow === addRowIndex) {
+                    _openAddForm()
+                } else {
+                    _openEditForm(videoCategoriesScreen._focusedRow)
+                }
+            } else if (event.key === Qt.Key_Y) {
+                // Y button / Y key = Delete
+                event.accepted = true
+                var delIdx = videoCategoriesScreen._focusedRow
+                if (delIdx < videoCategoriesScreen._listModel.length) {
+                    _deleteRow(delIdx)
+                }
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                videoCategoriesScreen.close()
+            }
+        }
+
+        function _handleFormKey(event) {
+            var fieldCount = 5  // name, path, type, save, cancel
+            var ff = videoCategoriesScreen._formFocusedField
+            if (event.key === Qt.Key_Up) {
+                event.accepted = true
+                if (ff > 0) videoCategoriesScreen._formFocusedField = ff - 1
+            } else if (event.key === Qt.Key_Down) {
+                event.accepted = true
+                if (ff < fieldCount - 1) videoCategoriesScreen._formFocusedField = ff + 1
+            } else if (ff === 2 &&
+                       (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+                // Toggle type field
+                event.accepted = true
+                videoCategoriesScreen._formType =
+                    videoCategoriesScreen._formType === "flat" ? "tv_shows" : "flat"
+            } else if (keys.isAccept(event)) {
+                event.accepted = true
+                if (ff === 2) {
+                    // Toggle type
+                    videoCategoriesScreen._formType =
+                        videoCategoriesScreen._formType === "flat" ? "tv_shows" : "flat"
+                } else if (ff === 3) {
+                    _saveForm()
+                } else if (ff === 4) {
+                    _cancelForm()
+                }
+                // fields 0 and 1 (name/path) are text inputs; accept handled by them
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                _cancelForm()
+            }
+        }
+
+        // ── Dark background overlay ───────────────────────────────────────────
+        Rectangle {
+            anchors.fill: parent
+            color: Theme.colorBackground
+        }
+
+        // ── Header bar ────────────────────────────────────────────────────────
+        Rectangle {
+            id: vcHeaderBar
+            anchors { top: parent.top; left: parent.left; right: parent.right }
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                text: "◀  Custom Video Categories"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+
+            Row {
+                anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                spacing: root.vpx(16)
+                visible: !videoCategoriesScreen._formVisible
+
+                Text {
+                    text: "Y  Delete"
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                }
+
+                Text {
+                    text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                }
+            }
+        }
+
+        // ── List view (shown when form is hidden) ─────────────────────────────
+        ListView {
+            id: vcList
+            anchors {
+                top: vcHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                topMargin: root.vpx(8)
+                leftMargin: root.vpx(48)
+                rightMargin: root.vpx(48)
+                bottomMargin: root.vpx(8)
+            }
+            visible: !videoCategoriesScreen._formVisible
+            clip: true
+            interactive: false
+            highlightMoveDuration: Theme.animDurationFast
+
+            model: {
+                var rows = []
+                var cats = videoCategoriesScreen._listModel
+                for (var i = 0; i < cats.length; i++)
+                    rows.push({ _type: "category", _data: cats[i], _index: i })
+                rows.push({ _type: "add" })
+                return rows
+            }
+
+            delegate: Item {
+                id: vcDelegate
+                width: vcList.width
+                height: root.vpx(56)
+
+                readonly property bool _isFocused: videoCategoriesScreen._focusedRow === index
+                readonly property bool _isAdd: modelData._type === "add"
+                readonly property var _cat: modelData._data || null
+                readonly property int _catIndex: modelData._index !== undefined ? modelData._index : -1
+
+                // ── Highlight ─────────────────────────────────────────────────
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorSecondary
+                    opacity: vcDelegate._isFocused ? 0.6 : 0.0
+                    radius: root.vpx(Theme.focusRingRadius)
+                    Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                }
+
+                // ── Focus ring ────────────────────────────────────────────────
+                Rectangle {
+                    anchors.fill: parent
+                    color: "transparent"
+                    border.color: Theme.colorFocusRing
+                    border.width: root.vpx(Theme.focusRingWidth)
+                    radius: root.vpx(Theme.focusRingRadius)
+                    visible: vcDelegate._isFocused
+                }
+
+                // ── Category row layout ───────────────────────────────────────
+                Row {
+                    anchors {
+                        left: parent.left; right: parent.right
+                        verticalCenter: parent.verticalCenter
+                        leftMargin: root.vpx(16); rightMargin: root.vpx(16)
+                    }
+                    visible: !vcDelegate._isAdd
+
+                    Text {
+                        width: parent.width * 0.3
+                        text: vcDelegate._cat ? (vcDelegate._cat.name || "") : ""
+                        color: vcDelegate._isFocused ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                        height: root.vpx(56)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                    }
+
+                    Text {
+                        width: parent.width * 0.5
+                        text: {
+                            if (!vcDelegate._cat) return ""
+                            var paths = vcDelegate._cat.paths
+                            return (paths && paths.length > 0) ? paths[0] : ""
+                        }
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                        height: root.vpx(56)
+                    }
+
+                    Text {
+                        width: parent.width * 0.2
+                        text: {
+                            if (!vcDelegate._cat) return ""
+                            return vcDelegate._cat.type === "tv_shows" ? "TV Shows" : "Flat"
+                        }
+                        color: Theme.colorPrimary
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        horizontalAlignment: Text.AlignRight
+                        verticalAlignment: Text.AlignVCenter
+                        height: root.vpx(56)
+                    }
+                }
+
+                // ── Add row layout ────────────────────────────────────────────
+                Text {
+                    anchors {
+                        left: parent.left; leftMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    visible: vcDelegate._isAdd
+                    text: "+ Add Category"
+                    color: vcDelegate._isFocused ? Theme.colorPrimary : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    font.bold: true
+                    Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                }
+
+                // ── Separator ─────────────────────────────────────────────────
+                Rectangle {
+                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                    height: root.vpx(1)
+                    color: Theme.colorTextDim
+                    opacity: 0.15
+                }
+            }
+
+            // Keep view scrolled to focused row
+            onModelChanged: {
+                positionViewAtIndex(videoCategoriesScreen._focusedRow, ListView.Contain)
+            }
+        }
+
+        // Keep list scrolled on focus change
+        Connections {
+            target: videoCategoriesScreen
+            function on_FocusedRowChanged() {
+                vcList.positionViewAtIndex(videoCategoriesScreen._focusedRow, ListView.Contain)
+            }
+        }
+
+        // ── Add / Edit form ───────────────────────────────────────────────────
+        Item {
+            id: vcForm
+            anchors {
+                top: vcHeaderBar.bottom
+                left: parent.left
+                right: parent.right
+                bottom: parent.bottom
+                topMargin: root.vpx(24)
+                leftMargin: root.vpx(48)
+                rightMargin: root.vpx(48)
+                bottomMargin: root.vpx(8)
+            }
+            visible: videoCategoriesScreen._formVisible
+
+            Column {
+                anchors { top: parent.top; left: parent.left; right: parent.right }
+                spacing: root.vpx(4)
+
+                // Form title
+                Text {
+                    text: videoCategoriesScreen._formIsEdit ? "Edit Category" : "Add Category"
+                    color: Theme.colorText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                    bottomPadding: root.vpx(12)
+                }
+
+                // ── Name field ────────────────────────────────────────────────
+                Item {
+                    id: vcNameRow
+                    width: parent.width
+                    height: root.vpx(56)
+                    readonly property bool _isFocused: videoCategoriesScreen._formFocusedField === 0
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: vcNameRow._isFocused ? 0.6 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+                        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: Theme.colorFocusRing
+                        border.width: root.vpx(Theme.focusRingWidth)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: vcNameRow._isFocused
+                    }
+
+                    Text {
+                        anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        width: parent.width * 0.25
+                        text: "Name"
+                        color: vcNameRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                    }
+
+                    TextInput {
+                        id: vcNameInput
+                        anchors {
+                            left: parent.left; leftMargin: parent.width * 0.28
+                            right: parent.right; rightMargin: root.vpx(16)
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: videoCategoriesScreen._formName
+                        color: Theme.colorText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        focus: vcNameRow._isFocused
+
+                        onTextChanged: {
+                            if (vcNameRow._isFocused)
+                                videoCategoriesScreen._formName = text
+                        }
+
+                        // Sync when form opens
+                        Connections {
+                            target: videoCategoriesScreen
+                            function on_FormNameChanged() { vcNameInput.text = videoCategoriesScreen._formName }
+                            function on_FormVisibleChanged() {
+                                if (videoCategoriesScreen._formVisible)
+                                    vcNameInput.text = videoCategoriesScreen._formName
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: root.vpx(1); color: Theme.colorTextDim; opacity: 0.15
+                    }
+                }
+
+                // ── Path field ────────────────────────────────────────────────
+                Item {
+                    id: vcPathRow
+                    width: parent.width
+                    height: root.vpx(56)
+                    readonly property bool _isFocused: videoCategoriesScreen._formFocusedField === 1
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: vcPathRow._isFocused ? 0.6 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+                        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: Theme.colorFocusRing
+                        border.width: root.vpx(Theme.focusRingWidth)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: vcPathRow._isFocused
+                    }
+
+                    Text {
+                        anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        width: parent.width * 0.25
+                        text: "Path"
+                        color: vcPathRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                    }
+
+                    TextInput {
+                        id: vcPathInput
+                        anchors {
+                            left: parent.left; leftMargin: parent.width * 0.28
+                            right: parent.right; rightMargin: root.vpx(16)
+                            verticalCenter: parent.verticalCenter
+                        }
+                        text: videoCategoriesScreen._formPath
+                        color: Theme.colorText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        focus: vcPathRow._isFocused
+
+                        onTextChanged: {
+                            if (vcPathRow._isFocused)
+                                videoCategoriesScreen._formPath = text
+                        }
+
+                        Connections {
+                            target: videoCategoriesScreen
+                            function on_FormPathChanged() { vcPathInput.text = videoCategoriesScreen._formPath }
+                            function on_FormVisibleChanged() {
+                                if (videoCategoriesScreen._formVisible)
+                                    vcPathInput.text = videoCategoriesScreen._formPath
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: root.vpx(1); color: Theme.colorTextDim; opacity: 0.15
+                    }
+                }
+
+                // ── Type toggle ───────────────────────────────────────────────
+                Item {
+                    id: vcTypeRow
+                    width: parent.width
+                    height: root.vpx(56)
+                    readonly property bool _isFocused: videoCategoriesScreen._formFocusedField === 2
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: vcTypeRow._isFocused ? 0.6 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+                        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: Theme.colorFocusRing
+                        border.width: root.vpx(Theme.focusRingWidth)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: vcTypeRow._isFocused
+                    }
+
+                    Text {
+                        anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        text: "Type"
+                        color: vcTypeRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                    }
+
+                    Rectangle {
+                        anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        width: typeLabel.implicitWidth + root.vpx(24)
+                        height: root.vpx(32)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        color: vcTypeRow._isFocused ? Theme.colorPrimary : "transparent"
+                        border.color: vcTypeRow._isFocused ? Theme.colorPrimary : Theme.colorTextDim
+                        border.width: root.vpx(1)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                        Behavior on border.color { ColorAnimation { duration: Theme.animDurationFast } }
+
+                        Text {
+                            id: typeLabel
+                            anchors.centerIn: parent
+                            text: videoCategoriesScreen._formType === "tv_shows" ? "TV Shows" : "Flat"
+                            color: vcTypeRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: root.vpx(1); color: Theme.colorTextDim; opacity: 0.15
+                    }
+                }
+
+                // ── Save button ───────────────────────────────────────────────
+                Item {
+                    id: vcSaveRow
+                    width: parent.width
+                    height: root.vpx(56)
+                    readonly property bool _isFocused: videoCategoriesScreen._formFocusedField === 3
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: vcSaveRow._isFocused ? 0.8 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+                        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: Theme.colorFocusRing
+                        border.width: root.vpx(Theme.focusRingWidth)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: vcSaveRow._isFocused
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        width: vcSaveLabel.implicitWidth + root.vpx(32)
+                        height: root.vpx(36)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        color: vcSaveRow._isFocused ? Theme.colorPrimary : "transparent"
+                        border.color: vcSaveRow._isFocused ? Theme.colorPrimary : Theme.colorTextDim
+                        border.width: root.vpx(1)
+                        Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                        Behavior on border.color { ColorAnimation { duration: Theme.animDurationFast } }
+
+                        Text {
+                            id: vcSaveLabel
+                            anchors.centerIn: parent
+                            text: "Save"
+                            color: vcSaveRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        height: root.vpx(1); color: Theme.colorTextDim; opacity: 0.15
+                    }
+                }
+
+                // ── Cancel button ─────────────────────────────────────────────
+                Item {
+                    id: vcCancelRow
+                    width: parent.width
+                    height: root.vpx(56)
+                    readonly property bool _isFocused: videoCategoriesScreen._formFocusedField === 4
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.colorSecondary
+                        opacity: vcCancelRow._isFocused ? 0.6 : 0.0
+                        radius: root.vpx(Theme.focusRingRadius)
+                        Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
+                    }
+                    Rectangle {
+                        anchors.fill: parent
+                        color: "transparent"
+                        border.color: Theme.colorFocusRing
+                        border.width: root.vpx(Theme.focusRingWidth)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: vcCancelRow._isFocused
+                    }
+
+                    Rectangle {
+                        anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                        width: vcCancelLabel.implicitWidth + root.vpx(32)
+                        height: root.vpx(36)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        color: "transparent"
+                        border.color: vcCancelRow._isFocused ? Theme.colorTextDim : Theme.colorTextDim
+                        border.width: root.vpx(1)
+
+                        Text {
+                            id: vcCancelLabel
+                            anchors.centerIn: parent
+                            text: "Cancel"
+                            color: vcCancelRow._isFocused ? Theme.colorText : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            Behavior on color { ColorAnimation { duration: Theme.animDurationFast } }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── React to localVideoCategoriesChanged while sub-screen is open ────────
+    Connections {
+        target: settings
+        function onLocalVideoCategoriesChanged() {
+            if (videoCategoriesScreen.visible) videoCategoriesScreen._refreshList()
         }
     }
 
