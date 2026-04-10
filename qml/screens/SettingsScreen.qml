@@ -2,16 +2,17 @@ import QtQuick
 import ".."
 import "../components"
 
-// Settings screen — navigable list of settings organized into sections:
-// Games, Plex, Browser, Moonlight, Controller, User Interface.
+// Settings screen — tabbed layout with three focus zones:
+//   1. Tab strip (horizontal) — Left/Right to switch tabs
+//   2. Sidebar (vertical, Games & User Interface tabs only) — Up/Down sub-categories
+//   3. Content list — the settings ListView
 //
 // Navigation:
-//   Up/Down — move between setting rows (headers are skipped automatically)
-//   A (Return) on text input — enter edit mode
-//   A (Return) on toggle — toggle value
-//   A (Return) on button — execute action
-//   A (Return) on slider — enter adjust mode
-//   B (Escape) — if in edit/adjust mode, exit it; otherwise emit back()
+//   Down from tabs → sidebar (if present) or content list
+//   Right/A from sidebar → content list
+//   Left/B from sidebar → tab strip
+//   Left/B from content list → sidebar (if present) or tab strip
+//   B from tab strip → back()
 FocusScope {
     id: settingsScreen
 
@@ -28,66 +29,126 @@ FocusScope {
     // options expression re-evaluates reactively.
     property int _librariesVersion: 0
 
-    // ── System Cores sub-screen ───────────────────────────────────────────────
+    // ── Focus zone tracking ──────────────────────────────────────────────────
+    // "tabs" | "sidebar" | "content"
+    property string _focusZone: "tabs"
+
+    // ── Tab / sub-category indices ───────────────────────────────────────────
+    property int _activeTabIndex: 0
+    property int _activeSubIndex: 0
+
+    // ── Tabs data model ──────────────────────────────────────────────────────
+    readonly property var _tabs: [
+        {
+            name: "Games",
+            subcategories: [
+                {
+                    name: "Paths",
+                    settings: [
+                        { type: "text", label: "ROMs Directory", settingKey: "romDirectory" },
+                        { type: "text", label: "Cores Directory", settingKey: "coresDirectory" },
+                    ]
+                },
+                {
+                    name: "Retroarch",
+                    settings: [
+                        { type: "text",    label: "RetroArch Command", settingKey: "retroarchCommand" },
+                        { type: "button",  label: "System Cores...",   action: "systemCores" },
+                        { type: "button",  label: "RetroArch Hotkeys", action: "retroarchHotkeys" },
+                        { type: "button",  label: "Rescan Library",    action: "rescan" },
+                        { type: "button",  label: "Clear Retro Games History", action: "clearRetroRecent" },
+                        { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
+                        { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
+                          min: 0, max: 5000, step: 100, suffix: "ms" },
+                    ]
+                },
+                {
+                    name: "Moonlight",
+                    settings: [
+                        { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
+                        { type: "select",  label: "Host",              settingKey: "moonlightHost" },
+                        { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
+                    ]
+                }
+            ]
+        },
+        {
+            name: "Plex",
+            subcategories: null,
+            settings: [
+                { type: "button",  label: "Sign in with Plex", action: "plexSignIn" },
+                { type: "button",  label: "Test Connection",   action: "testPlex" },
+                { type: "select",  label: "Server",            settingKey: "plexServer" },
+                { type: "select",  label: "User",              settingKey: "plexUser" },
+                { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
+                { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
+                { type: "toggle",  label: "Auto-Skip Intro",   settingKey: "autoSkipIntro" },
+            ]
+        },
+        {
+            name: "Controller",
+            subcategories: null,
+            settings: [
+                { type: "select",  label: "Button Layout",    settingKey: "buttonLayout" },
+                { type: "button",  label: "Map Controller",   action: "mapController" },
+                { type: "button",  label: "Reset to Default", action: "resetController" },
+            ]
+        },
+        {
+            name: "User Interface",
+            subcategories: [
+                {
+                    name: "Appearance",
+                    settings: [
+                        { type: "toggle",  label: "Network Indicator", settingKey: "showNetworkIndicator" },
+                    ]
+                },
+                {
+                    name: "Visible Tabs",
+                    settings: [
+                        { type: "toggle",  label: "Retro Games",  settingKey: "showRetroGamesTab" },
+                        { type: "toggle",  label: "PC Games",     settingKey: "showPcGamesTab" },
+                        { type: "toggle",  label: "Moonlight",    settingKey: "showMoonlightTab" },
+                        { type: "toggle",  label: "Plex Media",   settingKey: "showWatchTab" },
+                        { type: "toggle",  label: "Plex Music",   settingKey: "showListenTab" },
+                    ]
+                }
+            ]
+        },
+        {
+            name: "Advanced",
+            subcategories: null,
+            settings: [
+                { type: "text",  label: "Browser Command",  settingKey: "browserCommand" },
+            ]
+        }
+    ]
+
+    // ── Derived state ────────────────────────────────────────────────────────
+    readonly property bool _hasSidebar: _tabs[_activeTabIndex].subcategories !== null
+
+    function _currentSettings() {
+        var tab = _tabs[_activeTabIndex]
+        if (tab.subcategories)
+            return tab.subcategories[_activeSubIndex].settings
+        return tab.settings
+    }
+
+    // ── System Cores sub-screen ──────────────────────────────────────────────
     function showSystemCores() {
         systemCoresScreen.systems = settings ? settings.getSystemsList() : []
         systemCoresScreen.visible = true
         systemCoresScreen.forceActiveFocus()
     }
 
-    // ── RetroArch Hotkeys sub-screen ──────────────────────────────────────────
+    // ── RetroArch Hotkeys sub-screen ─────────────────────────────────────────
     function showRetroarchHotkeys() {
         retroarchHotkeysScreen.config = settings ? settings.getRetroarchHotkeyConfig() : {}
         retroarchHotkeysScreen.visible = true
         retroarchHotkeysScreen.forceActiveFocus()
     }
 
-    // ── Settings model ────────────────────────────────────────────────────────
-    // Each entry specifies the type and properties of a setting row.
-    // Headers are non-focusable visual separators.
-    readonly property var _settingsModel: [
-        { type: "header",  label: "Games" },
-        { type: "text",    label: "ROMs Directory",    settingKey: "romDirectory" },
-        { type: "text",    label: "RetroArch Command", settingKey: "retroarchCommand" },
-        { type: "text",    label: "Cores Directory",   settingKey: "coresDirectory" },
-        { type: "button",  label: "System Cores...",   action: "systemCores" },
-        { type: "button",  label: "RetroArch Hotkeys", action: "retroarchHotkeys" },
-        { type: "button",  label: "Rescan Library",    action: "rescan" },
-        { type: "button",  label: "Clear Retro Games History", action: "clearRetroRecent" },
-        { type: "header",  label: "Plex" },
-        { type: "button",  label: "Sign in with Plex", action: "plexSignIn" },
-        { type: "button",  label: "Test Connection",   action: "testPlex" },
-        { type: "select",  label: "Server",            settingKey: "plexServer" },
-        { type: "select",  label: "User",              settingKey: "plexUser" },
-        { type: "select",  label: "Music Library",    settingKey: "musicLibrary" },
-        { type: "cycle",   label: "Video Player",      settingKey: "plexPlayer" },
-        { type: "toggle",  label: "Auto-Skip Intro",   settingKey: "autoSkipIntro" },
-
-        { type: "header",  label: "Browser" },
-        { type: "text",    label: "Browser Command",   settingKey: "browserCommand" },
-        { type: "header",  label: "Moonlight" },
-        { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
-        { type: "select",  label: "Host",              settingKey: "moonlightHost" },
-        { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
-
-        { type: "header",  label: "Controller" },
-        { type: "select",  label: "Button Layout",    settingKey: "buttonLayout" },
-        { type: "button",  label: "Map Controller",   action: "mapController" },
-        { type: "button",  label: "Reset to Default", action: "resetController" },
-        { type: "header",  label: "User Interface" },
-        { type: "toggle",  label: "Video Snap Autoplay", settingKey: "videoSnapAutoplay" },
-        { type: "slider",  label: "Video Snap Delay",    settingKey: "videoSnapDelayMs",
-          min: 0, max: 5000, step: 100, suffix: "ms" },
-        { type: "toggle",  label: "Network Indicator",   settingKey: "showNetworkIndicator" },
-        { type: "header",  label: "Tabs" },
-        { type: "toggle",  label: "Retro Games",         settingKey: "showRetroGamesTab" },
-        { type: "toggle",  label: "PC Games",            settingKey: "showPcGamesTab" },
-        { type: "toggle",  label: "Moonlight",           settingKey: "showMoonlightTab" },
-        { type: "toggle",  label: "Plex Media",           settingKey: "showWatchTab" },
-        { type: "toggle",  label: "Plex Music",          settingKey: "showListenTab" },
-    ]
-
-    // ── Toast notification ────────────────────────────────────────────────────
+    // ── Toast notification ───────────────────────────────────────────────────
     property string _toastText: ""
 
     Timer {
@@ -102,7 +163,7 @@ FocusScope {
         toastTimer.restart()
     }
 
-    // ── Helper: get current value for a setting key ───────────────────────────
+    // ── Helper: get current value for a setting key ──────────────────────────
     function _getValue(key) {
         if (!settings) return ""
         if (key === "romDirectory")       return settings.romDirectory
@@ -143,11 +204,12 @@ FocusScope {
         if (key === "showMoonlightTab")   return settings.showMoonlightTab
         if (key === "showWatchTab")       return settings.showWatchTab
         if (key === "showListenTab")      return settings.showListenTab
+        if (key === "autoSkipIntro")      return settings.autoSkipIntro
 
         return ""
     }
 
-    // ── Helper: call the appropriate setter ───────────────────────────────────
+    // ── Helper: call the appropriate setter ──────────────────────────────────
     function _setValue(key, value, label) {
         if (!settings) return
         if (key === "romDirectory")       settings.setRomDirectory(value)
@@ -194,23 +256,28 @@ FocusScope {
             settings.setShowListenTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
+        else if (key === "autoSkipIntro") {
+            settings.setAutoSkipIntro(value)
+        }
 
     }
 
-    // ── Focus routing ─────────────────────────────────────────────────────────
-    onActiveFocusChanged: {
-        if (activeFocus) {
-            // If the system cores sub-screen is open, let it keep focus
-            if (systemCoresScreen.visible) {
-                systemCoresScreen.forceActiveFocus()
-                return
-            }
-            // If the retroarch hotkeys sub-screen is open, let it keep focus
-            if (retroarchHotkeysScreen.visible) {
-                retroarchHotkeysScreen.forceActiveFocus()
-                return
-            }
-            // Route focus to the current setting item
+    // ── Focus routing ────────────────────────────────────────────────────────
+    function _routeFocus() {
+        if (systemCoresScreen.visible) {
+            systemCoresScreen.forceActiveFocus()
+            return
+        }
+        if (retroarchHotkeysScreen.visible) {
+            retroarchHotkeysScreen.forceActiveFocus()
+            return
+        }
+        if (_focusZone === "tabs") {
+            tabStrip.forceActiveFocus()
+        } else if (_focusZone === "sidebar") {
+            sidebarList.forceActiveFocus()
+        } else {
+            // Focus the loaded component inside the current delegate
             var item = settingsList.currentItem
             if (item && item.children[0] && item.children[0].item) {
                 item.children[0].item.forceActiveFocus()
@@ -218,6 +285,33 @@ FocusScope {
                 settingsList.forceActiveFocus()
             }
         }
+    }
+
+    onActiveFocusChanged: {
+        if (activeFocus) {
+            _routeFocus()
+        }
+    }
+
+    on_FocusZoneChanged: {
+        if (activeFocus) {
+            _routeFocus()
+        }
+    }
+
+    on_ActiveTabIndexChanged: {
+        _activeSubIndex = 0
+        settingsList.currentIndex = 0
+        _refreshModel()
+    }
+
+    on_ActiveSubIndexChanged: {
+        settingsList.currentIndex = 0
+        _refreshModel()
+    }
+
+    function _refreshModel() {
+        settingsList.model = _currentSettings()
     }
 
     // ── Header bar ───────────────────────────────────────────────────────────
@@ -237,13 +331,435 @@ FocusScope {
         }
     }
 
-    // ── Settings list ─────────────────────────────────────────────────────────
-    ListView {
-        id: settingsList
+    // ── Tab strip ────────────────────────────────────────────────────────────
+    FocusScope {
+        id: tabStrip
 
         anchors {
             top: headerBar.bottom
             left: parent.left
+            right: parent.right
+        }
+        height: root.vpx(48)
+
+        Row {
+            id: tabRow
+            anchors {
+                left: parent.left
+                leftMargin: root.vpx(48)
+                verticalCenter: parent.verticalCenter
+            }
+            spacing: root.vpx(32)
+
+            Repeater {
+                model: settingsScreen._tabs
+
+                Item {
+                    width: tabLabel.implicitWidth + root.vpx(8)
+                    height: tabStrip.height
+
+                    Text {
+                        id: tabLabel
+                        anchors.centerIn: parent
+                        text: modelData.name
+                        color: index === settingsScreen._activeTabIndex
+                               ? Theme.colorPrimary : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        font.bold: index === settingsScreen._activeTabIndex
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+                    }
+
+                    // Active tab underline
+                    Rectangle {
+                        anchors {
+                            bottom: parent.bottom
+                            left: parent.left
+                            right: parent.right
+                        }
+                        height: root.vpx(2)
+                        color: Theme.colorPrimary
+                        visible: index === settingsScreen._activeTabIndex
+                    }
+                }
+            }
+        }
+
+        // Subtle bottom border for the tab strip
+        Rectangle {
+            anchors {
+                bottom: parent.bottom
+                left: parent.left
+                right: parent.right
+            }
+            height: root.vpx(1)
+            color: Theme.colorTextDim
+            opacity: 0.2
+        }
+
+        Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_Left) {
+                event.accepted = true
+                if (settingsScreen._activeTabIndex > 0)
+                    settingsScreen._activeTabIndex--
+            } else if (event.key === Qt.Key_Right) {
+                event.accepted = true
+                if (settingsScreen._activeTabIndex < settingsScreen._tabs.length - 1)
+                    settingsScreen._activeTabIndex++
+            } else if (event.key === Qt.Key_Down) {
+                event.accepted = true
+                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "content"
+            } else if (keys.isCancel(event)) {
+                event.accepted = true
+                settingsScreen.back()
+            }
+        }
+    }
+
+    // ── Sidebar ──────────────────────────────────────────────────────────────
+    Rectangle {
+        id: sidebarArea
+
+        anchors {
+            top: tabStrip.bottom
+            left: parent.left
+            bottom: parent.bottom
+        }
+        width: settingsScreen._hasSidebar ? root.vpx(180) : 0
+        color: Theme.colorSecondary
+        visible: settingsScreen._hasSidebar
+
+        ListView {
+            id: sidebarList
+
+            anchors {
+                fill: parent
+                topMargin: root.vpx(12)
+            }
+            clip: true
+            keyNavigationEnabled: false
+            model: settingsScreen._hasSidebar ? settingsScreen._tabs[settingsScreen._activeTabIndex].subcategories : []
+            currentIndex: settingsScreen._activeSubIndex
+
+            delegate: Item {
+                width: sidebarList.width
+                height: root.vpx(40)
+
+                // Left accent bar for active sub-category
+                Rectangle {
+                    anchors {
+                        left: parent.left
+                        top: parent.top
+                        bottom: parent.bottom
+                    }
+                    width: root.vpx(3)
+                    color: Theme.colorPrimary
+                    visible: index === settingsScreen._activeSubIndex
+                }
+
+                Text {
+                    anchors {
+                        left: parent.left
+                        leftMargin: root.vpx(16)
+                        verticalCenter: parent.verticalCenter
+                    }
+                    text: modelData.name
+                    color: index === settingsScreen._activeSubIndex
+                           ? Theme.colorPrimary : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                    font.bold: index === settingsScreen._activeSubIndex
+
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+            }
+
+            Keys.onPressed: (event) => {
+                if (event.key === Qt.Key_Up) {
+                    event.accepted = true
+                    if (settingsScreen._activeSubIndex > 0)
+                        settingsScreen._activeSubIndex--
+                } else if (event.key === Qt.Key_Down) {
+                    event.accepted = true
+                    var subcats = settingsScreen._tabs[settingsScreen._activeTabIndex].subcategories
+                    if (settingsScreen._activeSubIndex < subcats.length - 1)
+                        settingsScreen._activeSubIndex++
+                } else if (event.key === Qt.Key_Right || keys.isAccept(event)) {
+                    event.accepted = true
+                    settingsScreen._focusZone = "content"
+                } else if (event.key === Qt.Key_Left || keys.isCancel(event)) {
+                    event.accepted = true
+                    settingsScreen._focusZone = "tabs"
+                }
+            }
+        }
+    }
+
+    // ── Delegate components (top-level) ──────────────────────────────────────
+
+    // ── Text input component ─────────────────────────────────────────────
+    Component {
+        id: textInputComp
+        SettingTextInput {
+            property var rowData
+            width: parent ? parent.width : 0
+            label: rowData ? rowData.label : ""
+            value: rowData ? settingsScreen._getValue(rowData.settingKey) : ""
+            masked: rowData ? (rowData.masked || false) : false
+
+            onEditingChanged: {
+                settingsList._childEditing = editing
+            }
+
+            onValueEdited: (newValue) => {
+                if (rowData) settingsScreen._setValue(rowData.settingKey, newValue)
+            }
+        }
+    }
+
+    // ── Toggle component ─────────────────────────────────────────────────
+    Component {
+        id: toggleComp
+        SettingToggle {
+            property var rowData
+            width: parent ? parent.width : 0
+            label: rowData ? rowData.label : ""
+            checked: rowData ? settingsScreen._getValue(rowData.settingKey) : false
+
+            onToggled: (newValue) => {
+                if (rowData) settingsScreen._setValue(rowData.settingKey, newValue)
+            }
+        }
+    }
+
+    // ── Button component ─────────────────────────────────────────────────
+    Component {
+        id: buttonComp
+        SettingButton {
+            id: actionButton
+            property var rowData
+            width: parent ? parent.width : 0
+            label: rowData ? rowData.label : ""
+
+            onClicked: {
+                if (!rowData) return
+                var action = rowData.action
+                if (action === "rescan") {
+                    settings.rescanLibrary()
+                    actionButton.statusText = "Rescanned!"
+                } else if (action === "testPlex") {
+                    actionButton.statusText = "Testing..."
+                    // Defer the synchronous call to next event loop turn
+                    // so "Testing..." is rendered before blocking.
+                    Qt.callLater(function() {
+                        var ok = settings.testPlexConnection()
+                        actionButton.statusText = ok ? "Connected!" : "Failed"
+                    })
+                } else if (action === "plexSignIn") {
+                    plexLoginOverlay.visible = true
+                    plexLoginOverlay.forceActiveFocus()
+                    settings.startPlexPinLogin()
+                } else if (action === "openMoonlight") {
+                    settings.openMoonlight()
+                    actionButton.statusText = "Opening..."
+                } else if (action === "systemCores") {
+                    settingsScreen.showSystemCores()
+                } else if (action === "retroarchHotkeys") {
+                    settingsScreen.showRetroarchHotkeys()
+                } else if (action === "mapController") {
+                    settingsScreen.showControllerMapping()
+                } else if (action === "resetController") {
+                    if (settings) settings.resetControllerMapping()
+                    settingsScreen._showToast("Controller mapping reset")
+                } else if (action === "clearRetroRecent") {
+                    if (library) library.clearRecentlyPlayed()
+                    settingsScreen._showToast("Retro game history cleared")
+                }
+            }
+        }
+    }
+
+    // ── Slider component ─────────────────────────────────────────────────
+    Component {
+        id: sliderComp
+        SettingSlider {
+            property var rowData
+            width: parent ? parent.width : 0
+            label: rowData ? rowData.label : ""
+            value: rowData ? settingsScreen._getValue(rowData.settingKey) : 0
+            minValue: rowData && rowData.min !== undefined ? rowData.min : 0
+            maxValue: rowData && rowData.max !== undefined ? rowData.max : 5000
+            step: rowData && rowData.step !== undefined ? rowData.step : 100
+            suffix: rowData && rowData.suffix !== undefined ? rowData.suffix : ""
+
+            onAdjustingChanged: {
+                settingsList._childEditing = adjusting
+            }
+
+            onValueEdited: (newValue) => {
+                if (rowData) settingsScreen._setValue(rowData.settingKey, newValue)
+            }
+        }
+    }
+
+    // ── Select component ─────────────────────────────────────────────────
+    Component {
+        id: selectComp
+        SettingSelect {
+            property var rowData
+            width: parent ? parent.width : 0
+            label: rowData ? rowData.label : ""
+            currentValue: rowData ? settingsScreen._getValue(rowData.settingKey) : ""
+            optionsProvider: function() {
+                if (!rowData) return []
+                if (rowData.settingKey === "buttonLayout") {
+                    return [
+                        { id: "standard",  label: "Standard (A=East)" },
+                        { id: "alternate", label: "Alternate (A=South)" },
+                    ]
+                }
+                if (rowData.settingKey === "moonlightHost") {
+                    if (!settings) return []
+                    return settings.getHostsList()
+                }
+                if (rowData.settingKey === "musicLibrary") {
+                    if (!plex) return []
+                    // Read _librariesVersion so this expression re-evaluates
+                    // when onLibrariesModelChanged fires.
+                    void settingsScreen._librariesVersion
+                    var libs = plex.getMusicLibraries()
+                    if (libs.length === 0) plex.refresh()
+                    return libs
+                }
+                if (!plex) return []
+                if (rowData.settingKey === "plexServer") {
+                    return plex.getServerList().map(function(item) {
+                        return { id: item.id, label: item.name }
+                    })
+                }
+                if (rowData.settingKey === "plexUser") {
+                    return plex.getHomeUsers().map(function(item) {
+                        return { id: item.id, label: item.title }
+                    })
+                }
+                return []
+            }
+
+            onSelected: (id, label) => {
+                if (rowData) settingsScreen._setValue(rowData.settingKey, id, label)
+            }
+        }
+    }
+
+    // ── Cycle component (cycles through a fixed set of values) ───────────
+    // Matches the SettingToggle layout: label on left, value pill on right.
+    Component {
+        id: cycleComp
+        FocusScope {
+            id: cycleRoot
+
+            property var rowData
+            implicitHeight: root.vpx(56)
+            width: parent ? parent.width : 0
+
+            // ── Background highlight ─────────────────────────────────────
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.colorSecondary
+                opacity: cycleRoot.activeFocus ? 0.8 : 0.0
+                radius: root.vpx(Theme.focusRingRadius)
+
+                Behavior on opacity {
+                    NumberAnimation { duration: Theme.animDurationFast }
+                }
+            }
+
+            // ── Row label ────────────────────────────────────────────────
+            Text {
+                anchors {
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                text: rowData ? rowData.label : ""
+                color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+
+                Behavior on color {
+                    ColorAnimation { duration: Theme.animDurationFast }
+                }
+            }
+
+            // ── Value pill ───────────────────────────────────────────────
+            Rectangle {
+                id: valuePill
+                anchors {
+                    right: parent.right
+                    rightMargin: root.vpx(16)
+                    verticalCenter: parent.verticalCenter
+                }
+                width: valueLabel.implicitWidth + root.vpx(24)
+                height: root.vpx(32)
+                radius: root.vpx(Theme.focusRingRadius)
+                color: cycleRoot.activeFocus ? Theme.colorPrimary : "transparent"
+                border.color: cycleRoot.activeFocus ? Theme.colorPrimary : Theme.colorTextDim
+                border.width: root.vpx(1)
+
+                Behavior on color {
+                    ColorAnimation { duration: Theme.animDurationFast }
+                }
+                Behavior on border.color {
+                    ColorAnimation { duration: Theme.animDurationFast }
+                }
+
+                Text {
+                    id: valueLabel
+                    anchors.centerIn: parent
+                    text: (settings && (settings.plexPlayer || "mpv") === "mpv")
+                        ? "MPV"
+                        : "Browser"
+                    color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+
+                    Behavior on color {
+                        ColorAnimation { duration: Theme.animDurationFast }
+                    }
+                }
+            }
+
+            // ── Focus ring ───────────────────────────────────────────────
+            FocusRing {}
+
+            // ── Key handling ─────────────────────────────────────────────
+            Keys.onPressed: (event) => {
+                if (keys.isAccept(event)
+                        || event.key === Qt.Key_Left
+                        || event.key === Qt.Key_Right) {
+                    event.accepted = true
+                    if (settings) {
+                        settings.setPlexPlayer(
+                            (settings.plexPlayer || "mpv") === "mpv" ? "browser" : "mpv"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Content list ─────────────────────────────────────────────────────────
+    ListView {
+        id: settingsList
+
+        anchors {
+            top: tabStrip.bottom
+            left: sidebarArea.right
             right: parent.right
             bottom: parent.bottom
             topMargin: root.vpx(16)
@@ -252,10 +768,10 @@ FocusScope {
             bottomMargin: root.vpx(8)
         }
 
-        model: settingsScreen._settingsModel
+        model: settingsScreen._currentSettings()
         clip: true
         focus: true
-        keyNavigationEnabled: false  // We handle Up/Down manually to skip headers
+        keyNavigationEnabled: false
         highlightMoveDuration: Theme.animDurationFast
         highlightRangeMode:      ListView.ApplyRange
         preferredHighlightBegin: height * 0.35
@@ -264,7 +780,7 @@ FocusScope {
         // Track whether any child is in edit/adjust mode
         property bool _childEditing: false
 
-        // ── Key handling for the list ─────────────────────────────────────────
+        // ── Key handling for the list ────────────────────────────────────
         Keys.onPressed: (event) => {
             // If a child is in edit/adjust mode, let it handle keys
             if (settingsList._childEditing) {
@@ -277,43 +793,29 @@ FocusScope {
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
                 _moveFocus(1)
+            } else if (event.key === Qt.Key_Left) {
+                event.accepted = true
+                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "tabs"
             } else if (keys.isCancel(event)) {
                 event.accepted = true
-                settingsScreen.back()
+                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "tabs"
             }
         }
 
-        // Move focus by delta, skipping header rows
+        // Move focus by delta
         function _moveFocus(delta) {
             var newIndex = currentIndex + delta
-            while (newIndex >= 0 && newIndex < model.length) {
-                if (model[newIndex].type !== "header") {
-                    currentIndex = newIndex
-                    // Force active focus on the loaded component
-                    var item = currentItem
-                    if (item && item.children[0] && item.children[0].item) {
-                        item.children[0].item.forceActiveFocus()
-                    }
-                    return
-                }
-                newIndex += delta
-            }
-            // do nothing when navigating past the top or bottom
-        }
-
-        // Initialize to first non-header row.  Only sets currentIndex —
-        // actual focus is routed via onActiveFocusChanged when the user
-        // enters the content area (Down/A from tab bar).
-        Component.onCompleted: {
-            for (var i = 0; i < model.length; i++) {
-                if (model[i].type !== "header") {
-                    currentIndex = i
-                    break
+            if (newIndex >= 0 && newIndex < model.length) {
+                currentIndex = newIndex
+                // Force active focus on the loaded component
+                var item = currentItem
+                if (item && item.children[0] && item.children[0].item) {
+                    item.children[0].item.forceActiveFocus()
                 }
             }
         }
 
-        // ── Delegate ──────────────────────────────────────────────────────────
+        // ── Delegate ─────────────────────────────────────────────────────
         delegate: Item {
             id: delegateWrapper
             width: settingsList.width
@@ -328,7 +830,6 @@ FocusScope {
 
                 // Pick the right component based on type
                 sourceComponent: {
-                    if (rowData.type === "header")  return headerComp
                     if (rowData.type === "text")    return textInputComp
                     if (rowData.type === "toggle")  return toggleComp
                     if (rowData.type === "button")  return buttonComp
@@ -338,310 +839,22 @@ FocusScope {
                     return null
                 }
 
-                // Give focus to the loaded item when it becomes the current row
+                // Pass rowData and set up focus binding on the loaded item
                 onLoaded: {
-                    if (item && rowData.type !== "header") {
+                    if (item) {
+                        item.rowData = Qt.binding(function() {
+                            return delegateWrapper.rowData
+                        })
                         item.focus = Qt.binding(function() {
                             return delegateWrapper.isCurrentRow && settingsList.activeFocus
                         })
                     }
                 }
             }
-
-            // ── Header component ──────────────────────────────────────────────
-            Component {
-                id: headerComp
-                Item {
-                    implicitHeight: root.vpx(48)
-                    width: parent ? parent.width : 0
-
-                    // Separator line
-                    Rectangle {
-                        anchors {
-                            left: parent.left
-                            right: parent.right
-                            verticalCenter: headerLabel.verticalCenter
-                        }
-                        height: root.vpx(1)
-                        color: Theme.colorTextDim
-                        opacity: 0.3
-                    }
-
-                    // Header label on a background patch to "break" the line
-                    Rectangle {
-                        id: labelBg
-                        anchors {
-                            left: parent.left
-                            verticalCenter: headerLabel.verticalCenter
-                        }
-                        width: headerLabel.width + root.vpx(16)
-                        height: headerLabel.height + root.vpx(4)
-                        color: Theme.colorBackground
-                    }
-
-                    Text {
-                        id: headerLabel
-                        anchors {
-                            left: parent.left
-                            bottom: parent.bottom
-                            bottomMargin: root.vpx(6)
-                        }
-                        text: rowData.label
-                        color: Theme.colorPrimary
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                        font.bold: true
-                        font.letterSpacing: root.vpx(2)
-                    }
-                }
-            }
-
-            // ── Text input component ──────────────────────────────────────────
-            Component {
-                id: textInputComp
-                SettingTextInput {
-                    width: parent ? parent.width : 0
-                    label: rowData.label
-                    value: settingsScreen._getValue(rowData.settingKey)
-                    masked: rowData.masked || false
-
-                    onEditingChanged: {
-                        settingsList._childEditing = editing
-                    }
-
-                    onValueEdited: (newValue) => {
-                        settingsScreen._setValue(rowData.settingKey, newValue)
-                    }
-                }
-            }
-
-            // ── Toggle component ──────────────────────────────────────────────
-            Component {
-                id: toggleComp
-                SettingToggle {
-                    width: parent ? parent.width : 0
-                    label: rowData.label
-                    checked: settingsScreen._getValue(rowData.settingKey)
-
-                    onToggled: (newValue) => {
-                        settingsScreen._setValue(rowData.settingKey, newValue)
-                    }
-                }
-            }
-
-            // ── Button component ──────────────────────────────────────────────
-            Component {
-                id: buttonComp
-                SettingButton {
-                    id: actionButton
-                    width: parent ? parent.width : 0
-                    label: rowData.label
-
-                    onClicked: {
-                        var action = rowData.action
-                        if (action === "rescan") {
-                            settings.rescanLibrary()
-                            actionButton.statusText = "Rescanned!"
-                        } else if (action === "testPlex") {
-                            actionButton.statusText = "Testing..."
-                            // Defer the synchronous call to next event loop turn
-                            // so "Testing..." is rendered before blocking.
-                            Qt.callLater(function() {
-                                var ok = settings.testPlexConnection()
-                                actionButton.statusText = ok ? "Connected!" : "Failed"
-                            })
-                        } else if (action === "plexSignIn") {
-                            plexLoginOverlay.visible = true
-                            plexLoginOverlay.forceActiveFocus()
-                            settings.startPlexPinLogin()
-                        } else if (action === "openMoonlight") {
-                            settings.openMoonlight()
-                            actionButton.statusText = "Opening..."
-                        } else if (action === "systemCores") {
-                            settingsScreen.showSystemCores()
-                        } else if (action === "retroarchHotkeys") {
-                            settingsScreen.showRetroarchHotkeys()
-                        } else if (action === "mapController") {
-                            settingsScreen.showControllerMapping()
-                        } else if (action === "resetController") {
-                            if (settings) settings.resetControllerMapping()
-                            settingsScreen._showToast("Controller mapping reset")
-                        } else if (action === "clearRetroRecent") {
-                            if (library) library.clearRecentlyPlayed()
-                            settingsScreen._showToast("Retro game history cleared")
-                        }
-                    }
-                }
-            }
-
-            // ── Slider component ──────────────────────────────────────────────
-            Component {
-                id: sliderComp
-                SettingSlider {
-                    width: parent ? parent.width : 0
-                    label: rowData.label
-                    value: settingsScreen._getValue(rowData.settingKey)
-                    minValue: rowData.min !== undefined ? rowData.min : 0
-                    maxValue: rowData.max !== undefined ? rowData.max : 5000
-                    step: rowData.step !== undefined ? rowData.step : 100
-                    suffix: rowData.suffix !== undefined ? rowData.suffix : ""
-
-                    onAdjustingChanged: {
-                        settingsList._childEditing = adjusting
-                    }
-
-                    onValueEdited: (newValue) => {
-                        settingsScreen._setValue(rowData.settingKey, newValue)
-                    }
-                }
-            }
-
-            // ── Select component ──────────────────────────────────────────────
-            Component {
-                id: selectComp
-                SettingSelect {
-                    width: parent ? parent.width : 0
-                    label: rowData.label
-                    currentValue: settingsScreen._getValue(rowData.settingKey)
-                    optionsProvider: function() {
-                        if (rowData.settingKey === "buttonLayout") {
-                            return [
-                                { id: "standard",  label: "Standard (A=East)" },
-                                { id: "alternate", label: "Alternate (A=South)" },
-                            ]
-                        }
-                        if (rowData.settingKey === "moonlightHost") {
-                            if (!settings) return []
-                            return settings.getHostsList()
-                        }
-                        if (rowData.settingKey === "musicLibrary") {
-                            if (!plex) return []
-                            // Read _librariesVersion so this expression re-evaluates
-                            // when onLibrariesModelChanged fires.
-                            void settingsScreen._librariesVersion
-                            var libs = plex.getMusicLibraries()
-                            if (libs.length === 0) plex.refresh()
-                            return libs
-                        }
-                        if (!plex) return []
-                        if (rowData.settingKey === "plexServer") {
-                            return plex.getServerList().map(function(item) {
-                                return { id: item.id, label: item.name }
-                            })
-                        }
-                        if (rowData.settingKey === "plexUser") {
-                            return plex.getHomeUsers().map(function(item) {
-                                return { id: item.id, label: item.title }
-                            })
-                        }
-                        return []
-                    }
-
-                    onSelected: (id, label) => {
-                        settingsScreen._setValue(rowData.settingKey, id, label)
-                    }
-                }
-            }
-
-            // ── Cycle component (cycles through a fixed set of values) ─────────
-            // Matches the SettingToggle layout: label on left, value pill on right.
-            Component {
-                id: cycleComp
-                FocusScope {
-                    id: cycleRoot
-
-                    implicitHeight: root.vpx(56)
-                    width: parent ? parent.width : 0
-
-                    // ── Background highlight ──────────────────────────────────
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Theme.colorSecondary
-                        opacity: cycleRoot.activeFocus ? 0.8 : 0.0
-                        radius: root.vpx(Theme.focusRingRadius)
-
-                        Behavior on opacity {
-                            NumberAnimation { duration: Theme.animDurationFast }
-                        }
-                    }
-
-                    // ── Row label ─────────────────────────────────────────────
-                    Text {
-                        anchors {
-                            left: parent.left
-                            leftMargin: root.vpx(16)
-                            verticalCenter: parent.verticalCenter
-                        }
-                        text: rowData.label
-                        color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.animDurationFast }
-                        }
-                    }
-
-                    // ── Value pill ────────────────────────────────────────────
-                    Rectangle {
-                        id: valuePill
-                        anchors {
-                            right: parent.right
-                            rightMargin: root.vpx(16)
-                            verticalCenter: parent.verticalCenter
-                        }
-                        width: valueLabel.implicitWidth + root.vpx(24)
-                        height: root.vpx(32)
-                        radius: root.vpx(Theme.focusRingRadius)
-                        color: cycleRoot.activeFocus ? Theme.colorPrimary : "transparent"
-                        border.color: cycleRoot.activeFocus ? Theme.colorPrimary : Theme.colorTextDim
-                        border.width: root.vpx(1)
-
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.animDurationFast }
-                        }
-                        Behavior on border.color {
-                            ColorAnimation { duration: Theme.animDurationFast }
-                        }
-
-                        Text {
-                            id: valueLabel
-                            anchors.centerIn: parent
-                            text: (settings && (settings.plexPlayer || "mpv") === "mpv")
-                                ? "MPV"
-                                : "Browser"
-                            color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeBody)
-
-                            Behavior on color {
-                                ColorAnimation { duration: Theme.animDurationFast }
-                            }
-                        }
-                    }
-
-                    // ── Focus ring ────────────────────────────────────────────
-                    FocusRing {}
-
-                    // ── Key handling ──────────────────────────────────────────
-                    Keys.onPressed: (event) => {
-                        if (keys.isAccept(event)
-                                || event.key === Qt.Key_Left
-                                || event.key === Qt.Key_Right) {
-                            event.accepted = true
-                            if (settings) {
-                                settings.setPlexPlayer(
-                                    (settings.plexPlayer || "mpv") === "mpv" ? "browser" : "mpv"
-                                )
-                            }
-                        }
-                    }
-                }
-            }
         }
     }
 
-    // ── Toast overlay ─────────────────────────────────────────────────────────
+    // ── Toast overlay ────────────────────────────────────────────────────────
     Rectangle {
         id: toastOverlay
         anchors {
@@ -672,7 +885,7 @@ FocusScope {
         }
     }
 
-    // ── System Cores sub-screen (declared last so it renders on top) ──────────
+    // ── System Cores sub-screen (declared last so it renders on top) ─────────
     SystemCoresScreen {
         id: systemCoresScreen
         anchors.fill: parent
@@ -680,11 +893,12 @@ FocusScope {
 
         onBack: {
             systemCoresScreen.visible = false
-            settingsList.forceActiveFocus()
+            settingsScreen._focusZone = "content"
+            settingsScreen._routeFocus()
         }
     }
 
-    // ── RetroArch Hotkeys sub-screen ──────────────────────────────────────────
+    // ── RetroArch Hotkeys sub-screen ─────────────────────────────────────────
     RetroarchHotkeysScreen {
         id: retroarchHotkeysScreen
         anchors.fill: parent
@@ -692,11 +906,12 @@ FocusScope {
 
         onBack: {
             retroarchHotkeysScreen.visible = false
-            settingsList.forceActiveFocus()
+            settingsScreen._focusZone = "content"
+            settingsScreen._routeFocus()
         }
     }
 
-    // ── Plex PIN login: signal connections ────────────────────────────────────
+    // ── Plex PIN login: signal connections ───────────────────────────────────
     Connections {
         target: settings
         function onPlexLoginStatus(status) {
@@ -714,12 +929,12 @@ FocusScope {
                 plexLoginDismissTimer.start()
             } else if (status === "cancelled") {
                 plexLoginOverlay.visible = false
-                settingsList.forceActiveFocus()
+                settingsScreen._routeFocus()
             }
         }
     }
 
-    // ── Plex libraries model: force select re-evaluation on change ───────────
+    // ── Plex libraries model: force select re-evaluation on change ──────────
     Connections {
         target: plex
         function onLibrariesModelChanged() {
@@ -727,19 +942,23 @@ FocusScope {
         }
     }
 
-    // ── Plex PIN login: auto-dismiss after success / timeout / error ──────────
+    // ── Plex PIN login: auto-dismiss after success / timeout / error ─────────
     Timer {
         id: plexLoginDismissTimer
         interval: 2000
         onTriggered: {
             plexLoginOverlay.visible = false
-            settingsList.forceActiveFocus()
+            settingsScreen._routeFocus()
         }
     }
 
-    // ── Plex PIN login overlay (declared last so it renders on top) ───────────
+    // ── Plex PIN login overlay (declared last so it renders on top) ──────────
     PlexLoginOverlay {
         id: plexLoginOverlay
         anchors.fill: parent
+    }
+
+    Component.onCompleted: {
+        _refreshModel()
     }
 }
