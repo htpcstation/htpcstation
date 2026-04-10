@@ -4,6 +4,20 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP38 — Local Videos tab
+
+Task briefs: `misc/coding-team/local-videos/` (001–004)
+
+- New `backend/local_video_library.py`: `LocalVideoLibrary` — flat and TV-show-hierarchy scanning, 5 QAbstractListModel subclasses, MPV playback, metadata/poster stubs for future milestone. `_items`+`_display_items` model separation for future sort/filter.
+- Config: `local_videos.categories` list (name, paths[], type) + `tabs.show_local_videos`. Two pre-seeded defaults (Movies/TV Shows). N custom categories supported.
+- TV Shows: flexible season regex (S01/S2/Series-2/Season 02), Unsorted bucket for rootless episodes.
+- `qml/screens/LocalVideosScreen.qml`: 5-view FocusScope (categories → videos/shows → seasons → episodes), lazy scan on category select.
+- Wayland window restore + gamepad suppression wired in `main.py`.
+- Settings UI: Videos tab (Movies/TV Shows path fields) + custom category manager sub-screen + visibility toggle in UI → Visible Tabs.
+- 75 new tests (28 config, 47 library). 2,254 passing (was 2,181).
+
+---
+
 ## CP37 — Recently Played homescreen widget
 
 Task briefs: `misc/coding-team/recently-played-widget/` (001–004)
