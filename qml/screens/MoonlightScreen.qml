@@ -65,6 +65,9 @@ FocusScope {
     // JS array of source entries built in Component.onCompleted.
     property var _sourceEntries: []
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: {
@@ -89,6 +92,23 @@ FocusScope {
                 }
             }
             _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.app_name) {
+                    var targetName = navTarget.app_name
+                    var count = moonlight && moonlight.appsModel ? moonlight.appsModel.rowCount() : 0
+                    for (var i = 0; i < count; i++) {
+                        var app = moonlight.getApp(i)
+                        if (app && app.name === targetName) {
+                            isRecentSource = false
+                            isFavoritesSource = false
+                            selectedGameIndex = i
+                            currentView = "detail"
+                            break
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -563,19 +583,5 @@ FocusScope {
             moonlight.refresh()
         }
 
-        if (navTarget && navTarget.app_name) {
-            var targetName = navTarget.app_name
-            var count = moonlight && moonlight.appsModel ? moonlight.appsModel.rowCount() : 0
-            for (var i = 0; i < count; i++) {
-                var app = moonlight.getApp(i)
-                if (app && app.name === targetName) {
-                    isRecentSource = false
-                    isFavoritesSource = false
-                    selectedGameIndex = i
-                    currentView = "detail"
-                    break
-                }
-            }
-        }
     }
 }

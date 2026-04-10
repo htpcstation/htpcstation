@@ -99,6 +99,9 @@ FocusScope {
     property bool _playlistsLoading: false
     property bool _playlistTracksLoading: false
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     // Toast — shown when plex.plexError fires or section load fails
     property string _toastText: ""
 
@@ -337,6 +340,15 @@ FocusScope {
                 _trySelectMusicLibrary()
             }
             _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.rating_key) {
+                    _selectedAlbumKey = navTarget.rating_key
+                    _albumReturnView = "menu"
+                    currentView = "album"
+                    _routeFocus()
+                }
+            }
         }
     }
 
@@ -380,11 +392,6 @@ FocusScope {
         if (settings) {
             var savedMode = settings.listenViewMode
             if (savedMode) _viewMode = savedMode
-        }
-        if (navTarget && navTarget.rating_key) {
-            _selectedAlbumKey = navTarget.rating_key
-            _albumReturnView = "menu"
-            currentView = "album"
         }
     }
 

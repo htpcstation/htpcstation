@@ -80,6 +80,9 @@ FocusScope {
     // are accessible under the Listen tab.
     property var _libraryEntries: []
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     function _getVideoLibraries() {
         var all = plex.getLibraryList()
         var filtered = []
@@ -415,6 +418,33 @@ FocusScope {
                 return
             }
             _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.rating_key) {
+                    if (navTarget.media_type === "movie") {
+                        var targetRk = navTarget.rating_key
+                        var count = plex ? plex.moviesCount() : 0
+                        for (var i = 0; i < count; i++) {
+                            var rk = plex.getMovieRatingKeyAt(i)
+                            if (rk === targetRk) {
+                                selectedRatingKey = rk
+                                selectedMovieIndex = i
+                                selectedLibraryType = "movie"
+                                plex.fetchMovie(rk)
+                                currentView = "detail"
+                                _routeFocus()
+                                break
+                            }
+                        }
+                    } else if (navTarget.media_type === "show") {
+                        selectedLibraryType = "show"
+                        selectedShowRatingKey = navTarget.rating_key
+                        _showDetailOrigin = ""
+                        currentView = "detail"
+                        _routeFocus()
+                    }
+                }
+            }
         }
     }
 
@@ -1038,28 +1068,6 @@ FocusScope {
             _viewMode = settings.watchViewMode || "grid"
         }
         if (plex) _libraryEntries = _getVideoLibraries()
-        if (navTarget && navTarget.rating_key) {
-            if (navTarget.media_type === "movie") {
-                var targetRk = navTarget.rating_key
-                var count = plex ? plex.moviesCount() : 0
-                for (var i = 0; i < count; i++) {
-                    var rk = plex.getMovieRatingKeyAt(i)
-                    if (rk === targetRk) {
-                        selectedRatingKey = rk
-                        selectedMovieIndex = i
-                        selectedLibraryType = "movie"
-                        plex.fetchMovie(rk)
-                        currentView = "detail"
-                        break
-                    }
-                }
-            } else if (navTarget.media_type === "show") {
-                selectedLibraryType = "show"
-                selectedShowRatingKey = navTarget.rating_key
-                _showDetailOrigin = ""
-                currentView = "detail"
-            }
-        }
     }
 
     // ── Resume dialog overlay (declared last for highest z-order) ─────────────

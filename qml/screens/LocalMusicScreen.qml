@@ -65,6 +65,9 @@ FocusScope {
     // Which view to return to when pressing B from album detail.
     property string _albumReturnView: "detail"
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     // Filetree browser state.
     property var _folderData: ({})       // {folders: [], tracks: []}
     property string _currentFolder: ""   // current filetree path
@@ -165,6 +168,15 @@ FocusScope {
                 }
             }
             _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.folder_path) {
+                    _selectedAlbumFolder = navTarget.folder_path
+                    _albumReturnView = "menu"
+                    currentView = "album"
+                    _routeFocus()
+                }
+            }
         }
     }
 
@@ -189,11 +201,6 @@ FocusScope {
         if (settings) {
             var savedMode = settings.localMusicViewMode
             if (savedMode) _viewMode = savedMode
-        }
-        if (navTarget && navTarget.folder_path) {
-            _selectedAlbumFolder = navTarget.folder_path
-            _albumReturnView = "menu"
-            currentView = "album"
         }
     }
 

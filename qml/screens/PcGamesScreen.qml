@@ -62,6 +62,9 @@ FocusScope {
     // every time the user navigates back to this tab.
     property bool _refreshed: false
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: {
@@ -79,6 +82,23 @@ FocusScope {
                 if (steam) steam.refresh()
             }
             _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.app_id) {
+                    var targetId = navTarget.app_id
+                    var count = steam && steam.gamesModel ? steam.gamesModel.rowCount() : 0
+                    for (var i = 0; i < count; i++) {
+                        var game = steam.getGame(i)
+                        if (game && String(game.appId) === String(targetId)) {
+                            isRecentSource = false
+                            isFavoritesSource = false
+                            selectedGameIndex = i
+                            currentView = "detail"
+                            break
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -548,20 +568,6 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.pcGamesViewMode || "grid"
-        }
-        if (navTarget && navTarget.app_id) {
-            var targetId = navTarget.app_id
-            var count = steam && steam.gamesModel ? steam.gamesModel.rowCount() : 0
-            for (var i = 0; i < count; i++) {
-                var game = steam.getGame(i)
-                if (game && String(game.appId) === String(targetId)) {
-                    isRecentSource = false
-                    isFavoritesSource = false
-                    selectedGameIndex = i
-                    currentView = "detail"
-                    break
-                }
-            }
         }
     }
 }

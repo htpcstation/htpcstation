@@ -44,10 +44,32 @@ FocusScope {
     // Current view mode: "grid" or "list"
     property string _viewMode: "grid"
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     // Give focus to the appropriate child whenever the view changes or this
     // screen gains focus.
     onCurrentViewChanged: _routeFocus()
-    onActiveFocusChanged: if (activeFocus) _routeFocus()
+    onActiveFocusChanged: {
+        if (activeFocus) {
+            _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.rom_path) {
+                    var romPath = navTarget.rom_path
+                    var count = library.gamesModel ? library.gamesModel.rowCount() : 0
+                    for (var i = 0; i < count; i++) {
+                        var g = library.getGame(i)
+                        if (g && g.romPath === romPath) {
+                            selectedGameIndex = i
+                            currentView = "detail"
+                            break
+                        }
+                    }
+                }
+            }
+        }
+    }
     on_ViewModeChanged: { if (currentView === "games") _routeFocus() }
 
     function _routeFocus() {
@@ -322,18 +344,6 @@ FocusScope {
     Component.onCompleted: {
         if (settings) {
             _viewMode = settings.retroGamesViewMode || "grid"
-        }
-        if (navTarget && navTarget.rom_path) {
-            var romPath = navTarget.rom_path
-            var count = library.gamesModel ? library.gamesModel.rowCount() : 0
-            for (var i = 0; i < count; i++) {
-                var g = library.getGame(i)
-                if (g && g.romPath === romPath) {
-                    selectedGameIndex = i
-                    currentView = "detail"
-                    break
-                }
-            }
         }
     }
 }
