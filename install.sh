@@ -573,6 +573,15 @@ check_dependencies() {
         report_dep "mutagen" "missing" "$(install_cmd "python3-mutagen")"
     fi
 
+    # libxcb-cursor0 (required for Qt xcb platform plugin on X11)
+    if [ "$SESSION_TYPE" = "x11" ] && [ "$DISTRO_FAMILY" = "debian" ]; then
+        if check_pkg_installed "libxcb-cursor0" 2>/dev/null; then
+            report_dep "libxcb-cursor0" "ok"
+        else
+            report_dep "libxcb-cursor0 (Qt X11 plugin)" "missing" "$(install_cmd "libxcb-cursor0")"
+        fi
+    fi
+
     # lspci
     if check_binary lspci; then
         report_dep "lspci" "ok"
