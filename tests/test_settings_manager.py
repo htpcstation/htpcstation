@@ -151,6 +151,64 @@ class TestStartPlexPinLogin:
 # ---------------------------------------------------------------------------
 
 
+class TestPlexServerNameUserTitle:
+    def test_setPlexServerId_stores_name(self, tmp_path: Path) -> None:
+        """setPlexServerId(id, name) stores both and emits both signals."""
+        manager, config = _make_manager(tmp_path)
+
+        id_changed: list[bool] = []
+        name_changed: list[bool] = []
+        manager.plexServerIdChanged.connect(lambda: id_changed.append(True))
+        manager.plexServerNameChanged.connect(lambda: name_changed.append(True))
+
+        manager.setPlexServerId("srv1", "My Server")
+
+        assert config.plex_server_id == "srv1"
+        assert config.plex_server_name == "My Server"
+        assert len(id_changed) == 1
+        assert len(name_changed) == 1
+
+    def test_setPlexUserId_stores_title(self, tmp_path: Path) -> None:
+        """setPlexUserId(id, title) stores both and emits both signals."""
+        manager, config = _make_manager(tmp_path)
+
+        id_changed: list[bool] = []
+        title_changed: list[bool] = []
+        manager.plexUserIdChanged.connect(lambda: id_changed.append(True))
+        manager.plexUserTitleChanged.connect(lambda: title_changed.append(True))
+
+        manager.setPlexUserId(42, "Alice")
+
+        assert config.plex_user_id == 42
+        assert config.plex_user_title == "Alice"
+        assert len(id_changed) == 1
+        assert len(title_changed) == 1
+
+    def test_plexServerName_property(self, tmp_path: Path) -> None:
+        """plexServerName property reflects config value."""
+        manager, config = _make_manager(tmp_path)
+        manager.setPlexServerId("srv1", "Test Server")
+        assert manager.plexServerName == "Test Server"
+
+    def test_plexUserTitle_property(self, tmp_path: Path) -> None:
+        """plexUserTitle property reflects config value."""
+        manager, config = _make_manager(tmp_path)
+        manager.setPlexUserId(10, "Bob")
+        assert manager.plexUserTitle == "Bob"
+
+    def test_setPlexServerId_without_name(self, tmp_path: Path) -> None:
+        """setPlexServerId with only id defaults name to empty string."""
+        manager, config = _make_manager(tmp_path)
+        manager.setPlexServerId("srv1")
+        assert config.plex_server_name == ""
+
+    def test_setPlexUserId_without_title(self, tmp_path: Path) -> None:
+        """setPlexUserId with only id defaults title to empty string."""
+        manager, config = _make_manager(tmp_path)
+        manager.setPlexUserId(10)
+        assert config.plex_user_title == ""
+
+
 class TestCancelPlexPinLogin:
     def test_cancel_no_op_when_not_running(self, tmp_path: Path) -> None:
         """cancelPlexPinLogin emits plexLoginStatus("cancelled") even with no active login."""

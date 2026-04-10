@@ -16,7 +16,7 @@ FocusScope {
     // Function that returns fresh options on demand (called on each A press)
     property var optionsProvider: null
 
-    signal selected(var id)
+    signal selected(var id, string label)
 
     implicitHeight: root.vpx(56)
 
@@ -90,7 +90,7 @@ FocusScope {
             }
             // Cycle to next option (wrap around)
             var nextIdx = (currentIdx + 1) % opts.length
-            selectRoot.selected(opts[nextIdx].id)
+            selectRoot.selected(opts[nextIdx].id, opts[nextIdx].label)
         }
     }
 }

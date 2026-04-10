@@ -57,7 +57,9 @@ class SettingsManager(QObject):
     plexServerUrlChanged = Signal()  # kept for backward compat with existing QML
     plexTokenChanged = Signal()
     plexServerIdChanged = Signal()
+    plexServerNameChanged = Signal()
     plexUserIdChanged = Signal()
+    plexUserTitleChanged = Signal()
     browserCommandChanged = Signal()
     moonlightCommandChanged = Signal()
     moonlightHostUuidChanged = Signal()
@@ -133,8 +135,14 @@ class SettingsManager(QObject):
     def _get_plex_server_id(self) -> str:
         return self._config.plex_server_id or ""
 
+    def _get_plex_server_name(self) -> str:
+        return self._config.plex_server_name
+
     def _get_plex_user_id(self) -> int:
         return self._config.plex_user_id or 0
+
+    def _get_plex_user_title(self) -> str:
+        return self._config.plex_user_title
 
     def _get_browser_command(self) -> str:
         return self._config.browser_command
@@ -260,10 +268,20 @@ class SettingsManager(QObject):
         fget=_get_plex_server_id,
         notify=plexServerIdChanged,
     )
+    plexServerName = Property(
+        str,
+        fget=_get_plex_server_name,
+        notify=plexServerNameChanged,
+    )
     plexUserId = Property(
         int,
         fget=_get_plex_user_id,
         notify=plexUserIdChanged,
+    )
+    plexUserTitle = Property(
+        str,
+        fget=_get_plex_user_title,
+        notify=plexUserTitleChanged,
     )
     browserCommand = Property(
         str,
@@ -446,17 +464,19 @@ class SettingsManager(QObject):
         self._config.set_plex_token(token)
         self.plexTokenChanged.emit()
 
-    @Slot(str)
-    def setPlexServerId(self, server_id: str) -> None:
-        """Set the Plex server machine identifier."""
-        self._config.set_plex_server_id(server_id)
+    @Slot(str, str)
+    def setPlexServerId(self, server_id: str, server_name: str = "") -> None:
+        """Set the Plex server machine identifier and cached display name."""
+        self._config.set_plex_server_id(server_id, server_name)
         self.plexServerIdChanged.emit()
+        self.plexServerNameChanged.emit()
 
-    @Slot(int)
-    def setPlexUserId(self, user_id: int) -> None:
-        """Set the Plex home user ID."""
-        self._config.set_plex_user_id(user_id)
+    @Slot(int, str)
+    def setPlexUserId(self, user_id: int, user_title: str = "") -> None:
+        """Set the Plex home user ID and cached display name."""
+        self._config.set_plex_user_id(user_id, user_title)
         self.plexUserIdChanged.emit()
+        self.plexUserTitleChanged.emit()
 
     @Slot(str)
     def setBrowserCommand(self, cmd: str) -> None:

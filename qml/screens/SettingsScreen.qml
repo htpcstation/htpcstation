@@ -109,20 +109,10 @@ FocusScope {
         if (key === "retroarchCommand")   return settings.retroarchCommand
         if (key === "coresDirectory")     return settings.coresDirectory
         if (key === "plexServer") {
-            if (!plex) return "Not selected"
-            var servers = plex.getServerList()
-            for (var i = 0; i < servers.length; i++) {
-                if (servers[i].id === settings.plexServerId) return servers[i].name
-            }
-            return "Not selected"
+            return settings.plexServerName || "Not selected"
         }
         if (key === "plexUser") {
-            if (!plex) return "Not selected"
-            var users = plex.getHomeUsers()
-            for (var j = 0; j < users.length; j++) {
-                if (users[j].id == settings.plexUserId) return users[j].title
-            }
-            return "Not selected"
+            return settings.plexUserTitle || "Not selected"
         }
         if (key === "musicLibrary") {
             if (!plex) return "Not selected"
@@ -158,18 +148,18 @@ FocusScope {
     }
 
     // ── Helper: call the appropriate setter ───────────────────────────────────
-    function _setValue(key, value) {
+    function _setValue(key, value, label) {
         if (!settings) return
         if (key === "romDirectory")       settings.setRomDirectory(value)
         else if (key === "retroarchCommand")   settings.setRetroarchCommand(value)
         else if (key === "coresDirectory")     settings.setCoresDirectory(value)
         else if (key === "plexServer") {
             if (plex) plex.selectServer(value)
-            settings.setPlexServerId(value)
+            settings.setPlexServerId(value, label || "")
         }
         else if (key === "plexUser") {
             if (plex) plex.selectUser(parseInt(value))
-            settings.setPlexUserId(parseInt(value))
+            settings.setPlexUserId(parseInt(value), label || "")
         }
         else if (key === "browserCommand")     settings.setBrowserCommand(value)
         else if (key === "moonlightCommand")   settings.setMoonlightCommand(value)
@@ -547,8 +537,8 @@ FocusScope {
                         return []
                     }
 
-                    onSelected: (id) => {
-                        settingsScreen._setValue(rowData.settingKey, id)
+                    onSelected: (id, label) => {
+                        settingsScreen._setValue(rowData.settingKey, id, label)
                     }
                 }
             }

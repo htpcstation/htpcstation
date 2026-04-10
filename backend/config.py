@@ -376,8 +376,10 @@ class Config:
         # Plex Media Server configuration
         self._plex_token: Optional[str] = None
         self._plex_server_id: Optional[str] = None
+        self._plex_server_name: str = ""
         self._plex_server_url: str = ""
         self._plex_user_id: Optional[int] = None
+        self._plex_user_title: str = ""
         self._plex_client_id: str = ""
         # Browser configuration
         self._browser_command: str = _DEFAULT_BROWSER_COMMAND
@@ -465,6 +467,11 @@ class Config:
         return self._plex_server_id
 
     @property
+    def plex_server_name(self) -> str:
+        """Cached display name of the selected Plex server."""
+        return self._plex_server_name
+
+    @property
     def plex_server_url(self) -> str:
         """Last-known Plex server URL, cached for offline startup."""
         return self._plex_server_url
@@ -473,6 +480,11 @@ class Config:
     def plex_user_id(self) -> Optional[int]:
         """Plex home user ID. None if not selected (uses admin account)."""
         return self._plex_user_id
+
+    @property
+    def plex_user_title(self) -> str:
+        """Cached display name of the selected Plex user."""
+        return self._plex_user_title
 
     @property
     def plex_client_id(self) -> str:
@@ -643,9 +655,10 @@ class Config:
         self._plex_token = token if token else None
         self.save()
 
-    def set_plex_server_id(self, server_id: str) -> None:
+    def set_plex_server_id(self, server_id: str, server_name: str = "") -> None:
         """Set the Plex server machine identifier and persist the config."""
         self._plex_server_id = server_id if server_id else None
+        self._plex_server_name = server_name
         self.save()
 
     def set_plex_server_url(self, url: str) -> None:
@@ -653,9 +666,10 @@ class Config:
         self._plex_server_url = url.strip()
         self.save()
 
-    def set_plex_user_id(self, user_id: int) -> None:
+    def set_plex_user_id(self, user_id: int, user_title: str = "") -> None:
         """Set the Plex home user ID and persist the config."""
         self._plex_user_id = user_id if user_id else None
+        self._plex_user_title = user_title
         self.save()
 
     def set_browser_command(self, command: str) -> None:
@@ -935,8 +949,10 @@ class Config:
             "plex": {
                 "token": self._plex_token or "",
                 "server_id": self._plex_server_id or "",
+                "server_name": self._plex_server_name,
                 "server_url": self._plex_server_url,
                 "user_id": self._plex_user_id or 0,
+                "user_title": self._plex_user_title,
                 "client_id": self._plex_client_id,
                 "music_library_key": self._music_library_key,
                 "player": self._plex_player,
@@ -1094,9 +1110,11 @@ class Config:
             server_id = plex.get("server_id", "")
             if server_id:
                 self._plex_server_id = server_id
+            self._plex_server_name = plex.get("server_name", "")
             user_id = plex.get("user_id", 0)
             if user_id:
                 self._plex_user_id = int(user_id)
+            self._plex_user_title = plex.get("user_title", "")
             self._plex_client_id = plex.get("client_id", "")
             self._music_library_key = plex.get("music_library_key", "")
             player = plex.get("player", "mpv")
