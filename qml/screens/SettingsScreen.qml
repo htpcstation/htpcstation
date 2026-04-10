@@ -126,6 +126,14 @@ FocusScope {
                     ]
                 },
                 {
+                    name: "TMDb",
+                    settings: [
+                        { type: "text",   label: "API Key",         settingKey: "tmdbApiKey", masked: true },
+                        { type: "button", label: "Scrape Movies",   action: "scrapeMovies" },
+                        { type: "button", label: "Scrape TV Shows", action: "scrapeTvShows" },
+                    ]
+                },
+                {
                     name: "Custom Categories",
                     settings: [
                         { type: "button", label: "Manage Custom Categories...", action: "videoCategories" },
@@ -239,6 +247,7 @@ FocusScope {
             var tvCats = settings ? settings.localVideoCategories : []
             return tvCats.length > 1 && tvCats[1].paths && tvCats[1].paths.length > 0 ? tvCats[1].paths[0] : ""
         }
+        if (key === "tmdbApiKey") return settings ? settings.tmdbApiKey : ""
         if (key === "localMusicDirectory") return settings.localMusicDirectory
         if (key === "autoSkipIntro")      return settings.autoSkipIntro
         if (key === "transcodeMode") {
@@ -317,6 +326,7 @@ FocusScope {
             var tvName = tvCatsSet.length > 1 ? tvCatsSet[1].name : "TV Shows"
             settings.updateLocalVideoCategory(1, tvName, [value], "tv_shows")
         }
+        else if (key === "tmdbApiKey") settings.setTmdbApiKey(value)
         else if (key === "localMusicDirectory") settings.setLocalMusicDirectory(value)
         else if (key === "autoSkipIntro") {
             settings.setAutoSkipIntro(value)
@@ -616,6 +626,16 @@ FocusScope {
                     settingsScreen._showToast("Retro game history cleared")
                 } else if (action === "videoCategories") {
                     videoCategoriesScreen.open()
+                } else if (action === "scrapeMovies") {
+                    if (localVideos) {
+                        localVideos.scrapeMovies()
+                        if (settingsScreen._showToast) settingsScreen._showToast("Scraping movies...")
+                    }
+                } else if (action === "scrapeTvShows") {
+                    if (localVideos) {
+                        localVideos.scrapeTvShows()
+                        if (settingsScreen._showToast) settingsScreen._showToast("Scraping TV shows...")
+                    }
                 }
             }
         }
@@ -1666,6 +1686,29 @@ FocusScope {
             } else if (status === "cancelled") {
                 plexLoginOverlay.visible = false
                 settingsScreen._routeFocus()
+            }
+        }
+    }
+
+    // ── localVideos scrape signals ───────────────────────────────────────────
+    Connections {
+        target: localVideos
+        function onScrapeFinished(displayName) {
+            if (settingsScreen._showToast) settingsScreen._showToast(displayName + " scrape complete")
+        }
+        function onScrapeError(message) {
+            if (settingsScreen._showToast) settingsScreen._showToast(message)
+        }
+        function onScrapeProgressChanged(done, total) {
+            var pct = total > 0 ? Math.round(done / total * 100) : 0
+            for (var i = 0; i < settingsList.count; i++) {
+                var item = settingsList.itemAtIndex(i)
+                if (!item) continue
+                var comp = item.children[0] && item.children[0].item
+                if (comp && (comp.rowData) &&
+                    (comp.rowData.action === "scrapeMovies" || comp.rowData.action === "scrapeTvShows")) {
+                    comp.statusText = done + " / " + total + " (" + pct + "%)"
+                }
             }
         }
     }

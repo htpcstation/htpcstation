@@ -4,6 +4,20 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP39 — Local Videos TMDb scraping
+
+Task briefs: `misc/coding-team/local-videos-scraping/` (001–006)
+
+- `LocalVideoCache`: plain Python class; `library.json` I/O; poster resolution (custom > scraped); metadata merge with `custom` override dict; tombstone pattern (`tmdb_id: null`). Cache at `~/.config/htpcstation/local_videos_cache/` with per-category `artwork_custom/`/`artwork_scraped/` dirs.
+- `TmdbScraper`: TMDb v3 `/search/movie` and `/search/tv` + `image.tmdb.org/t/p/w500` poster downloads. Year-aware title parsing (`Title (Year).mkv`). 0.26s/item rate limiting. Tombstones confirmed misses.
+- `LocalVideoLibrary` enrichment: `selectCategory()` calls `_enrich_from_cache()` after scan — populates `poster_path`, `title`, `description`, `year`, `genre` from cache.
+- `scrapeMovies()` / `scrapeTvShows()` slots: run scraper on daemon thread; progress/finish/error signals dispatched to main thread via `QMetaObject.invokeMethod` trampolines.
+- Config: `tmdb_api_key` stored under `"tmdb": {"api_key": "..."}` in `config.json`.
+- Settings UI: Videos → TMDb subcategory with masked API key field and Scrape Movies/TV Shows buttons with toast feedback.
+- 110 new tests (18 config/paths + 44 cache + 32 scraper + 16 library enrichment). 2,365 passing (was 2,254).
+
+---
+
 ## CP38 — Local Videos tab
 
 Task briefs: `misc/coding-team/local-videos/` (001–004)

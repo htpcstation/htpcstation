@@ -89,6 +89,7 @@ class SettingsManager(QObject):
     themeNameChanged = Signal()
     accentColorChanged = Signal()
     focusRingColorChanged = Signal()
+    tmdbApiKeyChanged = Signal()
 
     def __init__(
         self,
@@ -249,6 +250,9 @@ class SettingsManager(QObject):
 
     def _get_focus_ring_color(self) -> str:
         return self._config.focus_ring_color
+
+    def _get_tmdb_api_key(self) -> str:
+        return self._config.tmdb_api_key
 
     def _get_theme_dir(self) -> str:
         return "file://" + str(self._app_dir / "themes" / self._config.theme_name) + "/"
@@ -477,6 +481,11 @@ class SettingsManager(QObject):
     )
     accentColor = Property(str, fget=_get_accent_color, notify=accentColorChanged)
     focusRingColor = Property(str, fget=_get_focus_ring_color, notify=focusRingColorChanged)
+    tmdbApiKey = Property(
+        str,
+        fget=_get_tmdb_api_key,
+        notify=tmdbApiKeyChanged,
+    )
 
     # ------------------------------------------------------------------
     # Slots — setters
@@ -745,6 +754,12 @@ class SettingsManager(QObject):
         """Set the focus ring color."""
         self._config.set_focus_ring_color(color)
         self.focusRingColorChanged.emit()
+
+    @Slot(str)
+    def setTmdbApiKey(self, key: str) -> None:
+        """Set the TMDB API key."""
+        self._config.set_tmdb_api_key(key)
+        self.tmdbApiKeyChanged.emit()
 
     # -- Button layout ----------------------------------------------------
 

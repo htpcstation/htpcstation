@@ -34,6 +34,16 @@ htpcstation/
     keys.py                            # Semantic key abstraction, input source tracking, button layout
     launcher.py                        # QProcess emulator launcher, async signal-based start
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
+    local_video_library.py             # LocalVideoLibrary QObject: flat and TV-shows scanning,
+                                       # 5 QAbstractListModel subclasses (CategoryListModel,
+                                       # VideoListModel, ShowListModel, SeasonListModel,
+                                       # EpisodeListModel), MPV playback, _is_launching guard.
+                                       # LocalVideoCache: library.json I/O, poster resolution
+                                       # (custom > scraped), metadata merge, tombstone pattern.
+                                       # TmdbScraper: TMDb v3 search + poster download, rate-limited
+                                       # (0.26s/item). scrapeMovies/scrapeTvShows run on daemon
+                                       # threading.Thread; progress routed via QMetaObject.invokeMethod
+                                       # trampolines. Cache dirs: ~/.config/htpcstation/local_videos_cache/
     live_tv_library.py                 # LiveTvLibrary QObject: HDHomeRun guide API fetch, guide cache,
                                        # warm/cold start, background refresh, LiveTvChannelModel
     live_tv_models.py                  # LiveTvChannel dataclass
@@ -148,6 +158,8 @@ htpcstation/
       MpvSubtitleOverlay.qml           # Always-on-top Window for subtitle track selection during MPV
       MpvSkipIntroOverlay.qml          # Always-on-top Window for skip intro button (bottom-right)
       ListenScreen.qml                 # Plex Music: menu, artists, albums, tracks, now playing
+      LocalVideosScreen.qml            # 5-view FocusScope: categories → videos/shows → seasons →
+                                       # episodes. Lazy scan on selectCategory(). B = back one level.
       ControllerMappingDialog.qml       # Full-screen wizard: 14 inputs, raw mode, co-firing collection,
                                         # hold-to-skip (skippable actions), Start+Select cancel,
                                         # auto-save on completion
@@ -192,6 +204,13 @@ htpcstation/
     test_keys.py                       # 17 tests (key code changes: 1/2 replace F1/F2)
     test_gamepad_disconnect.py         # 10 tests (disconnect crash fix, hint flash fix)
     test_theme_config.py               # ~226 tests (theme palette, accent/focus ring colors, config persistence)
+    test_local_video_config.py         # 28 tests (Config/SettingsManager: local_video_categories, tmdb_api_key)
+    test_local_video_cache.py          # 44 tests (LocalVideoCache: load/save, resolve_poster, resolve_metadata,
+                                       # tombstone, set_entry merge, _slugify)
+    test_local_video_library.py        # 63 tests (scan, models, enrichment, scrape slots)
+    test_tmdb_config_cache_paths.py    # 18 tests (tmdb_api_key config round-trip, cache path constants)
+    test_tmdb_scraper.py               # 32 tests (TmdbScraper: search_movie, search_tv_show, download_poster,
+                                       # scrape_movies, scrape_tv_shows — all HTTP mocked)
 ```
 
 **Test isolation:** `tests/conftest.py` has an autouse fixture `isolate_plex_cache` that
@@ -259,6 +278,95 @@ Button hint conventions:
 - **`PlexClient`** — talks to local media server. Always uses admin token. Sends full identity headers (`X-Plex-Client-Identifier`, `X-Plex-Product`, etc.) on every request. `get_stream_url(ratingKey)` returns `(url, view_offset_ms)`. `report_timeline()` is fire-and-forget (timeout=5s, never raises). `persist_stream_selection()` PUTs audio/subtitle choice with `allParts=1`. `get_transient_token()` returns short-lived delegation token for stream URLs.
 - **`PlexLibrary`** — orchestrates both. Stores `_active_token` (user-specific) for browser deep links separately from admin token. Caches user token/title/content-rating-filter. On-deck skipped for managed users (server rejects their tokens). Owns `PlexTimelineReporter` — started/stopped via `processStarted`/`processFinished`. Stores `_current_play_part_id`, `_audio_id_map`, `_sub_id_map` for track persistence. `_mpvLaunchReady` signal carries 6 args: `(url, title, start_ms, duration_ms, part_id, intro_end_ms)`. Public signals: `markersReady(intro_end_ms: int)`, `mpvPositionChanged(int ms)`. Slot: `seekMpv(ms: int)`.
 - **Poster cache:** `_poster_executor` (10 workers) separate from `_executor` (2 workers). Cached posters pre-resolved on worker thread before emitting to QML — no placeholder flash on warm load.
+
+### Local Video Library
+
+**Files:** `backend/local_video_library.py`, `qml/screens/LocalVideosScreen.qml`
+
+#### Cache Layout
+
+```
+~/.config/htpcstation/local_videos_cache/
+  movies/
+    artwork_custom/     # user-placed overrides — any image ext (.jpg/.jpeg/.png/.webp)
+    artwork_scraped/    # scraper-written, always .jpg
+    library.json        # keyed by filename stem, e.g. "The Matrix (1999)"
+  tv_shows/
+    artwork_custom/
+    artwork_scraped/
+    library.json        # keyed by show folder name, e.g. "Breaking Bad"
+  {slug}/               # custom categories: slug = _slugify(name)
+    artwork_custom/
+    library.json        # user-authored only; no artwork_scraped dir
+```
+
+`_slugify(name)` → `re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')`.  
+Custom categories have no `has_scraped_art` dir (TMDb scraping not supported for custom categories).
+
+#### `library.json` Schema
+
+```json
+{
+  "The Matrix (1999)": {
+    "title":          "The Matrix",
+    "year":           1999,
+    "description":    "A computer hacker learns from mysterious rebels...",
+    "genres":         [],
+    "rating":         "",
+    "tmdb_id":        603,
+    "poster_scraped": "/home/user/.config/htpcstation/local_videos_cache/movies/artwork_scraped/The Matrix (1999).jpg",
+    "custom": {
+      "title": "The Matrix (Director's Cut)"
+    }
+  },
+  "Unknown Movie": {
+    "tmdb_id": null
+  }
+}
+```
+
+- `tmdb_id: null` = tombstone — confirmed TMDb miss, skip on next scrape.
+- `custom` dict: user edits — overrides any same-named base field at display time.
+- `poster_scraped` path is absolute; `resolve_poster()` checks disk existence before returning it.
+
+#### Poster Resolution Priority
+
+`LocalVideoCache.resolve_poster(key)`:
+1. `artwork_custom/{key}.{jpg,jpeg,png,webp}` — first matching extension wins.
+2. `poster_scraped` path in `library.json` — only if the file still exists on disk.
+3. `""` — no poster available.
+
+#### Custom Override (User Edits)
+
+To override a field for a movie/show, edit `library.json` and add values under the `"custom"` key:
+
+```json
+"The Matrix (1999)": {
+  ...
+  "custom": {
+    "title": "The Matrix (Extended)",
+    "description": "My custom description."
+  }
+}
+```
+
+`custom` fields are preserved by `set_entry()` — re-running the scraper will never overwrite them.
+
+To use a custom poster image: drop any `.jpg`/`.jpeg`/`.png`/`.webp` file named after the movie stem (e.g. `The Matrix (1999).jpg`) into `artwork_custom/`. It takes priority over the scraped poster automatically.
+
+#### TMDb API Key Setup
+
+1. Register at [themoviedb.org](https://www.themoviedb.org/) and generate a v3 API key.
+2. Open **Settings → Videos → TMDb → API Key** and enter the key.
+3. The key is stored in `~/.config/htpcstation/config.json` under `"tmdb": {"api_key": "..."}`.
+4. Use **Scrape Movies** / **Scrape TV Shows** buttons in Settings → Videos → TMDb to run a scrape.
+
+#### Threading Notes
+
+- `LocalVideoCache` is **main-thread only** — never call it from a worker thread.
+- `TmdbScraper` is pure Python (no Qt) — runs on a daemon `threading.Thread` started by `LocalVideoLibrary._start_scrape()`.
+- Progress and completion signals are dispatched back to the main thread via `QMetaObject.invokeMethod(..., Qt.ConnectionType.QueuedConnection, ...)` trampoline slots.
+- The scrape guard (`_scrape_thread.is_alive()`) automatically resets when the thread finishes.
 
 ### MPV Architecture
 - `LibMpvPlayer` (`backend/mpv_launcher.py`): in-process MPV via `python-mpv` (libmpv ctypes). Created with `wid=int(window.winId())` so MPV renders into the Qt window — no subprocess, no window hide/show. Auto-detects Wayland vs Xorg via `XDG_SESSION_TYPE`. Wayland → `hwdec=vaapi-copy, gpu_context=wayland`. Xorg → `hwdec=vaapi, gpu_context=x11`. Gamepad bindings registered via `player.keybind()` at startup — no `input.conf` file written to disk. Verified button names on 8BitDo Micro D-input: `GAMEPAD_ACTION_DOWN` (A/east = pause/play), `GAMEPAD_DPAD_*` (seek/volume), `GAMEPAD_LEFT/RIGHT_SHOULDER` (audio/tracks), `GAMEPAD_ACTION_LEFT` (Y = subtitle picker), `GAMEPAD_ACTION_UP` (X = show-progress), `GAMEPAD_START` (quit). L2/R2 use `on_key_press` callbacks with 0.5s debounce — one seek per tap.

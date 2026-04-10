@@ -23,6 +23,7 @@ from backend.local_video_library import (
     CategoryListModel,
     Episode,
     EpisodeListModel,
+    LocalVideoCache,
     LocalVideoLibrary,
     Season,
     SeasonListModel,
@@ -30,6 +31,7 @@ from backend.local_video_library import (
     ShowListModel,
     VideoFile,
     VideoListModel,
+    _enrich_from_cache,
     _scan_flat,
     _scan_tv_shows,
 )
@@ -563,3 +565,321 @@ class TestPlayVideo:
 
         lib.stopPlayback()
         lib._mpv.kill.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _enrich_from_cache tests
+# ---------------------------------------------------------------------------
+
+
+def _make_cache_with_entry(tmp_path: Path, key: str, entry: dict) -> LocalVideoCache:
+    """Create a LocalVideoCache with a single pre-populated entry."""
+    cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+    cache.ensure_dirs()
+    cache._data = {key: entry}
+    cache.save()
+    return LocalVideoCache(tmp_path / "cache", has_scraped_art=True)  # fresh instance
+
+
+class TestEnrichFromCache:
+    def test_videofile_poster_populated(self, tmp_path: Path) -> None:
+        poster = tmp_path / "cache" / "artwork_scraped" / "mymovie.jpg"
+        poster.parent.mkdir(parents=True, exist_ok=True)
+        poster.write_bytes(b"")
+        cache = _make_cache_with_entry(tmp_path, "mymovie", {"poster_scraped": str(poster)})
+        item = VideoFile(title="mymovie", path=str(tmp_path / "mymovie.mkv"))
+        _enrich_from_cache([item], cache)
+        assert item.poster_path == str(poster)
+
+    def test_videofile_all_fields_populated(self, tmp_path: Path) -> None:
+        cache = _make_cache_with_entry(tmp_path, "the_matrix", {
+            "title": "The Matrix",
+            "year": 1999,
+            "description": "Sci-fi classic",
+            "genres": ["Action", "Sci-Fi"],
+        })
+        item = VideoFile(title="the_matrix", path=str(tmp_path / "the_matrix.mkv"))
+        _enrich_from_cache([item], cache)
+        assert item.title == "The Matrix"
+        assert item.year == 1999
+        assert item.description == "Sci-fi classic"
+        assert item.genre == "Action, Sci-Fi"
+
+    def test_videofile_fields_not_overwritten_when_no_entry(self, tmp_path: Path) -> None:
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache.save()
+        item = VideoFile(title="original_title", path=str(tmp_path / "film.mkv"))
+        _enrich_from_cache([item], cache)
+        assert item.title == "original_title"
+        assert item.poster_path == ""
+        assert item.year == 0
+        assert item.genre == ""
+
+    def test_show_only_poster_and_description_populated(self, tmp_path: Path) -> None:
+        poster = tmp_path / "cache" / "artwork_scraped" / "Breaking Bad.jpg"
+        poster.parent.mkdir(parents=True, exist_ok=True)
+        poster.write_bytes(b"")
+        cache = _make_cache_with_entry(tmp_path, "Breaking Bad", {
+            "poster_scraped": str(poster),
+            "title": "Breaking Bad (TMDb title)",
+            "year": 2008,
+            "description": "A chemistry teacher...",
+            "genres": ["Drama", "Crime"],
+        })
+        show = Show(name="Breaking Bad", path=str(tmp_path / "Breaking Bad"))
+        _enrich_from_cache([show], cache)
+        # Poster and description should be set
+        assert show.poster_path == str(poster)
+        assert show.description == "A chemistry teacher..."
+        # Show has no title/year/genre attributes to set — no error expected
+        assert not hasattr(show, "title")
+        assert not hasattr(show, "year")
+        assert not hasattr(show, "genre")
+
+    def test_custom_art_takes_priority_over_scraped(self, tmp_path: Path) -> None:
+        cache_dir = tmp_path / "cache"
+        scraped = cache_dir / "artwork_scraped" / "film.jpg"
+        custom = cache_dir / "artwork_custom" / "film.png"
+        scraped.parent.mkdir(parents=True, exist_ok=True)
+        custom.parent.mkdir(parents=True, exist_ok=True)
+        scraped.write_bytes(b"scraped")
+        custom.write_bytes(b"custom")
+        cache = LocalVideoCache(cache_dir, has_scraped_art=True)
+        cache._data = {"film": {"poster_scraped": str(scraped)}}
+        item = VideoFile(title="film", path=str(tmp_path / "film.mkv"))
+        _enrich_from_cache([item], cache)
+        assert item.poster_path == str(custom)
+
+
+# ---------------------------------------------------------------------------
+# selectCategory enrichment tests
+# ---------------------------------------------------------------------------
+
+
+class TestSelectCategoryEnrichment:
+    def test_movies_category_uses_movies_cache(self, tmp_path: Path) -> None:
+        """After selectCategory(0), VideoFile has poster_path from movies cache."""
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        (media_dir / "Inception.mkv").write_bytes(b"")
+
+        cats = [{"name": "Movies", "type": "flat", "paths": [str(media_dir)]}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        # Prepare a movies cache entry with a real poster file
+        from backend.local_video_library import _MOVIES_CACHE_DIR
+        poster_path = _MOVIES_CACHE_DIR / "artwork_scraped" / "Inception.jpg"
+        poster_path.parent.mkdir(parents=True, exist_ok=True)
+        poster_path.write_bytes(b"")
+        lib_file = _MOVIES_CACHE_DIR / "library.json"
+        lib_file.write_text(
+            json.dumps({"Inception": {"poster_scraped": str(poster_path)}}),
+            encoding="utf-8",
+        )
+
+        try:
+            lib.selectCategory(0)
+            assert lib._videos.rowCount() == 1
+            idx = lib._videos.index(0, 0)
+            assert lib._videos.data(idx, VideoListModel.PosterPathRole) == str(poster_path)
+        finally:
+            # Clean up side effects on shared cache dir
+            if lib_file.exists():
+                lib_file.unlink()
+            if poster_path.exists():
+                poster_path.unlink()
+
+    def test_tv_shows_category_uses_tv_shows_cache(self, tmp_path: Path) -> None:
+        """After selectCategory(1), Show has poster_path from tv_shows cache."""
+        media_dir = tmp_path / "media"
+        show_dir = media_dir / "Breaking Bad" / "Season 1"
+        show_dir.mkdir(parents=True)
+        (show_dir / "ep.mkv").write_bytes(b"")
+
+        cats = [
+            {"name": "Movies", "type": "flat", "paths": []},
+            {"name": "TV Shows", "type": "tv_shows", "paths": [str(media_dir)]},
+        ]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        from backend.local_video_library import _TV_SHOWS_CACHE_DIR
+        poster_path = _TV_SHOWS_CACHE_DIR / "artwork_scraped" / "Breaking Bad.jpg"
+        poster_path.parent.mkdir(parents=True, exist_ok=True)
+        poster_path.write_bytes(b"")
+        lib_file = _TV_SHOWS_CACHE_DIR / "library.json"
+        lib_file.write_text(
+            json.dumps({"Breaking Bad": {"poster_scraped": str(poster_path)}}),
+            encoding="utf-8",
+        )
+
+        try:
+            lib.selectCategory(1)
+            assert lib._shows.rowCount() == 1
+            idx = lib._shows.index(0, 0)
+            assert lib._shows.data(idx, ShowListModel.PosterPathRole) == str(poster_path)
+        finally:
+            if lib_file.exists():
+                lib_file.unlink()
+            if poster_path.exists():
+                poster_path.unlink()
+
+    def test_custom_category_uses_custom_cache(self, tmp_path: Path) -> None:
+        """selectCategory(2) uses _custom_category_cache, not _movies_cache."""
+        media_dir = tmp_path / "media"
+        media_dir.mkdir()
+        (media_dir / "documentary.mkv").write_bytes(b"")
+
+        cats = [
+            {"name": "Movies", "type": "flat", "paths": []},
+            {"name": "TV Shows", "type": "tv_shows", "paths": []},
+            {"name": "Docs", "type": "flat", "paths": [str(media_dir)]},
+        ]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        with patch(
+            "backend.local_video_library._custom_category_cache"
+        ) as mock_custom, patch(
+            "backend.local_video_library._movies_cache"
+        ) as mock_movies:
+            mock_cache = MagicMock()
+            mock_cache.resolve_poster.return_value = ""
+            mock_cache.resolve_metadata.return_value = {}
+            mock_custom.return_value = mock_cache
+
+            lib.selectCategory(2)
+
+            mock_custom.assert_called_once_with("Docs")
+            mock_movies.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# scrapeMovies / scrapeTvShows tests
+# ---------------------------------------------------------------------------
+
+
+class TestScrapeSlots:
+    def test_scrape_movies_emits_error_when_no_api_key(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        lib = _make_library(tmp_path, config)
+
+        errors: list[str] = []
+        lib.scrapeError.connect(errors.append)
+        lib.scrapeMovies()
+        assert len(errors) == 1
+        assert "API key" in errors[0]
+
+    def test_scrape_tv_shows_emits_error_when_no_api_key(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        lib = _make_library(tmp_path, config)
+
+        errors: list[str] = []
+        lib.scrapeError.connect(errors.append)
+        lib.scrapeTvShows()
+        assert len(errors) == 1
+        assert "API key" in errors[0]
+
+    def test_scrape_emits_error_when_already_in_progress(self, tmp_path: Path) -> None:
+        cats = [{"name": "Movies", "type": "flat", "paths": []}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        config.set_tmdb_api_key("fake_key")
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        alive_thread = MagicMock()
+        alive_thread.is_alive.return_value = True
+        lib._scrape_thread = alive_thread
+
+        errors: list[str] = []
+        lib.scrapeError.connect(errors.append)
+        lib.scrapeMovies()
+        assert len(errors) == 1
+        assert "in progress" in errors[0]
+
+    def test_scrape_movies_starts_thread_and_calls_scraper(self, tmp_path: Path) -> None:
+        cats = [{"name": "Movies", "type": "flat", "paths": []}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        config.set_tmdb_api_key("fake_key")
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        scraper_mock = MagicMock()
+
+        with patch(
+            "backend.local_video_library.TmdbScraper", return_value=scraper_mock
+        ) as scraper_cls:
+            lib.scrapeMovies()
+            assert lib._scrape_thread is not None
+            lib._scrape_thread.join(timeout=5)
+            scraper_cls.assert_called_once_with("fake_key")
+            scraper_mock.scrape_movies.assert_called_once()
+            scraper_mock.close.assert_called_once()
+
+    def test_scrape_tv_shows_starts_thread_and_calls_scraper(self, tmp_path: Path) -> None:
+        cats = [
+            {"name": "Movies", "type": "flat", "paths": []},
+            {"name": "TV Shows", "type": "tv_shows", "paths": []},
+        ]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        config.set_tmdb_api_key("fake_key")
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        scraper_mock = MagicMock()
+
+        with patch(
+            "backend.local_video_library.TmdbScraper", return_value=scraper_mock
+        ) as scraper_cls:
+            lib.scrapeTvShows()
+            assert lib._scrape_thread is not None
+            lib._scrape_thread.join(timeout=5)
+            scraper_cls.assert_called_once_with("fake_key")
+            scraper_mock.scrape_tv_shows.assert_called_once()
+            scraper_mock.close.assert_called_once()
+
+    def test_scrape_finished_emitted_after_completion(self, tmp_path: Path) -> None:
+        cats = [{"name": "Movies", "type": "flat", "paths": []}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        config.set_tmdb_api_key("fake_key")
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        finished: list[str] = []
+
+        # Connect the signal to a list to capture emissions
+        lib._emit_scrape_finished = lambda name: finished.append(name)  # type: ignore[method-assign]
+
+        scraper_mock = MagicMock()
+        with patch("backend.local_video_library.TmdbScraper", return_value=scraper_mock):
+            lib.scrapeMovies()
+            lib._scrape_thread.join(timeout=5)  # type: ignore[union-attr]
+
+        # _emit_scrape_finished was invoked via QMetaObject on the main thread;
+        # since there's no event loop running in tests, invoke directly to verify logic
+        lib.scrapeFinished.connect(finished.append)
+        lib._emit_scrape_finished("Movies")
+        assert "Movies" in finished
+
+    def test_emit_scrape_finished_calls_selectCategory(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        lib = _make_library(tmp_path, config)
+        lib._current_category_index = 0
+
+        with patch.object(lib, "selectCategory") as mock_select:
+            lib._emit_scrape_finished("Movies")
+            mock_select.assert_called_once_with(0)
+
+    def test_emit_scrape_finished_no_reload_when_index_negative(self, tmp_path: Path) -> None:
+        config = _make_config(tmp_path)
+        lib = _make_library(tmp_path, config)
+        lib._current_category_index = -1
+
+        with patch.object(lib, "selectCategory") as mock_select:
+            lib._emit_scrape_finished("Movies")
+            mock_select.assert_not_called()

@@ -6,17 +6,25 @@ QAbstractListModel subclasses, and launches playback via LibMpvPlayer.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import re
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+import requests
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QMetaObject,
     QModelIndex,
     QObject,
     Property,
+    Q_ARG,
     Qt,
     Signal,
     Slot,
@@ -37,6 +45,370 @@ _SEASON_RE = re.compile(
     r'(?:season|series|s)\s*[-_.]?\s*0*(\d+)',
     re.IGNORECASE,
 )
+
+_CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "htpcstation"
+_LOCAL_VIDEOS_CACHE_DIR = _CONFIG_DIR / "local_videos_cache"
+
+# Per-category cache dirs (movies and tv_shows are the two default categories)
+_MOVIES_CACHE_DIR   = _LOCAL_VIDEOS_CACHE_DIR / "movies"
+_TV_SHOWS_CACHE_DIR = _LOCAL_VIDEOS_CACHE_DIR / "tv_shows"
+
+
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
+
+
+def _slugify(name: str) -> str:
+    """Return a stable, filesystem-safe slug for a category name."""
+    return re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
+
+
+class LocalVideoCache:
+    """Read/write cache for a single video category.
+
+    Handles library.json I/O, posterPath resolution, and field-level
+    custom overrides. Instantiated once per category.
+    """
+
+    def __init__(self, cache_dir: Path, has_scraped_art: bool = True) -> None:
+        """
+        cache_dir       — e.g. _MOVIES_CACHE_DIR or a custom-category path
+        has_scraped_art — False for custom categories (no artwork_scraped dir)
+        """
+        self._cache_dir = cache_dir
+        self._custom_art_dir = cache_dir / "artwork_custom"
+        self._scraped_art_dir = cache_dir / "artwork_scraped" if has_scraped_art else None
+        self._library_file = cache_dir / "library.json"
+        self._data: dict[str, dict] = {}  # key → raw JSON entry
+
+    def ensure_dirs(self) -> None:
+        """Create cache_dir, artwork_custom/, and artwork_scraped/ (if applicable)."""
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._custom_art_dir.mkdir(parents=True, exist_ok=True)
+        if self._scraped_art_dir is not None:
+            self._scraped_art_dir.mkdir(parents=True, exist_ok=True)
+
+    def load(self) -> None:
+        """Read library.json into self._data. No-op if file absent."""
+        if not self._library_file.exists():
+            return
+        try:
+            text = self._library_file.read_text(encoding="utf-8")
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.error("LocalVideoCache: failed to load %s: %s", self._library_file, exc)
+            self._data = {}
+            return
+        if not isinstance(parsed, dict):
+            logger.warning(
+                "LocalVideoCache: %s contains %s instead of a JSON object; ignoring",
+                self._library_file,
+                type(parsed).__name__,
+            )
+            self._data = {}
+            return
+        self._data = parsed
+
+    def save(self) -> None:
+        """Write self._data to library.json as indented JSON."""
+        self.ensure_dirs()
+        try:
+            self._library_file.write_text(
+                json.dumps(self._data, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            logger.error("LocalVideoCache: failed to save %s: %s", self._library_file, exc)
+
+    def get_entry(self, key: str) -> dict | None:
+        """Return a shallow copy of the entry for key, or None if absent."""
+        entry = self._data.get(key)
+        return dict(entry) if entry is not None else None
+
+    def set_entry(self, key: str, data: dict) -> None:
+        """Merge data into the existing entry, preserving the custom sub-dict."""
+        existing = self._data.get(key, {})
+        custom = existing.get("custom", {})
+        self._data[key] = {**existing, **data, "custom": custom}
+        self.save()
+
+    def resolve_poster(self, key: str) -> str:
+        """Return the best available poster path for key.
+
+        Priority: artwork_custom file → poster_scraped field in JSON → "".
+        """
+        for ext in (".jpg", ".jpeg", ".png", ".webp"):
+            candidate = self._custom_art_dir / f"{key}{ext}"
+            if candidate.exists():
+                return str(candidate)
+
+        entry = self._data.get(key, {})
+        scraped = entry.get("poster_scraped", "")
+        if scraped and Path(scraped).exists():
+            return scraped
+
+        return ""
+
+    def resolve_metadata(self, key: str) -> dict:
+        """Return effective metadata for key: base fields merged with custom overrides."""
+        entry = self._data.get(key, {})
+        custom = entry.get("custom", {})
+        base = {
+            "title":       entry.get("title", ""),
+            "year":        entry.get("year", 0),
+            "description": entry.get("description", ""),
+            "genres":      entry.get("genres", []),
+            "rating":      entry.get("rating", ""),
+            "tmdb_id":     entry.get("tmdb_id"),
+        }
+        return {**base, **custom}
+
+    def is_tombstoned(self, key: str) -> bool:
+        """Return True if the entry has tmdb_id explicitly set to None (lookup miss)."""
+        entry = self._data.get(key)
+        return entry is not None and entry.get("tmdb_id") is None and "tmdb_id" in entry
+
+    def write_tombstone(self, key: str) -> None:
+        """Write {"tmdb_id": null} for key, preserving any existing custom data."""
+        existing = self._data.get(key, {})
+        self._data[key] = {**existing, "tmdb_id": None}
+        self.save()
+
+
+def _movies_cache() -> LocalVideoCache:
+    return LocalVideoCache(_MOVIES_CACHE_DIR, has_scraped_art=True)
+
+
+def _tv_shows_cache() -> LocalVideoCache:
+    return LocalVideoCache(_TV_SHOWS_CACHE_DIR, has_scraped_art=True)
+
+
+def _custom_category_cache(name: str) -> LocalVideoCache:
+    cache_dir = _LOCAL_VIDEOS_CACHE_DIR / _slugify(name)
+    return LocalVideoCache(cache_dir, has_scraped_art=False)
+
+
+# ---------------------------------------------------------------------------
+# TMDb scraper helpers
+# ---------------------------------------------------------------------------
+
+_MOVIE_YEAR_RE = re.compile(r'^(.+?)\s*\((\d{4})\)\s*$')
+
+
+def _parse_movie_title(stem: str) -> tuple[str, int | None]:
+    """Split 'The Matrix (1999)' → ('The Matrix', 1999). No match → (stem, None)."""
+    m = _MOVIE_YEAR_RE.match(stem)
+    if m:
+        return m.group(1).strip(), int(m.group(2))
+    return stem, None
+
+
+class TmdbScraper:
+    """Fetches movie/TV show metadata and posters from The Movie Database (TMDb).
+
+    Pure Python — no Qt imports. Blocking HTTP only. Threading is handled by
+    the caller (LocalVideoLibrary in Task 004).
+    """
+
+    SEARCH_BASE = "https://api.themoviedb.org/3"
+    IMAGE_BASE  = "https://image.tmdb.org/t/p/w500"
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+        self._session = requests.Session()
+        self._session.headers.update({"User-Agent": "htpcstation/1.0"})
+
+    # ------------------------------------------------------------------
+    # Search methods
+    # ------------------------------------------------------------------
+
+    def search_movie(self, title: str, year: int | None) -> dict | None:
+        """Search TMDb for a movie. Returns the best matching result dict or None."""
+        params: dict = {
+            "api_key": self._api_key,
+            "query": title,
+            "language": "en-US",
+            "include_adult": "false",
+        }
+        if year is not None:
+            params["year"] = year
+
+        try:
+            resp = self._session.get(
+                f"{self.SEARCH_BASE}/search/movie",
+                params=params,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+        except requests.RequestException as exc:
+            logger.warning("TmdbScraper.search_movie failed for %r: %s", title, exc)
+            return None
+
+        if not results:
+            return None
+
+        if year is not None:
+            year_str = str(year)
+            for r in results:
+                if r.get("release_date", "").startswith(year_str):
+                    return r
+
+        return results[0]
+
+    def search_tv_show(self, name: str) -> dict | None:
+        """Search TMDb for a TV show. Returns results[0] or None."""
+        params: dict = {
+            "api_key": self._api_key,
+            "query": name,
+            "language": "en-US",
+        }
+        try:
+            resp = self._session.get(
+                f"{self.SEARCH_BASE}/search/tv",
+                params=params,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            results = resp.json().get("results", [])
+        except requests.RequestException as exc:
+            logger.warning("TmdbScraper.search_tv_show failed for %r: %s", name, exc)
+            return None
+
+        if not results:
+            return None
+        return results[0]
+
+    def download_poster(self, tmdb_poster_path: str, dest: Path) -> bool:
+        """Download a TMDb poster image to dest. Returns True on success."""
+        stripped = tmdb_poster_path.lstrip("/")
+        url = f"{self.IMAGE_BASE}/{stripped}"
+        try:
+            resp = self._session.get(url, timeout=10)
+            resp.raise_for_status()
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(resp.content)
+            return True
+        except (requests.RequestException, OSError) as exc:
+            logger.warning("TmdbScraper.download_poster failed for %r: %s", tmdb_poster_path, exc)
+            return False
+
+    # ------------------------------------------------------------------
+    # Bulk scrape methods
+    # ------------------------------------------------------------------
+
+    def scrape_movies(
+        self,
+        items: list,
+        cache: LocalVideoCache,
+        on_progress: Callable | None = None,
+    ) -> None:
+        """Scrape TMDb metadata for a list of VideoFile items."""
+        total = len(items)
+        for done, item in enumerate(items, start=1):
+            key = Path(item.path).stem
+
+            if cache.is_tombstoned(key):
+                if on_progress is not None:
+                    on_progress(done, total)
+                continue
+
+            existing = cache.get_entry(key)
+            if existing is not None and existing.get("tmdb_id") is not None:
+                if on_progress is not None:
+                    on_progress(done, total)
+                continue
+
+            title, year = _parse_movie_title(key)
+            result = self.search_movie(title, year)
+
+            if result is None:
+                cache.write_tombstone(key)
+                if on_progress is not None:
+                    on_progress(done, total)
+                time.sleep(0.26)
+                continue
+
+            entry: dict = {
+                "title":          result.get("title", key),
+                "year":           int(result["release_date"][:4]) if result.get("release_date") else 0,
+                "description":    result.get("overview", ""),
+                "genres":         [],
+                "rating":         "",
+                "tmdb_id":        result["id"],
+                "poster_scraped": "",
+            }
+
+            if result.get("poster_path"):
+                dest = cache._scraped_art_dir / f"{key}.jpg"
+                if self.download_poster(result["poster_path"], dest):
+                    entry["poster_scraped"] = str(dest)
+
+            cache.set_entry(key, entry)
+
+            if on_progress is not None:
+                on_progress(done, total)
+
+            time.sleep(0.26)
+
+    def scrape_tv_shows(
+        self,
+        shows: list,
+        cache: LocalVideoCache,
+        on_progress: Callable | None = None,
+    ) -> None:
+        """Scrape TMDb metadata for a list of Show items."""
+        total = len(shows)
+        for done, show in enumerate(shows, start=1):
+            key = show.name
+
+            if cache.is_tombstoned(key):
+                if on_progress is not None:
+                    on_progress(done, total)
+                continue
+
+            existing = cache.get_entry(key)
+            if existing is not None and existing.get("tmdb_id") is not None:
+                if on_progress is not None:
+                    on_progress(done, total)
+                continue
+
+            result = self.search_tv_show(show.name)
+
+            if result is None:
+                cache.write_tombstone(key)
+                if on_progress is not None:
+                    on_progress(done, total)
+                time.sleep(0.26)
+                continue
+
+            first_air = result.get("first_air_date", "")
+            entry: dict = {
+                "title":          result.get("name", key),
+                "year":           int(first_air[:4]) if first_air else 0,
+                "description":    result.get("overview", ""),
+                "genres":         [],
+                "rating":         "",
+                "tmdb_id":        result["id"],
+                "poster_scraped": "",
+            }
+
+            if result.get("poster_path"):
+                dest = cache._scraped_art_dir / f"{key}.jpg"
+                if self.download_poster(result["poster_path"], dest):
+                    entry["poster_scraped"] = str(dest)
+
+            cache.set_entry(key, entry)
+
+            if on_progress is not None:
+                on_progress(done, total)
+
+            time.sleep(0.26)
+
+    def close(self) -> None:
+        """Close the underlying requests session."""
+        self._session.close()
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +549,41 @@ def _scan_season_dir(season_dir: Path) -> Optional[Season]:
         return Season(name=f"Season {num}", number=num, episodes=episodes)
     else:
         return Season(name=season_dir.name, number=-1, episodes=episodes)
+
+
+# ---------------------------------------------------------------------------
+# Cache enrichment helper
+# ---------------------------------------------------------------------------
+
+
+def _enrich_from_cache(items: list, cache: LocalVideoCache) -> None:
+    """Mutate items in place, filling in poster/metadata from cache.
+
+    Works for both VideoFile (has ``path``) and Show (has ``seasons``) via
+    hasattr checks — no brittle isinstance coupling.
+    """
+    cache.load()  # reload from disk to pick up any scrapes done since last load
+    for item in items:
+        # Determine cache key: Show uses folder name; VideoFile uses file stem
+        if hasattr(item, "path") and not hasattr(item, "seasons"):
+            key = Path(item.path).stem
+        else:
+            key = item.name
+
+        poster = cache.resolve_poster(key)
+        if poster:
+            item.poster_path = poster
+
+        meta = cache.resolve_metadata(key)
+        if meta.get("title") and hasattr(item, "title"):
+            item.title = meta["title"]
+        if meta.get("description"):
+            item.description = meta["description"]
+        if meta.get("year") and hasattr(item, "year"):
+            item.year = meta["year"]
+        genres = meta.get("genres", [])
+        if genres and hasattr(item, "genre"):
+            item.genre = ", ".join(genres)
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +830,9 @@ class LocalVideoLibrary(QObject):
     currentCategoryIndexChanged = Signal()
     playbackStarted = Signal()
     playbackFinished = Signal()
+    scrapeProgressChanged = Signal(int, int)  # (done, total)
+    scrapeFinished = Signal(str)              # category display name
+    scrapeError = Signal(str)                 # error message
 
     def __init__(self, config: Config, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -450,6 +860,7 @@ class LocalVideoLibrary(QObject):
         )
 
         self._is_launching = False
+        self._scrape_thread: Optional[threading.Thread] = None
 
         # Empty models
         self._videos = VideoListModel(self)
@@ -538,6 +949,8 @@ class LocalVideoLibrary(QObject):
         cat = cats[index]
         if cat["type"] == "flat":
             items = _scan_flat(cat["paths"])
+            cache = _movies_cache() if index == 0 else _custom_category_cache(cat["name"])
+            _enrich_from_cache(items, cache)
             self._reset_model(self._videos, items)
             # Reset TV show models
             self._reset_model(self._shows, [])
@@ -546,6 +959,8 @@ class LocalVideoLibrary(QObject):
             self.videosModelChanged.emit()
         else:
             shows = _scan_tv_shows(cat["paths"])
+            cache = _tv_shows_cache() if index == 1 else _custom_category_cache(cat["name"])
+            _enrich_from_cache(shows, cache)
             self._reset_model(self._shows, shows)
             # Reset flat/season/episode models
             self._reset_model(self._videos, [])
@@ -602,6 +1017,102 @@ class LocalVideoLibrary(QObject):
     def rescanCategory(self, index: int) -> None:
         """Re-run the scan for the given category index."""
         self.selectCategory(index)
+
+    # ------------------------------------------------------------------
+    # Scrape slots
+    # ------------------------------------------------------------------
+
+    @Slot()
+    def scrapeMovies(self) -> None:
+        """Start a background TMDb scrape for the Movies category."""
+        self._start_scrape("movies")
+
+    @Slot()
+    def scrapeTvShows(self) -> None:
+        """Start a background TMDb scrape for the TV Shows category."""
+        self._start_scrape("tv_shows")
+
+    def _start_scrape(self, category_type: str) -> None:
+        """Kick off a background scrape thread for movies or tv_shows."""
+        api_key = self._config.tmdb_api_key
+        if not api_key:
+            self.scrapeError.emit("TMDb API key not configured. Set it in Settings → Videos.")
+            return
+        if self._scrape_thread and self._scrape_thread.is_alive():
+            self.scrapeError.emit("A scrape is already in progress.")
+            return
+
+        cats = self._config.local_video_categories
+        if category_type == "movies":
+            cat = next(
+                (c for c in cats if c.get("type") == "flat" and c.get("name") == "Movies"),
+                None,
+            )
+            items = _scan_flat(cat["paths"]) if cat else []
+            cache = _movies_cache()
+            display_name = "Movies"
+        else:
+            cat = next(
+                (c for c in cats if c.get("type") == "tv_shows" and c.get("name") == "TV Shows"),
+                None,
+            )
+            items = _scan_tv_shows(cat["paths"]) if cat else []
+            cache = _tv_shows_cache()
+            display_name = "TV Shows"
+
+        cache.ensure_dirs()
+        cache.load()
+        scraper = TmdbScraper(api_key)
+
+        def _on_progress(done: int, total: int) -> None:
+            QMetaObject.invokeMethod(
+                self,
+                "_emit_scrape_progress",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(int, done),
+                Q_ARG(int, total),
+            )
+
+        def _run() -> None:
+            try:
+                if category_type == "movies":
+                    scraper.scrape_movies(items, cache, _on_progress)
+                else:
+                    scraper.scrape_tv_shows(items, cache, _on_progress)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("TmdbScraper error: %s", exc)
+                QMetaObject.invokeMethod(
+                    self,
+                    "_emit_scrape_error",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, f"Scrape failed: {exc}"),
+                )
+            finally:
+                scraper.close()
+                QMetaObject.invokeMethod(
+                    self,
+                    "_emit_scrape_finished",
+                    Qt.ConnectionType.QueuedConnection,
+                    Q_ARG(str, display_name),
+                )
+
+        self._scrape_thread = threading.Thread(target=_run, daemon=True)
+        self._scrape_thread.start()
+
+    @Slot(int, int)
+    def _emit_scrape_progress(self, done: int, total: int) -> None:
+        self.scrapeProgressChanged.emit(done, total)
+
+    @Slot(str)
+    def _emit_scrape_finished(self, display_name: str) -> None:
+        self.scrapeFinished.emit(display_name)
+        # Reload current category so newly scraped art/metadata shows immediately
+        if self._current_category_index >= 0:
+            self.selectCategory(self._current_category_index)
+
+    @Slot(str)
+    def _emit_scrape_error(self, message: str) -> None:
+        self.scrapeError.emit(message)
 
     # ------------------------------------------------------------------
     # set_wid pass-through

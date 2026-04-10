@@ -415,6 +415,8 @@ class Config:
         self._plex_transcode_mode: str = "auto"
         # Cached list of VA-API hardware decode codecs
         self._hw_decode_codecs: list[str] = []
+        # TMDB configuration
+        self._tmdb_api_key: str = ""
 
         # Sort preferences
         self._sort_retro_games: str = "az"
@@ -689,6 +691,16 @@ class Config:
             logger.warning("set_focus_ring_color: invalid value %r — ignored", color)
             return
         self._focus_ring_color = color
+        self.save()
+
+    @property
+    def tmdb_api_key(self) -> str:
+        """TMDB API key for scraping video metadata. Empty string if not configured."""
+        return self._tmdb_api_key
+
+    def set_tmdb_api_key(self, key: str) -> None:
+        """Set the TMDB API key and persist the config."""
+        self._tmdb_api_key = key.strip()
         self.save()
 
     def set_rom_directory(self, path: "str | Path") -> None:
@@ -1109,6 +1121,9 @@ class Config:
             "local_videos": {
                 "categories": list(self._local_video_categories),
             },
+            "tmdb": {
+                "api_key": self._tmdb_api_key,
+            },
         }
         # Safety guard: never overwrite a config that has credentials with a blank one.
         if CONFIG_FILE.exists() and not self._plex_token and not self._plex_server_id:
@@ -1345,6 +1360,12 @@ class Config:
                         continue
                     loaded_categories.append({"name": name, "paths": paths, "type": type_})
                 self._local_video_categories = loaded_categories
+
+        # tmdb section
+        tmdb = raw.get("tmdb", {})
+        if isinstance(tmdb, dict):
+            if "api_key" in tmdb:
+                self._tmdb_api_key = str(tmdb["api_key"]).strip()
 
 
 def ensure_config_dir() -> None:
