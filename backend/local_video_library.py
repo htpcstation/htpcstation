@@ -449,6 +449,7 @@ class Show:
     poster_path: str = ""
     seasons: list = field(default_factory=list)   # list[Season]
     description: str = ""
+    year: int = 0       # populated by _enrich_from_cache automatically
 
     @property
     def season_count(self) -> int:
@@ -636,12 +637,15 @@ class CategoryListModel(QAbstractListModel):
 class VideoListModel(QAbstractListModel):
     """Exposes flat video files to QML.
 
-    Roles: title, path, posterPath
+    Roles: title, path, posterPath, year, genre, description
     """
 
-    TitleRole = Qt.ItemDataRole.UserRole + 1
-    PathRole = Qt.ItemDataRole.UserRole + 2
-    PosterPathRole = Qt.ItemDataRole.UserRole + 3
+    TitleRole       = Qt.ItemDataRole.UserRole + 1
+    PathRole        = Qt.ItemDataRole.UserRole + 2
+    PosterPathRole  = Qt.ItemDataRole.UserRole + 3
+    YearRole        = Qt.ItemDataRole.UserRole + 4
+    GenreRole       = Qt.ItemDataRole.UserRole + 5
+    DescriptionRole = Qt.ItemDataRole.UserRole + 6
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -663,29 +667,40 @@ class VideoListModel(QAbstractListModel):
             return item.path
         if role == self.PosterPathRole:
             return item.poster_path
+        if role == self.YearRole:
+            return item.year
+        if role == self.GenreRole:
+            return item.genre
+        if role == self.DescriptionRole:
+            return item.description
         if role == Qt.ItemDataRole.DisplayRole:
             return item.title
         return None
 
     def roleNames(self) -> dict[int, bytes]:
         return {
-            self.TitleRole: b"title",
-            self.PathRole: b"path",
-            self.PosterPathRole: b"posterPath",
+            self.TitleRole:       b"title",
+            self.PathRole:        b"path",
+            self.PosterPathRole:  b"posterPath",
+            self.YearRole:        b"year",
+            self.GenreRole:       b"genre",
+            self.DescriptionRole: b"description",
         }
 
 
 class ShowListModel(QAbstractListModel):
     """Exposes TV shows to QML.
 
-    Roles: name, path, posterPath, seasonCount, episodeCount
+    Roles: name, path, posterPath, seasonCount, episodeCount, year, description
     """
 
-    NameRole = Qt.ItemDataRole.UserRole + 1
-    PathRole = Qt.ItemDataRole.UserRole + 2
-    PosterPathRole = Qt.ItemDataRole.UserRole + 3
+    NameRole        = Qt.ItemDataRole.UserRole + 1
+    PathRole        = Qt.ItemDataRole.UserRole + 2
+    PosterPathRole  = Qt.ItemDataRole.UserRole + 3
     SeasonCountRole = Qt.ItemDataRole.UserRole + 4
     EpisodeCountRole = Qt.ItemDataRole.UserRole + 5
+    YearRole        = Qt.ItemDataRole.UserRole + 6
+    DescriptionRole = Qt.ItemDataRole.UserRole + 7
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -711,17 +726,23 @@ class ShowListModel(QAbstractListModel):
             return item.season_count
         if role == self.EpisodeCountRole:
             return item.episode_count
+        if role == self.YearRole:
+            return item.year
+        if role == self.DescriptionRole:
+            return item.description
         if role == Qt.ItemDataRole.DisplayRole:
             return item.name
         return None
 
     def roleNames(self) -> dict[int, bytes]:
         return {
-            self.NameRole: b"name",
-            self.PathRole: b"path",
-            self.PosterPathRole: b"posterPath",
+            self.NameRole:        b"name",
+            self.PathRole:        b"path",
+            self.PosterPathRole:  b"posterPath",
             self.SeasonCountRole: b"seasonCount",
             self.EpisodeCountRole: b"episodeCount",
+            self.YearRole:        b"year",
+            self.DescriptionRole: b"description",
         }
 
 
@@ -870,6 +891,11 @@ class LocalVideoLibrary(QObject):
 
         self._current_category_index = -1
 
+        # Sort/filter state (reset on each selectCategory call)
+        self._video_sort: str = ""
+        self._video_genre: str = ""
+        self._show_sort: str = ""
+
     # ------------------------------------------------------------------
     # Helper
     # ------------------------------------------------------------------
@@ -946,6 +972,10 @@ class LocalVideoLibrary(QObject):
         if index < 0 or index >= len(cats):
             return
         self._current_category_index = index
+        # Reset sort/filter state on each category switch
+        self._video_sort = ""
+        self._video_genre = ""
+        self._show_sort = ""
         cat = cats[index]
         if cat["type"] == "flat":
             items = _scan_flat(cat["paths"])
@@ -1017,6 +1047,83 @@ class LocalVideoLibrary(QObject):
     def rescanCategory(self, index: int) -> None:
         """Re-run the scan for the given category index."""
         self.selectCategory(index)
+
+    # ------------------------------------------------------------------
+    # Sort / filter helpers
+    # ------------------------------------------------------------------
+
+    def _apply_videos_filter_sort(self) -> None:
+        """Rebuild _display_items from _items, applying the current genre filter and sort."""
+        items = self._videos._items
+        # Genre filter
+        if self._video_genre:
+            items = [
+                v for v in items
+                if self._video_genre in [g.strip() for g in v.genre.split(",") if g.strip()]
+            ]
+        # Sort
+        if self._video_sort == "az":
+            items = sorted(items, key=lambda v: v.title.lower())
+        elif self._video_sort == "za":
+            items = sorted(items, key=lambda v: v.title.lower(), reverse=True)
+        elif self._video_sort == "year_desc":
+            items = sorted(items, key=lambda v: v.year, reverse=True)
+        elif self._video_sort == "year_asc":
+            items = sorted(items, key=lambda v: v.year)
+        # Update display list only — _items remains the canonical unfiltered list
+        self._videos.beginResetModel()
+        self._videos._display_items = items
+        self._videos.endResetModel()
+        self.videosModelChanged.emit()
+
+    def _apply_shows_sort(self) -> None:
+        """Rebuild _display_items for shows, applying the current sort."""
+        items = self._shows._items
+        if self._show_sort == "az":
+            items = sorted(items, key=lambda s: s.name.lower())
+        elif self._show_sort == "za":
+            items = sorted(items, key=lambda s: s.name.lower(), reverse=True)
+        elif self._show_sort == "year_desc":
+            items = sorted(items, key=lambda s: s.year, reverse=True)
+        elif self._show_sort == "year_asc":
+            items = sorted(items, key=lambda s: s.year)
+        self._shows.beginResetModel()
+        self._shows._display_items = items
+        self._shows.endResetModel()
+        self.showsModelChanged.emit()
+
+    # ------------------------------------------------------------------
+    # Sort / filter slots
+    # ------------------------------------------------------------------
+
+    @Slot(str)
+    def sortVideos(self, sort_key: str) -> None:
+        """Set the sort key for videos and refresh the display list."""
+        self._video_sort = sort_key
+        self._apply_videos_filter_sort()
+
+    @Slot(str)
+    def filterVideosByGenre(self, genre: str) -> None:
+        """Set the genre filter for videos and refresh the display list."""
+        self._video_genre = genre
+        self._apply_videos_filter_sort()
+
+    @Slot(str)
+    def sortShows(self, sort_key: str) -> None:
+        """Set the sort key for TV shows and refresh the display list."""
+        self._show_sort = sort_key
+        self._apply_shows_sort()
+
+    @Slot(result="QVariantList")
+    def getVideoGenres(self) -> list:
+        """Return sorted unique genre strings from the current videos list."""
+        genres: set[str] = set()
+        for v in self._videos._items:
+            for g in v.genre.split(","):
+                g = g.strip()
+                if g:
+                    genres.add(g)
+        return sorted(genres)
 
     # ------------------------------------------------------------------
     # Scrape slots

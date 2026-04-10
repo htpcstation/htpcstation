@@ -5,15 +5,14 @@ import "../components"
 // Local Videos screen — browse and play local video files.
 //
 // Views:
-//   "categories" — ListView of all configured video categories
-//   "videos"     — ListView of flat video files in the selected category
-//   "shows"      — ListView of TV shows in the selected category
-//   "seasons"    — ListView of seasons within a selected show
-//   "episodes"   — ListView of episodes within a selected season
+//   "categories"  — ListView of all configured video categories
+//   "videos"      — LocalVideoMovieGrid or LocalVideoMovieList (based on _viewMode)
+//   "movieDetail" — LocalVideoMovieDetail
+//   "shows"       — LocalVideoShowGrid or LocalVideoShowList (based on _viewMode)
+//   "showDetail"  — LocalVideoShowDetail
 //
 // Focus flow:
 //   Enter LocalVideosScreen → categoriesList gets focus
-//   Up/Down           — navigate items (ListView handles natively)
 //   A (Return)        — select item
 //   B (Escape)        — go back one level; from categories emit back()
 FocusScope {
@@ -30,62 +29,43 @@ FocusScope {
     // Only process input when this screen is active.
     enabled: focus
 
-    // Current view: "categories", "videos", "shows", "seasons", "episodes"
+    // Current view state
     property string currentView: "categories"
-
-    property int _selectedCategoryIndex: -1
+    property string _viewMode: "grid"
+    property var _selectedMovieData: ({})
+    property var _selectedShowData: ({})
     property int _selectedShowIndex: -1
-    property int _selectedSeasonIndex: -1
+
+    // Category name for the selected category
+    property string _currentCategoryName: ""
+    property int _selectedCategoryIndex: -1
 
     onCurrentViewChanged: _routeFocus()
     onActiveFocusChanged: if (activeFocus) _routeFocus()
 
-    // ── Focus routing ─────────────────────────────────────────────────────────
-    function _routeFocus() {
-        if (currentView === "categories") {
-            categoriesList.forceActiveFocus()
-        } else if (currentView === "videos") {
-            videosList.forceActiveFocus()
-        } else if (currentView === "shows") {
-            showsList.forceActiveFocus()
-        } else if (currentView === "seasons") {
-            seasonsList.forceActiveFocus()
-        } else if (currentView === "episodes") {
-            episodesList.forceActiveFocus()
-        }
+    Component.onCompleted: {
+        if (settings) _viewMode = settings.localVideoViewMode || "grid"
     }
 
-    // ── Header bar ───────────────────────────────────────────────────────────
-    Rectangle {
-        id: headerBar
-
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        height: root.vpx(56)
-        color: Theme.colorSecondary
-
-        Text {
-            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-            text: "Videos"
-            color: Theme.colorText
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
+    // ── Focus routing ─────────────────────────────────────────────────────────
+    function _routeFocus() {
+        if (currentView === "categories")
+            categoriesList.forceActiveFocus()
+        else if (currentView === "videos")
+            (_viewMode === "grid" ? movieGrid : movieList).forceActiveFocus()
+        else if (currentView === "movieDetail")
+            movieDetail.forceActiveFocus()
+        else if (currentView === "shows")
+            (_viewMode === "grid" ? showGrid : showList).forceActiveFocus()
+        else if (currentView === "showDetail")
+            showDetail.forceActiveFocus()
     }
 
     // ── Categories ListView ───────────────────────────────────────────────────
     ListView {
         id: categoriesList
 
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            topMargin: root.vpx(16)
-            leftMargin: root.vpx(32)
-            rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
-        }
+        anchors.fill: parent
 
         model: localVideos ? localVideos.categoriesModel : null
         clip: true
@@ -97,6 +77,22 @@ FocusScope {
         preferredHighlightEnd: height * 0.65
 
         visible: localVideosScreen.currentView === "categories"
+        enabled: visible
+
+        // Header
+        header: Rectangle {
+            width: categoriesList.width
+            height: root.vpx(56)
+            color: Theme.colorSecondary
+
+            Text {
+                anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+                text: "Videos"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+            }
+        }
 
         Keys.onPressed: (event) => {
             if (keys.isAccept(event)) {
@@ -104,6 +100,7 @@ FocusScope {
                 if (localVideos && currentIndex >= 0 && currentItem) {
                     localVideos.selectCategory(currentIndex)
                     localVideosScreen._selectedCategoryIndex = currentIndex
+                    localVideosScreen._currentCategoryName = currentItem.categoryName
                     if (currentItem.categoryType === "flat") {
                         localVideosScreen.currentView = "videos"
                     } else {
@@ -120,6 +117,7 @@ FocusScope {
             id: categoryDelegate
 
             readonly property string categoryType: model.type
+            readonly property string categoryName: model.name
 
             width: categoriesList.width
             height: root.vpx(64)
@@ -167,6 +165,7 @@ FocusScope {
                     if (localVideos) {
                         localVideos.selectCategory(index)
                         localVideosScreen._selectedCategoryIndex = index
+                        localVideosScreen._currentCategoryName = model.name
                         if (model.type === "flat") {
                             localVideosScreen.currentView = "videos"
                         } else {
@@ -189,457 +188,136 @@ FocusScope {
         }
     }
 
-    // ── Videos ListView ───────────────────────────────────────────────────────
-    ListView {
-        id: videosList
+    // ── Movies grid ───────────────────────────────────────────────────────────
+    LocalVideoMovieGrid {
+        id: movieGrid
 
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            topMargin: root.vpx(16)
-            leftMargin: root.vpx(32)
-            rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "videos" && localVideosScreen._viewMode === "grid"
+        enabled: visible
+
+        systemName: localVideosScreen._currentCategoryName
+        _viewMode: localVideosScreen._viewMode
+
+        onMovieSelected: (index, data) => {
+            localVideosScreen._selectedMovieData = data
+            localVideosScreen.currentView = "movieDetail"
         }
-
-        model: localVideos ? localVideos.videosModel : null
-        clip: true
-        keyNavigationEnabled: true
-        highlightMoveDuration: Theme.animDurationFast
-        highlightRangeMode: ListView.ApplyRange
-        preferredHighlightBegin: height * 0.35
-        preferredHighlightEnd: height * 0.65
-
-        visible: localVideosScreen.currentView === "videos"
-
-        Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
-                event.accepted = true
-                if (localVideos && currentIndex >= 0 && currentItem) {
-                    localVideos.playVideo(currentItem.videoPath, localVideos.getResumePosition(currentItem.videoPath))
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                localVideosScreen.currentView = "categories"
-            }
+        onViewModeChanged: (mode) => {
+            localVideosScreen._viewMode = mode
+            localVideosScreen._routeFocus()
         }
-
-        delegate: Item {
-            id: videoDelegate
-
-            readonly property string videoPath: model.path
-
-            width: videosList.width
-            height: root.vpx(64)
-
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorSecondary
-                opacity: videoDelegate.ListView.isCurrentItem ? 1.0 : 0.0
-                radius: root.vpx(Theme.focusRingRadius)
-
-                scale: videoDelegate.ListView.isCurrentItem && videosList.activeFocus
-                    ? Theme.focusScale : 1.0
-                Behavior on scale {
-                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
-                }
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.animDurationFast }
-                }
-            }
-
-            Text {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    verticalCenter: parent.verticalCenter
-                }
-                text: model.title
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-                elide: Text.ElideRight
-                width: parent.width - root.vpx(32)
-            }
-
-            FocusRing {
-                visible: videoDelegate.ListView.isCurrentItem && videosList.activeFocus
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    videosList.currentIndex = index
-                    videosList.forceActiveFocus()
-                }
-                onDoubleClicked: {
-                    videosList.currentIndex = index
-                    if (localVideos) {
-                        localVideos.playVideo(model.path, localVideos.getResumePosition(model.path))
-                    }
-                }
-            }
-        }
-
-        // Empty state
-        Text {
-            anchors.centerIn: parent
-            visible: videosList.count === 0
-            text: "No videos found."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeBody)
-            horizontalAlignment: Text.AlignHCenter
-        }
+        onBack: localVideosScreen.currentView = "categories"
     }
 
-    // ── Shows ListView ────────────────────────────────────────────────────────
-    ListView {
-        id: showsList
+    // ── Movies list ───────────────────────────────────────────────────────────
+    LocalVideoMovieList {
+        id: movieList
 
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            topMargin: root.vpx(16)
-            leftMargin: root.vpx(32)
-            rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "videos" && localVideosScreen._viewMode === "list"
+        enabled: visible
+
+        systemName: localVideosScreen._currentCategoryName
+        _viewMode: localVideosScreen._viewMode
+
+        onMovieSelected: (index, data) => {
+            localVideosScreen._selectedMovieData = data
+            localVideosScreen.currentView = "movieDetail"
         }
-
-        model: localVideos ? localVideos.showsModel : null
-        clip: true
-        keyNavigationEnabled: true
-        highlightMoveDuration: Theme.animDurationFast
-        highlightRangeMode: ListView.ApplyRange
-        preferredHighlightBegin: height * 0.35
-        preferredHighlightEnd: height * 0.65
-
-        visible: localVideosScreen.currentView === "shows"
-
-        Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
-                event.accepted = true
-                if (localVideos && currentIndex >= 0) {
-                    localVideos.selectShow(currentIndex)
-                    localVideosScreen._selectedShowIndex = currentIndex
-                    localVideosScreen.currentView = "seasons"
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                localVideosScreen.currentView = "categories"
-            }
+        onViewModeChanged: (mode) => {
+            localVideosScreen._viewMode = mode
+            localVideosScreen._routeFocus()
         }
-
-        delegate: Item {
-            id: showDelegate
-
-            width: showsList.width
-            height: root.vpx(72)
-
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorSecondary
-                opacity: showDelegate.ListView.isCurrentItem ? 1.0 : 0.0
-                radius: root.vpx(Theme.focusRingRadius)
-
-                scale: showDelegate.ListView.isCurrentItem && showsList.activeFocus
-                    ? Theme.focusScale : 1.0
-                Behavior on scale {
-                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
-                }
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.animDurationFast }
-                }
-            }
-
-            Column {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    right: parent.right
-                    rightMargin: root.vpx(16)
-                    verticalCenter: parent.verticalCenter
-                }
-                spacing: root.vpx(4)
-
-                Text {
-                    text: model.name
-                    color: Theme.colorText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeHeading)
-                    elide: Text.ElideRight
-                    width: parent.width
-                }
-
-                Text {
-                    text: model.seasonCount + " seasons · " + model.episodeCount + " episodes"
-                    color: Theme.colorTextDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                }
-            }
-
-            FocusRing {
-                visible: showDelegate.ListView.isCurrentItem && showsList.activeFocus
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    showsList.currentIndex = index
-                    showsList.forceActiveFocus()
-                }
-                onDoubleClicked: {
-                    showsList.currentIndex = index
-                    if (localVideos) {
-                        localVideos.selectShow(index)
-                        localVideosScreen._selectedShowIndex = index
-                        localVideosScreen.currentView = "seasons"
-                    }
-                }
-            }
-        }
-
-        // Empty state
-        Text {
-            anchors.centerIn: parent
-            visible: showsList.count === 0
-            text: "No shows found."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeBody)
-            horizontalAlignment: Text.AlignHCenter
-        }
+        onBack: localVideosScreen.currentView = "categories"
     }
 
-    // ── Seasons ListView ──────────────────────────────────────────────────────
-    ListView {
-        id: seasonsList
+    // ── Movie detail ──────────────────────────────────────────────────────────
+    LocalVideoMovieDetail {
+        id: movieDetail
 
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            topMargin: root.vpx(16)
-            leftMargin: root.vpx(32)
-            rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "movieDetail"
+        enabled: visible
+
+        moviePath:        localVideosScreen._selectedMovieData.path        || ""
+        movieTitle:       localVideosScreen._selectedMovieData.title       || ""
+        movieYear:        localVideosScreen._selectedMovieData.year        || 0
+        movieGenre:       localVideosScreen._selectedMovieData.genre       || ""
+        movieDescription: localVideosScreen._selectedMovieData.description || ""
+        moviePosterPath:  localVideosScreen._selectedMovieData.posterPath  || ""
+
+        onPlay: (path) => {
+            if (localVideos) localVideos.playVideo(path, localVideos.getResumePosition(path))
         }
-
-        model: localVideos ? localVideos.seasonsModel : null
-        clip: true
-        keyNavigationEnabled: true
-        highlightMoveDuration: Theme.animDurationFast
-        highlightRangeMode: ListView.ApplyRange
-        preferredHighlightBegin: height * 0.35
-        preferredHighlightEnd: height * 0.65
-
-        visible: localVideosScreen.currentView === "seasons"
-
-        Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
-                event.accepted = true
-                if (localVideos && currentIndex >= 0) {
-                    localVideos.selectSeason(currentIndex)
-                    localVideosScreen._selectedSeasonIndex = currentIndex
-                    localVideosScreen.currentView = "episodes"
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                localVideosScreen.currentView = "shows"
-            }
-        }
-
-        delegate: Item {
-            id: seasonDelegate
-
-            width: seasonsList.width
-            height: root.vpx(72)
-
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorSecondary
-                opacity: seasonDelegate.ListView.isCurrentItem ? 1.0 : 0.0
-                radius: root.vpx(Theme.focusRingRadius)
-
-                scale: seasonDelegate.ListView.isCurrentItem && seasonsList.activeFocus
-                    ? Theme.focusScale : 1.0
-                Behavior on scale {
-                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
-                }
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.animDurationFast }
-                }
-            }
-
-            Column {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    right: parent.right
-                    rightMargin: root.vpx(16)
-                    verticalCenter: parent.verticalCenter
-                }
-                spacing: root.vpx(4)
-
-                Text {
-                    text: model.name
-                    color: Theme.colorText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeHeading)
-                    elide: Text.ElideRight
-                    width: parent.width
-                }
-
-                Text {
-                    text: model.episodeCount + " episodes"
-                    color: Theme.colorTextDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                }
-            }
-
-            FocusRing {
-                visible: seasonDelegate.ListView.isCurrentItem && seasonsList.activeFocus
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    seasonsList.currentIndex = index
-                    seasonsList.forceActiveFocus()
-                }
-                onDoubleClicked: {
-                    seasonsList.currentIndex = index
-                    if (localVideos) {
-                        localVideos.selectSeason(index)
-                        localVideosScreen._selectedSeasonIndex = index
-                        localVideosScreen.currentView = "episodes"
-                    }
-                }
-            }
-        }
-
-        // Empty state
-        Text {
-            anchors.centerIn: parent
-            visible: seasonsList.count === 0
-            text: "No seasons found."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeBody)
-            horizontalAlignment: Text.AlignHCenter
-        }
+        onBack: localVideosScreen.currentView = "videos"
     }
 
-    // ── Episodes ListView ─────────────────────────────────────────────────────
-    ListView {
-        id: episodesList
+    // ── Shows grid ────────────────────────────────────────────────────────────
+    LocalVideoShowGrid {
+        id: showGrid
 
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-            topMargin: root.vpx(16)
-            leftMargin: root.vpx(32)
-            rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "shows" && localVideosScreen._viewMode === "grid"
+        enabled: visible
+
+        systemName: localVideosScreen._currentCategoryName
+        _viewMode: localVideosScreen._viewMode
+
+        onShowSelected: (index, data) => {
+            localVideosScreen._selectedShowIndex = index
+            localVideosScreen._selectedShowData = data
+            if (localVideos) localVideos.selectShow(index)
+            localVideosScreen.currentView = "showDetail"
         }
-
-        model: localVideos ? localVideos.episodesModel : null
-        clip: true
-        keyNavigationEnabled: true
-        highlightMoveDuration: Theme.animDurationFast
-        highlightRangeMode: ListView.ApplyRange
-        preferredHighlightBegin: height * 0.35
-        preferredHighlightEnd: height * 0.65
-
-        visible: localVideosScreen.currentView === "episodes"
-
-        Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
-                event.accepted = true
-                if (localVideos && currentIndex >= 0 && currentItem) {
-                    localVideos.playVideo(currentItem.episodePath, localVideos.getResumePosition(currentItem.episodePath))
-                }
-            } else if (keys.isCancel(event)) {
-                event.accepted = true
-                localVideosScreen.currentView = "seasons"
-            }
+        onViewModeChanged: (mode) => {
+            localVideosScreen._viewMode = mode
+            localVideosScreen._routeFocus()
         }
+        onBack: localVideosScreen.currentView = "categories"
+    }
 
-        delegate: Item {
-            id: episodeDelegate
+    // ── Shows list ────────────────────────────────────────────────────────────
+    LocalVideoShowList {
+        id: showList
 
-            readonly property string episodePath: model.path
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "shows" && localVideosScreen._viewMode === "list"
+        enabled: visible
 
-            width: episodesList.width
-            height: root.vpx(64)
+        systemName: localVideosScreen._currentCategoryName
+        _viewMode: localVideosScreen._viewMode
 
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.colorSecondary
-                opacity: episodeDelegate.ListView.isCurrentItem ? 1.0 : 0.0
-                radius: root.vpx(Theme.focusRingRadius)
-
-                scale: episodeDelegate.ListView.isCurrentItem && episodesList.activeFocus
-                    ? Theme.focusScale : 1.0
-                Behavior on scale {
-                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
-                }
-                Behavior on opacity {
-                    NumberAnimation { duration: Theme.animDurationFast }
-                }
-            }
-
-            Text {
-                anchors {
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    verticalCenter: parent.verticalCenter
-                }
-                text: model.title
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-                elide: Text.ElideRight
-                width: parent.width - root.vpx(32)
-            }
-
-            FocusRing {
-                visible: episodeDelegate.ListView.isCurrentItem && episodesList.activeFocus
-            }
-
-            MouseArea {
-                anchors.fill: parent
-                onClicked: {
-                    episodesList.currentIndex = index
-                    episodesList.forceActiveFocus()
-                }
-                onDoubleClicked: {
-                    episodesList.currentIndex = index
-                    if (localVideos) {
-                        localVideos.playVideo(model.path, localVideos.getResumePosition(model.path))
-                    }
-                }
-            }
+        onShowSelected: (index, data) => {
+            localVideosScreen._selectedShowIndex = index
+            localVideosScreen._selectedShowData = data
+            if (localVideos) localVideos.selectShow(index)
+            localVideosScreen.currentView = "showDetail"
         }
-
-        // Empty state
-        Text {
-            anchors.centerIn: parent
-            visible: episodesList.count === 0
-            text: "No episodes found."
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeBody)
-            horizontalAlignment: Text.AlignHCenter
+        onViewModeChanged: (mode) => {
+            localVideosScreen._viewMode = mode
+            localVideosScreen._routeFocus()
         }
+        onBack: localVideosScreen.currentView = "categories"
+    }
+
+    // ── Show detail ───────────────────────────────────────────────────────────
+    LocalVideoShowDetail {
+        id: showDetail
+
+        anchors.fill: parent
+        visible: localVideosScreen.currentView === "showDetail"
+        enabled: visible
+
+        showName:        localVideosScreen._selectedShowData.name        || ""
+        showPosterPath:  localVideosScreen._selectedShowData.posterPath  || ""
+        showYear:        localVideosScreen._selectedShowData.year        || 0
+        showDescription: localVideosScreen._selectedShowData.description || ""
+        showSeasonCount: localVideosScreen._selectedShowData.seasonCount || 0
+
+        onPlayEpisode: (path) => {
+            if (localVideos) localVideos.playVideo(path, localVideos.getResumePosition(path))
+        }
+        onBack: localVideosScreen.currentView = "shows"
     }
 }

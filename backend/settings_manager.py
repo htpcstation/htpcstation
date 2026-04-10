@@ -83,6 +83,7 @@ class SettingsManager(QObject):
     localMusicDirectoryChanged = Signal()
     localMusicViewModeChanged = Signal()
     sortLocalMusicArtistsChanged = Signal()
+    localVideoViewModeChanged = Signal()
     showMoonlightTabChanged = Signal()
     tabVisibilityChanged = Signal()
     localVideoCategoriesChanged = Signal()
@@ -238,6 +239,9 @@ class SettingsManager(QObject):
 
     def _get_local_music_view_mode(self) -> str:
         return self._config.local_music_view_mode
+
+    def _get_local_video_view_mode(self) -> str:
+        return self._config.local_video_view_mode
 
     def _get_sort_local_music_artists(self) -> str:
         return self._config.sort_local_music_artists
@@ -458,6 +462,11 @@ class SettingsManager(QObject):
         str,
         fget=_get_local_music_view_mode,
         notify=localMusicViewModeChanged,
+    )
+    localVideoViewMode = Property(
+        str,
+        fget=_get_local_video_view_mode,
+        notify=localVideoViewModeChanged,
     )
     sortLocalMusicArtists = Property(
         str,
@@ -736,6 +745,12 @@ class SettingsManager(QObject):
         """Persist the view mode for the Local Music screen ('grid' or 'list')."""
         self._config.set_local_music_view_mode(mode)
         self.localMusicViewModeChanged.emit()
+
+    @Slot(str)
+    def setLocalVideoViewMode(self, mode: str) -> None:
+        """Persist the view mode for the Local Videos screen ('grid' or 'list')."""
+        self._config.set_local_video_view_mode(mode)
+        self.localVideoViewModeChanged.emit()
 
     @Slot(str)
     def setSortLocalMusicArtists(self, key: str) -> None:

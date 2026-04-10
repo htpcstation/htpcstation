@@ -435,6 +435,7 @@ class Config:
         self._watch_view_mode: str = "grid"
         self._listen_view_mode: str = "grid"
         self._local_music_view_mode: str = "grid"
+        self._local_video_view_mode: str = "grid"
         # Theme
         self._theme_name: str = "default"
         self._accent_color: str = "#e94560"
@@ -831,6 +832,16 @@ class Config:
         self.save()
 
     @property
+    def local_video_view_mode(self) -> str:
+        """Persisted view mode for the Local Videos screen. Either 'grid' or 'list'."""
+        return self._local_video_view_mode
+
+    def set_local_video_view_mode(self, mode: str) -> None:
+        """Set the view mode for the Local Videos screen and persist the config."""
+        self._local_video_view_mode = mode if mode in ("grid", "list") else "grid"
+        self.save()
+
+    @property
     def hotkey_modifier_evdev(self) -> int | None:
         """evdev code of the modifier (enable_hotkey) button. None if not configured."""
         return self._hotkey_modifier_evdev
@@ -1094,6 +1105,7 @@ class Config:
                 "watch_view_mode": self._watch_view_mode,
                 "listen_view_mode": self._listen_view_mode,
                 "local_music_view_mode": self._local_music_view_mode,
+                "local_video_view_mode": self._local_video_view_mode,
                 "theme_name": self._theme_name,
                 "accent_color": self._accent_color,
                 "focus_ring_color": self._focus_ring_color,
@@ -1300,6 +1312,8 @@ class Config:
             self._listen_view_mode = raw_listen_view_mode if raw_listen_view_mode in ("grid", "list") else "grid"
             raw_local_music_view_mode = ui.get("local_music_view_mode", "grid")
             self._local_music_view_mode = raw_local_music_view_mode if raw_local_music_view_mode in ("grid", "list") else "grid"
+            raw_local_video_view_mode = ui.get("local_video_view_mode", "grid")
+            self._local_video_view_mode = raw_local_video_view_mode if raw_local_video_view_mode in ("grid", "list") else "grid"
             raw_theme_name = ui.get("theme_name", "default").strip()
             self._theme_name = raw_theme_name if raw_theme_name else "default"
             raw_accent = ui.get("accent_color", "").strip()

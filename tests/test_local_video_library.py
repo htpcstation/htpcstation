@@ -616,7 +616,7 @@ class TestEnrichFromCache:
         assert item.year == 0
         assert item.genre == ""
 
-    def test_show_only_poster_and_description_populated(self, tmp_path: Path) -> None:
+    def test_show_poster_description_and_year_populated(self, tmp_path: Path) -> None:
         poster = tmp_path / "cache" / "artwork_scraped" / "Breaking Bad.jpg"
         poster.parent.mkdir(parents=True, exist_ok=True)
         poster.write_bytes(b"")
@@ -629,12 +629,12 @@ class TestEnrichFromCache:
         })
         show = Show(name="Breaking Bad", path=str(tmp_path / "Breaking Bad"))
         _enrich_from_cache([show], cache)
-        # Poster and description should be set
+        # Poster, description, and year should be set
         assert show.poster_path == str(poster)
         assert show.description == "A chemistry teacher..."
-        # Show has no title/year/genre attributes to set — no error expected
+        assert show.year == 2008
+        # Show has no title or genre attributes to set — no error expected
         assert not hasattr(show, "title")
-        assert not hasattr(show, "year")
         assert not hasattr(show, "genre")
 
     def test_custom_art_takes_priority_over_scraped(self, tmp_path: Path) -> None:
@@ -883,3 +883,300 @@ class TestScrapeSlots:
         with patch.object(lib, "selectCategory") as mock_select:
             lib._emit_scrape_finished("Movies")
             mock_select.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Model roles — new fields
+# ---------------------------------------------------------------------------
+
+
+class TestVideoListModelNewRoles:
+    def test_role_names_include_year_genre_description(self) -> None:
+        model = VideoListModel()
+        names = model.roleNames()
+        assert b"year" in names.values()
+        assert b"genre" in names.values()
+        assert b"description" in names.values()
+
+    def test_year_genre_description_data(self) -> None:
+        vf = VideoFile(
+            title="The Matrix",
+            path="/media/matrix.mkv",
+            year=1999,
+            genre="Action, Sci-Fi",
+            description="Sci-fi classic",
+        )
+        model = VideoListModel()
+        model.beginResetModel()
+        model._items = [vf]
+        model._display_items = [vf]
+        model.endResetModel()
+
+        idx = model.index(0, 0)
+        assert model.data(idx, VideoListModel.YearRole) == 1999
+        assert model.data(idx, VideoListModel.GenreRole) == "Action, Sci-Fi"
+        assert model.data(idx, VideoListModel.DescriptionRole) == "Sci-fi classic"
+
+
+class TestShowListModelNewRoles:
+    def test_role_names_include_year_description(self) -> None:
+        model = ShowListModel()
+        names = model.roleNames()
+        assert b"year" in names.values()
+        assert b"description" in names.values()
+
+    def test_year_description_data(self) -> None:
+        show = Show(
+            name="Breaking Bad",
+            path="/media/bb",
+            year=2008,
+            description="A chemistry teacher...",
+        )
+        model = ShowListModel()
+        model.beginResetModel()
+        model._items = [show]
+        model._display_items = [show]
+        model.endResetModel()
+
+        idx = model.index(0, 0)
+        assert model.data(idx, ShowListModel.YearRole) == 2008
+        assert model.data(idx, ShowListModel.DescriptionRole) == "A chemistry teacher..."
+
+    def test_show_year_defaults_to_zero(self) -> None:
+        show = Show(name="New Show", path="/media/new")
+        assert show.year == 0
+
+
+# ---------------------------------------------------------------------------
+# Sort / filter slots
+# ---------------------------------------------------------------------------
+
+
+def _make_library_with_videos(tmp_path: Path, videos: list[VideoFile]) -> "LocalVideoLibrary":
+    """Return a LocalVideoLibrary with _videos pre-seeded (bypasses scanning)."""
+    config = _make_config(tmp_path)
+    lib = _make_library(tmp_path, config)
+    lib._videos.beginResetModel()
+    lib._videos._items = list(videos)
+    lib._videos._display_items = list(videos)
+    lib._videos.endResetModel()
+    return lib
+
+
+def _make_library_with_shows(tmp_path: Path, shows: list[Show]) -> "LocalVideoLibrary":
+    """Return a LocalVideoLibrary with _shows pre-seeded (bypasses scanning)."""
+    config = _make_config(tmp_path)
+    lib = _make_library(tmp_path, config)
+    lib._shows.beginResetModel()
+    lib._shows._items = list(shows)
+    lib._shows._display_items = list(shows)
+    lib._shows.endResetModel()
+    return lib
+
+
+class TestSortVideos:
+    def test_sort_az_orders_display_items(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Zebra", path="/z.mkv"),
+            VideoFile(title="apple", path="/a.mkv"),
+            VideoFile(title="Mango", path="/m.mkv"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("az")
+        titles = [lib._videos._display_items[i].title for i in range(3)]
+        assert titles == sorted(titles, key=str.lower)
+
+    def test_sort_az_leaves_items_unchanged(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Zebra", path="/z.mkv"),
+            VideoFile(title="apple", path="/a.mkv"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        original_items = list(lib._videos._items)
+        lib.sortVideos("az")
+        assert lib._videos._items == original_items
+
+    def test_sort_za_orders_display_items_descending(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="apple", path="/a.mkv"),
+            VideoFile(title="Mango", path="/m.mkv"),
+            VideoFile(title="Zebra", path="/z.mkv"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("za")
+        titles = [lib._videos._display_items[i].title for i in range(3)]
+        assert titles == sorted(titles, key=str.lower, reverse=True)
+
+    def test_sort_year_desc(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Old", path="/o.mkv", year=1990),
+            VideoFile(title="New", path="/n.mkv", year=2020),
+            VideoFile(title="Mid", path="/m.mkv", year=2005),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("year_desc")
+        years = [lib._videos._display_items[i].year for i in range(3)]
+        assert years == [2020, 2005, 1990]
+
+    def test_sort_year_asc(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="New", path="/n.mkv", year=2020),
+            VideoFile(title="Old", path="/o.mkv", year=1990),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("year_asc")
+        years = [lib._videos._display_items[i].year for i in range(2)]
+        assert years == [1990, 2020]
+
+    def test_empty_sort_key_no_reorder(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Zebra", path="/z.mkv"),
+            VideoFile(title="apple", path="/a.mkv"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("")
+        # Original insertion order preserved
+        assert lib._videos._display_items[0].title == "Zebra"
+
+
+class TestFilterVideosByGenre:
+    def test_filter_by_genre_reduces_display_items(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="ActionFilm", path="/a.mkv", genre="Action, Drama"),
+            VideoFile(title="Comedy", path="/c.mkv", genre="Comedy"),
+            VideoFile(title="ActionDrama", path="/ad.mkv", genre="Drama, Action"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.filterVideosByGenre("Action")
+        assert lib._videos.rowCount() == 2
+        titles = {lib._videos._display_items[i].title for i in range(2)}
+        assert titles == {"ActionFilm", "ActionDrama"}
+
+    def test_filter_empty_genre_shows_all(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="A", path="/a.mkv", genre="Action"),
+            VideoFile(title="B", path="/b.mkv", genre="Comedy"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.filterVideosByGenre("Action")
+        assert lib._videos.rowCount() == 1
+        lib.filterVideosByGenre("")
+        assert lib._videos.rowCount() == 2
+
+    def test_filter_empty_genre_reapplies_sort(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Zebra", path="/z.mkv", genre="Action"),
+            VideoFile(title="apple", path="/a.mkv", genre="Action"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib._video_sort = "az"
+        lib.filterVideosByGenre("")
+        titles = [lib._videos._display_items[i].title for i in range(2)]
+        assert titles == sorted(titles, key=str.lower)
+
+    def test_filter_and_sort_compose(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="Zebra Action", path="/z.mkv", genre="Action"),
+            VideoFile(title="Comedy", path="/c.mkv", genre="Comedy"),
+            VideoFile(title="Apple Action", path="/a.mkv", genre="Action"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.sortVideos("az")
+        lib.filterVideosByGenre("Action")
+        assert lib._videos.rowCount() == 2
+        titles = [lib._videos._display_items[i].title for i in range(2)]
+        assert titles == ["Apple Action", "Zebra Action"]
+
+    def test_items_unchanged_after_filter(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="A", path="/a.mkv", genre="Action"),
+            VideoFile(title="B", path="/b.mkv", genre="Comedy"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        lib.filterVideosByGenre("Action")
+        assert len(lib._videos._items) == 2
+
+
+class TestSortShows:
+    def test_sort_za_orders_display_items_descending(self, tmp_path: Path) -> None:
+        shows = [
+            Show(name="apple", path="/a"),
+            Show(name="Zebra", path="/z"),
+            Show(name="Mango", path="/m"),
+        ]
+        lib = _make_library_with_shows(tmp_path, shows)
+        lib.sortShows("za")
+        names = [lib._shows._display_items[i].name for i in range(3)]
+        assert names == sorted(names, key=str.lower, reverse=True)
+
+    def test_sort_az(self, tmp_path: Path) -> None:
+        shows = [
+            Show(name="Zebra", path="/z"),
+            Show(name="apple", path="/a"),
+        ]
+        lib = _make_library_with_shows(tmp_path, shows)
+        lib.sortShows("az")
+        names = [lib._shows._display_items[i].name for i in range(2)]
+        assert names == sorted(names, key=str.lower)
+
+    def test_sort_year_desc(self, tmp_path: Path) -> None:
+        shows = [
+            Show(name="Old", path="/o", year=1995),
+            Show(name="New", path="/n", year=2020),
+        ]
+        lib = _make_library_with_shows(tmp_path, shows)
+        lib.sortShows("year_desc")
+        years = [lib._shows._display_items[i].year for i in range(2)]
+        assert years == [2020, 1995]
+
+    def test_sort_shows_leaves_items_unchanged(self, tmp_path: Path) -> None:
+        shows = [
+            Show(name="Zebra", path="/z"),
+            Show(name="apple", path="/a"),
+        ]
+        lib = _make_library_with_shows(tmp_path, shows)
+        original_items = list(lib._shows._items)
+        lib.sortShows("az")
+        assert lib._shows._items == original_items
+
+
+class TestGetVideoGenres:
+    def test_returns_sorted_unique_genres(self, tmp_path: Path) -> None:
+        videos = [
+            VideoFile(title="A", path="/a.mkv", genre="Action, Drama"),
+            VideoFile(title="B", path="/b.mkv", genre="Comedy, Action"),
+            VideoFile(title="C", path="/c.mkv", genre="Drama"),
+        ]
+        lib = _make_library_with_videos(tmp_path, videos)
+        genres = lib.getVideoGenres()
+        assert genres == ["Action", "Comedy", "Drama"]
+
+    def test_returns_empty_list_when_no_genres(self, tmp_path: Path) -> None:
+        videos = [VideoFile(title="A", path="/a.mkv", genre="")]
+        lib = _make_library_with_videos(tmp_path, videos)
+        assert lib.getVideoGenres() == []
+
+    def test_whitespace_stripped(self, tmp_path: Path) -> None:
+        videos = [VideoFile(title="A", path="/a.mkv", genre=" Action ,  Drama ")]
+        lib = _make_library_with_videos(tmp_path, videos)
+        genres = lib.getVideoGenres()
+        assert "Action" in genres
+        assert "Drama" in genres
+
+
+class TestSelectCategoryResetsState:
+    def test_sort_filter_reset_on_select_category(self, tmp_path: Path) -> None:
+        cats = [{"name": "Movies", "type": "flat", "paths": [str(tmp_path)]}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        (tmp_path / "cfg").mkdir(exist_ok=True)
+        lib = _make_library(tmp_path / "cfg", config)
+
+        lib._video_sort = "az"
+        lib._video_genre = "Action"
+        lib._show_sort = "za"
+
+        lib.selectCategory(0)
+
+        assert lib._video_sort == ""
+        assert lib._video_genre == ""
+        assert lib._show_sort == ""

@@ -365,3 +365,64 @@ class TestSettingsManagerLocalVideos:
         cats = config.local_video_categories
         added = next(c for c in cats if c["name"] == "Test")
         assert all(isinstance(p, str) for p in added["paths"])
+
+
+# ---------------------------------------------------------------------------
+# Local video view mode — Config and SettingsManager
+# ---------------------------------------------------------------------------
+
+
+class TestLocalVideoViewModeConfig:
+    def test_default_is_grid(self, tmp_path: Path) -> None:
+        cfg = _make_config(tmp_path)
+        assert cfg.local_video_view_mode == "grid"
+
+    def test_set_list_persists(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.json"
+        cfg_dir = tmp_path
+        with patch("backend.config.CONFIG_FILE", cfg_file), \
+             patch("backend.config.CONFIG_DIR", cfg_dir):
+            cfg = Config()
+            cfg.set_local_video_view_mode("list")
+
+        with patch("backend.config.CONFIG_FILE", cfg_file), \
+             patch("backend.config.CONFIG_DIR", cfg_dir):
+            reloaded = Config()
+        assert reloaded.local_video_view_mode == "list"
+
+    def test_invalid_value_coerces_to_grid(self, tmp_path: Path) -> None:
+        cfg = _make_config(tmp_path)
+        cfg.save = lambda: None
+        cfg.set_local_video_view_mode("invalid")
+        assert cfg.local_video_view_mode == "grid"
+
+    def test_save_includes_local_video_view_mode(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "config.json"
+        cfg_dir = tmp_path
+        with patch("backend.config.CONFIG_FILE", cfg_file), \
+             patch("backend.config.CONFIG_DIR", cfg_dir):
+            cfg = Config()
+            cfg.set_local_video_view_mode("list")
+
+        data = json.loads(cfg_file.read_text())
+        assert data["ui"]["local_video_view_mode"] == "list"
+
+
+class TestLocalVideoViewModeSettingsManager:
+    def test_property_returns_config_value(self, tmp_path: Path) -> None:
+        from backend.settings_manager import SettingsManager
+        manager, config = _make_manager(tmp_path)
+        config._local_video_view_mode = "list"
+        assert manager.localVideoViewMode == "list"
+
+    def test_set_local_video_view_mode_calls_config_and_emits(self, tmp_path: Path) -> None:
+        from backend.settings_manager import SettingsManager
+        manager, config = _make_manager(tmp_path)
+
+        emitted: list = []
+        manager.localVideoViewModeChanged.connect(lambda: emitted.append(True))
+
+        manager.setLocalVideoViewMode("list")
+
+        assert len(emitted) == 1
+        config.save.assert_called()
