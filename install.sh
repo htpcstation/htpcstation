@@ -535,14 +535,14 @@ check_dependencies() {
     if check_python_import "PySide6" "PySide6" 2>/dev/null; then
         report_dep "PySide6" "ok"
     else
-        local pyside6_hint
         case "$DISTRO_FAMILY" in
-            debian)  pyside6_hint="pip install PySide6 (installed via venv)" ;;
-            fedora)  pyside6_hint="$(install_cmd "python3-pyside6")" ;;
-            arch)    pyside6_hint="$(install_cmd "pyside6")" ;;
-            *)       pyside6_hint="pip install PySide6" ;;
+            debian)
+                echo "  ${YELLOW}○${RESET} PySide6  (will be installed via pip in venv)"
+                ;;
+            fedora) report_dep "PySide6" "missing" "$(install_cmd "python3-pyside6")" ;;
+            arch)   report_dep "PySide6" "missing" "$(install_cmd "pyside6")" ;;
+            *)      echo "  ${YELLOW}○${RESET} PySide6  (will be installed via pip in venv)" ;;
         esac
-        report_dep "PySide6" "missing" "$pyside6_hint"
     fi
 
     # python-mpv
