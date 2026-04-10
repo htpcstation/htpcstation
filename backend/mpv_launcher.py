@@ -224,6 +224,22 @@ class LibMpvPlayer(QObject):
                 return
             # Re-enable video now that we know the user wants to watch.
             self._player["vid"] = "auto"
+            # Wait for the first actual video frame before signalling ready.
+            # With vid=no, wait_until_playing returns as soon as the demuxer
+            # starts — but the video decoder/renderer hasn't produced a frame
+            # yet. Poll video-params (set once the decoder outputs a frame)
+            # so the loading overlay stays visible until there's something
+            # on screen.
+            for _ in range(300):  # up to 30s in 100ms steps
+                if self._cancel_requested.is_set():
+                    self._player.stop()
+                    return
+                try:
+                    if self._player.video_params is not None:
+                        break
+                except Exception:  # noqa: BLE001
+                    break
+                time.sleep(0.1)
             QMetaObject.invokeMethod(
                 self,
                 "_on_playback_started",
