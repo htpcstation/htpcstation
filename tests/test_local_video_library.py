@@ -29,9 +29,11 @@ from backend.local_video_library import (
     SeasonListModel,
     Show,
     ShowListModel,
+    TmdbScraper,
     VideoFile,
     VideoListModel,
     _enrich_from_cache,
+    _parse_movie_title,
     _scan_flat,
     _scan_tv_shows,
 )
@@ -850,21 +852,22 @@ class TestScrapeSlots:
         (tmp_path / "cfg").mkdir(exist_ok=True)
         lib = _make_library(tmp_path / "cfg", config)
 
-        finished: list[str] = []
+        finished: list[tuple] = []
 
         # Connect the signal to a list to capture emissions
-        lib._emit_scrape_finished = lambda name, cat_type: finished.append(name)  # type: ignore[method-assign]
+        lib._emit_scrape_finished = lambda name, cat_type, s, t, sk: finished.append((name, s, t, sk))  # type: ignore[method-assign]
 
         scraper_mock = MagicMock()
+        scraper_mock.scrape_movies.return_value = (0, 0, 0)
         with patch("backend.local_video_library.TmdbScraper", return_value=scraper_mock):
             lib.scrapeMovies()
             lib._scrape_thread.join(timeout=5)  # type: ignore[union-attr]
 
         # _emit_scrape_finished was invoked via QMetaObject on the main thread;
         # since there's no event loop running in tests, invoke directly to verify logic
-        lib.scrapeFinished.connect(finished.append)
-        lib._emit_scrape_finished("Movies", "movies")
-        assert "Movies" in finished
+        lib.scrapeFinished.connect(lambda dn, s, t, sk: finished.append((dn, s, t, sk)))
+        lib._emit_scrape_finished("Movies", "movies", 3, 0, 0)
+        assert any(item[0] == "Movies" for item in finished)
 
     def test_emit_scrape_finished_calls_selectCategory(self, tmp_path: Path) -> None:
         cats = [{"name": "Movies", "type": "flat", "paths": []}]
@@ -872,7 +875,7 @@ class TestScrapeSlots:
         lib = _make_library(tmp_path, config)
 
         with patch.object(lib, "selectCategory") as mock_select:
-            lib._emit_scrape_finished("Movies", "movies")
+            lib._emit_scrape_finished("Movies", "movies", 3, 0, 0)
             mock_select.assert_called_once_with(0)
 
     def test_emit_scrape_finished_no_reload_when_no_matching_category(self, tmp_path: Path) -> None:
@@ -881,7 +884,7 @@ class TestScrapeSlots:
         lib = _make_library(tmp_path, config)
 
         with patch.object(lib, "selectCategory") as mock_select:
-            lib._emit_scrape_finished("Movies", "movies")
+            lib._emit_scrape_finished("Movies", "movies", 0, 0, 0)
             mock_select.assert_not_called()
 
 
@@ -1180,3 +1183,215 @@ class TestSelectCategoryResetsState:
         assert lib._video_sort == ""
         assert lib._video_genre == ""
         assert lib._show_sort == ""
+
+
+# ---------------------------------------------------------------------------
+# Title sanitization tests
+# ---------------------------------------------------------------------------
+
+
+class TestParseMovieTitle:
+    def test_parse_movie_title_strips_codec_suffix(self) -> None:
+        title, year = _parse_movie_title("Coraline - x264 Bluray-1080p")
+        assert title == "Coraline"
+        assert year is None
+
+    def test_parse_movie_title_strips_suffix_preserves_year(self) -> None:
+        title, year = _parse_movie_title("The Matrix (1999) - x264 1080p")
+        assert title == "The Matrix"
+        assert year == 1999
+
+    def test_parse_movie_title_unchanged_clean_title(self) -> None:
+        title, year = _parse_movie_title("The Matrix (1999)")
+        assert title == "The Matrix"
+        assert year == 1999
+
+    def test_parse_movie_title_strips_x265_suffix(self) -> None:
+        title, year = _parse_movie_title("300 - x265 Bluray-1080p")
+        assert title == "300"
+        assert year is None
+
+    def test_parse_movie_title_no_year_no_junk(self) -> None:
+        title, year = _parse_movie_title("Inception")
+        assert title == "Inception"
+        assert year is None
+
+    def test_parse_movie_title_strips_bluray_suffix(self) -> None:
+        title, year = _parse_movie_title("A Charlie Brown Christmas - x264 Bluray-1080p")
+        assert title == "A Charlie Brown Christmas"
+        assert year is None
+
+
+# ---------------------------------------------------------------------------
+# LocalVideoCache.clear_tombstones tests
+# ---------------------------------------------------------------------------
+
+
+class TestClearTombstones:
+    def test_clear_tombstones_removes_null_tmdb_id_entries(self, tmp_path: Path) -> None:
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {
+            "Coraline - x264 Bluray-1080p": {"tmdb_id": None},
+            "300 - x265 Bluray-1080p": {"tmdb_id": None},
+        }
+        cache.save()
+
+        cache.clear_tombstones()
+
+        assert "Coraline - x264 Bluray-1080p" not in cache._data
+        assert "300 - x265 Bluray-1080p" not in cache._data
+        assert cache._data == {}
+
+    def test_clear_tombstones_preserves_real_entries(self, tmp_path: Path) -> None:
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {
+            "Tombstone Movie": {"tmdb_id": None},
+            "Good Movie": {"tmdb_id": 12345, "title": "Good Movie"},
+        }
+        cache.save()
+
+        cache.clear_tombstones()
+
+        assert "Tombstone Movie" not in cache._data
+        assert "Good Movie" in cache._data
+        assert cache._data["Good Movie"]["tmdb_id"] == 12345
+
+    def test_clear_tombstones_noop_when_no_tombstones(self, tmp_path: Path) -> None:
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {
+            "Good Movie": {"tmdb_id": 42, "title": "Good Movie"},
+        }
+        cache.save()
+
+        cache.clear_tombstones()
+
+        assert "Good Movie" in cache._data
+
+    def test_clear_tombstones_saves_to_disk(self, tmp_path: Path) -> None:
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {"Dead Entry": {"tmdb_id": None}}
+        cache.save()
+
+        cache.clear_tombstones()
+
+        # Reload from disk and verify it was persisted
+        fresh = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        fresh.load()
+        assert "Dead Entry" not in fresh._data
+
+
+# ---------------------------------------------------------------------------
+# TmdbScraper count-returning tests
+# ---------------------------------------------------------------------------
+
+
+class TestScrapeMoviesCounts:
+    def test_scrape_movies_returns_counts(self, tmp_path: Path) -> None:
+        """search_movie returns result for 1 of 2 items → (1, 1, 0)."""
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+
+        item1 = VideoFile(title="Good Movie", path=str(tmp_path / "Good Movie.mkv"))
+        item2 = VideoFile(title="Bad Movie", path=str(tmp_path / "Bad Movie.mkv"))
+
+        scraper = TmdbScraper.__new__(TmdbScraper)
+        scraper._api_key = "fake"
+
+        def fake_search_movie(title, year):
+            if title == "Good Movie":
+                return {"id": 1, "title": "Good Movie", "release_date": "2000-01-01",
+                        "overview": "", "poster_path": None}
+            return None
+
+        scraper.search_movie = fake_search_movie
+        scraper.download_poster = MagicMock(return_value=False)
+
+        result = scraper.scrape_movies([item1, item2], cache)
+        assert result == (1, 1, 0)
+
+    def test_scrape_movies_skips_existing(self, tmp_path: Path) -> None:
+        """Item already has tmdb_id → (0, 0, 1)."""
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {"Existing Movie": {"tmdb_id": 99, "title": "Existing Movie"}}
+
+        item = VideoFile(title="Existing Movie", path=str(tmp_path / "Existing Movie.mkv"))
+
+        scraper = TmdbScraper.__new__(TmdbScraper)
+        scraper._api_key = "fake"
+        scraper.search_movie = MagicMock()
+
+        result = scraper.scrape_movies([item], cache)
+        assert result == (0, 0, 1)
+        scraper.search_movie.assert_not_called()
+
+
+class TestScrapeTvShowsCounts:
+    def test_scrape_tv_shows_returns_counts(self, tmp_path: Path) -> None:
+        """search_tv_show returns result for 1 of 2 shows → (1, 1, 0)."""
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+
+        show1 = Show(name="Good Show", path=str(tmp_path / "Good Show"))
+        show2 = Show(name="Bad Show", path=str(tmp_path / "Bad Show"))
+
+        scraper = TmdbScraper.__new__(TmdbScraper)
+        scraper._api_key = "fake"
+
+        def fake_search_tv_show(name):
+            if name == "Good Show":
+                return {"id": 1, "name": "Good Show", "first_air_date": "2005-01-01",
+                        "overview": "", "poster_path": None}
+            return None
+
+        scraper.search_tv_show = fake_search_tv_show
+        scraper.download_poster = MagicMock(return_value=False)
+
+        result = scraper.scrape_tv_shows([show1, show2], cache)
+        assert result == (1, 1, 0)
+
+    def test_scrape_tv_shows_skips_existing(self, tmp_path: Path) -> None:
+        """Show already has tmdb_id → (0, 0, 1)."""
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+        cache._data = {"Existing Show": {"tmdb_id": 55, "title": "Existing Show"}}
+
+        show = Show(name="Existing Show", path=str(tmp_path / "Existing Show"))
+
+        scraper = TmdbScraper.__new__(TmdbScraper)
+        scraper._api_key = "fake"
+        scraper.search_tv_show = MagicMock()
+
+        result = scraper.scrape_tv_shows([show], cache)
+        assert result == (0, 0, 1)
+        scraper.search_tv_show.assert_not_called()
+
+    def test_scrape_tv_shows_sanitizes_name_for_search(self, tmp_path: Path) -> None:
+        """The sanitized name is sent to search but the raw name is used as cache key."""
+        cache = LocalVideoCache(tmp_path / "cache", has_scraped_art=True)
+        cache.ensure_dirs()
+
+        show = Show(name="Breaking Bad - x264 1080p", path=str(tmp_path / "Breaking Bad - x264 1080p"))
+
+        scraper = TmdbScraper.__new__(TmdbScraper)
+        scraper._api_key = "fake"
+        search_calls: list[str] = []
+
+        def fake_search_tv_show(name):
+            search_calls.append(name)
+            return {"id": 7, "name": "Breaking Bad", "first_air_date": "2008-01-20",
+                    "overview": "", "poster_path": None}
+
+        scraper.search_tv_show = fake_search_tv_show
+        scraper.download_poster = MagicMock(return_value=False)
+
+        result = scraper.scrape_tv_shows([show], cache)
+        assert result == (1, 0, 0)
+        # Search was called with the sanitized name
+        assert search_calls == ["Breaking Bad"]
+        # Cache key is the raw folder name
+        assert "Breaking Bad - x264 1080p" in cache._data

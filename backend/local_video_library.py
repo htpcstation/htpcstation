@@ -175,6 +175,21 @@ class LocalVideoCache:
         self._data[key] = {**existing, "tmdb_id": None}
         self.save()
 
+    def clear_tombstones(self) -> None:
+        """Remove all tombstone entries (tmdb_id=null) so items can be re-scraped."""
+        tombstone_keys = [
+            k for k, v in self._data.items()
+            if isinstance(v, dict) and "tmdb_id" in v and v["tmdb_id"] is None
+        ]
+        if tombstone_keys:
+            for k in tombstone_keys:
+                del self._data[k]
+            self.save()
+            logger.info(
+                "LocalVideoCache.clear_tombstones: cleared %d tombstone(s) from %s",
+                len(tombstone_keys), self._cache_dir,
+            )
+
 
 def _movies_cache() -> LocalVideoCache:
     return LocalVideoCache(_MOVIES_CACHE_DIR, has_scraped_art=True)
@@ -195,13 +210,33 @@ def _custom_category_cache(name: str) -> LocalVideoCache:
 
 _MOVIE_YEAR_RE = re.compile(r'^(.+?)\s*\((\d{4})\)\s*$')
 
+_RELEASE_JUNK_RE = re.compile(
+    r'\s*[-–]\s*(?:'
+    r'x264|x265|xvid|h\.?264|h\.?265|hevc|avc|aac|mp3|flac|dts|ac3|atmos|truehd|'
+    r'bluray|blu-?ray|bdrip|brrip|dvdrip|dvdscr|hdtv|webrip|web-?dl|remux|uhd|hdr|sdr|'
+    r'480p|720p|1080p|2160p|4k|hq|ts|cam'
+    r')\b.*$',
+    re.IGNORECASE,
+)
+
 
 def _parse_movie_title(stem: str) -> tuple[str, int | None]:
-    """Split 'The Matrix (1999)' → ('The Matrix', 1999). No match → (stem, None)."""
-    m = _MOVIE_YEAR_RE.match(stem)
+    """Extract (title, year|None) from a filename stem.
+
+    Strips codec/quality/release suffixes first, then extracts year.
+    Examples:
+      'The Matrix (1999)'                → ('The Matrix', 1999)
+      'Coraline - x264 Bluray-1080p'     → ('Coraline', None)
+      '300 - x265 Bluray-1080p'          → ('300', None)
+      'The Matrix (1999) - x264 1080p'   → ('The Matrix', 1999)
+    """
+    # Strip release junk
+    clean = _RELEASE_JUNK_RE.sub('', stem).strip(' .-_') or stem
+    # Try year extraction on the cleaned string
+    m = _MOVIE_YEAR_RE.match(clean)
     if m:
         return m.group(1).strip(), int(m.group(2))
-    return stem, None
+    return clean, None
 
 
 class TmdbScraper:
@@ -303,9 +338,13 @@ class TmdbScraper:
         items: list,
         cache: LocalVideoCache,
         on_progress: Callable | None = None,
-    ) -> None:
-        """Scrape TMDb metadata for a list of VideoFile items."""
+    ) -> tuple[int, int, int]:
+        """Scrape TMDb metadata for a list of VideoFile items.
+
+        Returns (scraped, tombstoned, skipped).
+        """
         logger.info("scrape_movies: %d items to process", len(items))
+        scraped = tombstoned = skipped = 0
         total = len(items)
         for done, item in enumerate(items, start=1):
             key = Path(item.path).stem
@@ -313,6 +352,7 @@ class TmdbScraper:
 
             if cache.is_tombstoned(key):
                 logger.debug("scrape_movies: skipping tombstoned key=%r", key)
+                skipped += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
@@ -320,17 +360,21 @@ class TmdbScraper:
             existing = cache.get_entry(key)
             if existing is not None and existing.get("tmdb_id") is not None:
                 logger.debug("scrape_movies: skipping already-scraped key=%r", key)
+                skipped += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
 
             title, year = _parse_movie_title(key)
+            if title != key:
+                logger.debug("scrape_movies: sanitized key %r → title=%r year=%s", key, title, year)
             result = self.search_movie(title, year)
             logger.debug("scrape_movies: search title=%r year=%s → %s", title, year, result.get("id") if result else "no result")
 
             if result is None:
                 cache.write_tombstone(key)
                 logger.info("scrape_movies: no TMDb result for key=%r, writing tombstone", key)
+                tombstoned += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 time.sleep(0.26)
@@ -353,42 +397,56 @@ class TmdbScraper:
 
             cache.set_entry(key, entry)
             logger.info("scrape_movies: saved key=%r tmdb_id=%s poster=%s", key, entry["tmdb_id"], bool(entry["poster_scraped"]))
+            scraped += 1
 
             if on_progress is not None:
                 on_progress(done, total)
 
             time.sleep(0.26)
 
+        logger.info("scrape_movies: done — scraped=%d tombstoned=%d skipped=%d", scraped, tombstoned, skipped)
+        return scraped, tombstoned, skipped
+
     def scrape_tv_shows(
         self,
         shows: list,
         cache: LocalVideoCache,
         on_progress: Callable | None = None,
-    ) -> None:
-        """Scrape TMDb metadata for a list of Show items."""
+    ) -> tuple[int, int, int]:
+        """Scrape TMDb metadata for a list of Show items.
+
+        Returns (scraped, tombstoned, skipped).
+        """
         logger.info("scrape_tv_shows: %d shows to process", len(shows))
+        scraped = tombstoned = skipped = 0
         total = len(shows)
         for done, show in enumerate(shows, start=1):
             key = show.name
             logger.debug("scrape_tv_shows: processing key=%r", key)
 
             if cache.is_tombstoned(key):
+                skipped += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
 
             existing = cache.get_entry(key)
             if existing is not None and existing.get("tmdb_id") is not None:
+                skipped += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 continue
 
-            result = self.search_tv_show(show.name)
-            logger.debug("scrape_tv_shows: search name=%r → %s", show.name, result.get("id") if result else "no result")
+            search_name = _RELEASE_JUNK_RE.sub('', show.name).strip(' .-_') or show.name
+            if search_name != show.name:
+                logger.debug("scrape_tv_shows: sanitized name %r → %r", show.name, search_name)
+            result = self.search_tv_show(search_name)
+            logger.debug("scrape_tv_shows: search name=%r → %s", search_name, result.get("id") if result else "no result")
 
             if result is None:
                 cache.write_tombstone(key)
                 logger.info("scrape_tv_shows: no TMDb result for key=%r, writing tombstone", key)
+                tombstoned += 1
                 if on_progress is not None:
                     on_progress(done, total)
                 time.sleep(0.26)
@@ -412,11 +470,15 @@ class TmdbScraper:
 
             cache.set_entry(key, entry)
             logger.info("scrape_tv_shows: saved key=%r tmdb_id=%s poster=%s", key, entry["tmdb_id"], bool(entry["poster_scraped"]))
+            scraped += 1
 
             if on_progress is not None:
                 on_progress(done, total)
 
             time.sleep(0.26)
+
+        logger.info("scrape_tv_shows: done — scraped=%d tombstoned=%d skipped=%d", scraped, tombstoned, skipped)
+        return scraped, tombstoned, skipped
 
     def close(self) -> None:
         """Close the underlying requests session."""
@@ -873,9 +935,9 @@ class LocalVideoLibrary(QObject):
     currentCategoryIndexChanged = Signal()
     playbackStarted = Signal()
     playbackFinished = Signal()
-    scrapeProgressChanged = Signal(int, int)  # (done, total)
-    scrapeFinished = Signal(str)              # category display name
-    scrapeError = Signal(str)                 # error message
+    scrapeProgressChanged = Signal(int, int)        # (done, total)
+    scrapeFinished = Signal(str, int, int, int)     # (display_name, scraped, tombstoned, skipped)
+    scrapeError = Signal(str)                       # error message
 
     def __init__(self, config: Config, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -1206,6 +1268,7 @@ class LocalVideoLibrary(QObject):
 
         cache.ensure_dirs()
         cache.load()
+        cache.clear_tombstones()
         scraper = TmdbScraper(api_key)
 
         def _on_progress(done: int, total: int) -> None:
@@ -1218,11 +1281,12 @@ class LocalVideoLibrary(QObject):
             )
 
         def _run() -> None:
+            scraped = tombstoned = skipped = 0
             try:
                 if category_type == "movies":
-                    scraper.scrape_movies(items, cache, _on_progress)
+                    scraped, tombstoned, skipped = scraper.scrape_movies(items, cache, _on_progress)
                 else:
-                    scraper.scrape_tv_shows(items, cache, _on_progress)
+                    scraped, tombstoned, skipped = scraper.scrape_tv_shows(items, cache, _on_progress)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("TmdbScraper error: %s", exc)
                 QMetaObject.invokeMethod(
@@ -1239,6 +1303,9 @@ class LocalVideoLibrary(QObject):
                     Qt.ConnectionType.QueuedConnection,
                     Q_ARG(str, display_name),
                     Q_ARG(str, category_type),
+                    Q_ARG(int, scraped),
+                    Q_ARG(int, tombstoned),
+                    Q_ARG(int, skipped),
                 )
 
         self._scrape_thread = threading.Thread(target=_run, daemon=True)
@@ -1248,10 +1315,14 @@ class LocalVideoLibrary(QObject):
     def _emit_scrape_progress(self, done: int, total: int) -> None:
         self.scrapeProgressChanged.emit(done, total)
 
-    @Slot(str, str)
-    def _emit_scrape_finished(self, display_name: str, category_type: str) -> None:
-        logger.info("_emit_scrape_finished: display_name=%r category_type=%r", display_name, category_type)
-        self.scrapeFinished.emit(display_name)
+    @Slot(str, str, int, int, int)
+    def _emit_scrape_finished(self, display_name: str, category_type: str,
+                              scraped: int, tombstoned: int, skipped: int) -> None:
+        logger.info(
+            "_emit_scrape_finished: display_name=%r scraped=%d tombstoned=%d skipped=%d",
+            display_name, scraped, tombstoned, skipped,
+        )
+        self.scrapeFinished.emit(display_name, scraped, tombstoned, skipped)
         # Reload the category that was just scraped.
         # Walk categories to find the matching one by type, then call selectCategory.
         cats = self._config.local_video_categories

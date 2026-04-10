@@ -1693,8 +1693,11 @@ FocusScope {
     // ── localVideos scrape signals ───────────────────────────────────────────
     Connections {
         target: localVideos
-        function onScrapeFinished(displayName) {
-            if (settingsScreen._showToast) settingsScreen._showToast(displayName + " scrape complete")
+        function onScrapeFinished(displayName, scraped, tombstoned, skipped) {
+            var parts = [scraped + " scraped"]
+            if (tombstoned > 0) parts.push(tombstoned + " not found on TMDb")
+            if (skipped > 0) parts.push(skipped + " already done")
+            if (settingsScreen._showToast) settingsScreen._showToast(displayName + ": " + parts.join(", "))
         }
         function onScrapeError(message) {
             if (settingsScreen._showToast) settingsScreen._showToast(message)
