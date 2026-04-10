@@ -1,3 +1,5 @@
+**Note: This is still very much a WIP** 
+
 # HTPC Station
 
 Turn a cheap mini PC into a console-like home entertainment system.
