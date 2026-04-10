@@ -151,9 +151,9 @@ MPV Bindings
 
 ## Current Limitations
 
-- Changing which tabs are visible requires restarting the app.
-- HTPC Station does not scrape ROM metadata. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library.
+- ROM scraping is not yet supported. You need another scraper to create `gamelist.xml` files and download artwork before HTPC Station can display your retro game library. Importing from Batocera or Knulli works great.
 - Continue Watching is hidden for managed and kids Plex profiles. This is a Plex platform limitation with no known workaround.
+- Changing which tabs are visible requires restarting the app.
 - Moonlight host pairing must be done through Moonlight's own interface. You can open it from Settings by pressing "Open Moonlight."
 - Large Plex audio playlists (over 1,000 tracks) are hidden to avoid performance issues.
 - Live TV requires an HDHomeRun tuner connected through Plex DVR. Channels not available on the tuner show "Not available" in the guide.
@@ -205,7 +205,7 @@ For those interested in what's under the hood:
 
 As you can probably tell by looking at the code, I leveraged AI coding assistants to help build HTPC Station. I have nearly a decade of systems engineering experience, but I am not a full-stack developer by trade. That being said, the scope of this project balooned pretty quickly, and was by no means a small effort to get it to its current state.
 
-This builds on the work of many excellent projects, either by directly implenting or by taking inspiration from: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, MPV, Brave/Chromium, Pegasus, ES-DE, Batocera, and others. Thank you to all the developers and communities behind these tools.
+This builds on the work of many excellent projects, either by directly implenting or by taking inspiration from: Qt and PySide6, RetroArch, Steam, Moonlight, Plex, MPV, Brave/Chromium, Pegasus, ES-DE, Batocera, Knulli, and others. Thank you to all the developers and communities behind these tools.
 
 ---
 
