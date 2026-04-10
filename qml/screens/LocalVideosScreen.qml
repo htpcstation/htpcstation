@@ -61,11 +61,38 @@ FocusScope {
             showDetail.forceActiveFocus()
     }
 
+    // ── Categories header bar ────────────────────────────────────────────────
+    Rectangle {
+        id: categoriesHeader
+
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: root.vpx(56)
+        color: Theme.colorSecondary
+        visible: localVideosScreen.currentView === "categories"
+
+        Text {
+            anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
+            text: "Videos"
+            color: Theme.colorText
+            font.family: Theme.fontFamily
+            font.pixelSize: root.vpx(Theme.fontSizeHeading)
+        }
+    }
+
     // ── Categories ListView ───────────────────────────────────────────────────
     ListView {
         id: categoriesList
 
-        anchors.fill: parent
+        anchors {
+            top: categoriesHeader.bottom
+            left: parent.left
+            right: parent.right
+            bottom: parent.bottom
+            topMargin: root.vpx(16)
+            leftMargin: root.vpx(16)
+            rightMargin: root.vpx(16)
+            bottomMargin: root.vpx(16)
+        }
 
         model: localVideos ? localVideos.categoriesModel : null
         clip: true
@@ -78,21 +105,6 @@ FocusScope {
 
         visible: localVideosScreen.currentView === "categories"
         enabled: visible
-
-        // Header
-        header: Rectangle {
-            width: categoriesList.width
-            height: root.vpx(56)
-            color: Theme.colorSecondary
-
-            Text {
-                anchors { left: parent.left; leftMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-                text: "Videos"
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            }
-        }
 
         Keys.onPressed: (event) => {
             if (keys.isAccept(event)) {
