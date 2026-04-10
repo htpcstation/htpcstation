@@ -99,7 +99,7 @@ class LibMpvPlayer(QObject):
             input_gamepad="yes",
             cache="yes",
             log_handler=_mpv_log,
-            loglevel="warn",
+            loglevel="info" if logger.isEnabledFor(logging.DEBUG) else "warn",
         )
 
         # Set persistent options
@@ -394,7 +394,42 @@ class LibMpvPlayer(QObject):
 
     @Slot()
     def _on_playback_started(self) -> None:
+        self._log_playback_info()
         self.mpvPlaybackStarted.emit()
+
+    def _log_playback_info(self) -> None:
+        """Log stream and decoding details for debugging choppy playback."""
+        if self._player is None or not logger.isEnabledFor(logging.DEBUG):
+            return
+        p = self._player
+        try:
+            vp = p.video_params or {}
+            logger.debug(
+                "MPV playback info:\n"
+                "  Video: %s %sx%s @ %s fps\n"
+                "  HW decode: %s (requested: %s)\n"
+                "  Pixel format: %s\n"
+                "  Audio: %s %s Hz %s ch\n"
+                "  Demuxer: %s\n"
+                "  Cache: %s sec buffered\n"
+                "  VO: %s  GPU API: %s  GPU context: %s",
+                p.video_codec or "?",
+                vp.get("w", "?"), vp.get("h", "?"),
+                p.container_fps or p.estimated_vf_fps or "?",
+                p.hwdec_current or "none",
+                p.hwdec or "?",
+                vp.get("pixelformat", "?"),
+                p.audio_codec or "?",
+                p.audio_params.get("samplerate", "?") if p.audio_params else "?",
+                p.audio_params.get("channel-count", "?") if p.audio_params else "?",
+                p.demuxer or "?",
+                p.demuxer_cache_duration or 0,
+                p.current_vo or "?",
+                p.gpu_api or "?",
+                p.gpu_context or "?",
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("MPV playback info: could not read properties")
 
     # ------------------------------------------------------------------
     # Internal helpers
