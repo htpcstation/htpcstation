@@ -433,6 +433,7 @@ class LocalMusicLibrary(QObject):
                     year = tags.get("year", 0)
                     genre = tags.get("genre", "")
                     duration_ms = tags.get("duration_ms", 0)
+                    codec_info = tags.get("codec_info", "")
                     folder_path = str(root_path)
 
                     # Ensure artist entry
@@ -457,6 +458,7 @@ class LocalMusicLibrary(QObject):
                         "track_num": track_num,
                         "duration_ms": duration_ms,
                         "file_path": str(file_path),
+                        "codec_info": codec_info,
                     })
 
                     # Extract album art (once per folder)
@@ -557,6 +559,10 @@ class LocalMusicLibrary(QObject):
 
                     for track in album_data.get("tracks", []):
                         file_path = track["file_path"]
+                        codec = track.get("codec_info", "")
+                        if not codec:
+                            # Old cache without codec_info — derive from file on disk
+                            codec = _codec_info_from_file(Path(file_path))
                         tracks.append({
                             "title": track["title"],
                             "index": track["track_num"],
@@ -565,6 +571,7 @@ class LocalMusicLibrary(QObject):
                             "grandparentTitle": artist_name,
                             "streamUrl": Path(file_path).as_uri(),
                             "ratingKey": "",
+                            "codecInfo": codec,
                         })
                     break
             if album_info:
@@ -640,9 +647,57 @@ def _read_tags(file_path: Path) -> dict:
             result["duration_ms"] = int(audio.info.length * 1000)
         else:
             result["duration_ms"] = 0
+
+        # Codec info
+        result["codec_info"] = _format_codec_info(audio, file_path)
     except Exception:
         logger.debug("_read_tags: failed to read tags from %s", file_path, exc_info=True)
     return result
+
+
+def _codec_info_from_file(file_path: Path) -> str:
+    """Read codec info from an audio file (used for cache entries missing the field)."""
+    try:
+        audio = mutagen.File(str(file_path), easy=True)
+        if audio is None:
+            return ""
+        return _format_codec_info(audio, file_path)
+    except Exception:
+        return ""
+
+
+def _format_codec_info(audio: object, file_path: Path) -> str:
+    """Build a codec summary string like 'FLAC 44.1/16', 'MP3 256', 'OPUS 64'."""
+    info = audio.info  # type: ignore[union-attr]
+    if info is None:
+        return ""
+
+    # Codec name from file extension
+    ext = file_path.suffix.lower().lstrip(".")
+    codec_map = {
+        "flac": "FLAC", "mp3": "MP3", "ogg": "OGG", "opus": "OPUS",
+        "m4a": "AAC", "aac": "AAC", "wma": "WMA", "wav": "WAV",
+        "aif": "AIFF", "aiff": "AIFF",
+    }
+    codec = codec_map.get(ext, ext.upper())
+
+    # Lossless formats: show sample_rate / bits_per_sample
+    sample_rate = getattr(info, "sample_rate", 0)
+    bits = getattr(info, "bits_per_sample", 0)
+    if codec in ("FLAC", "WAV", "AIFF") and sample_rate:
+        sr = sample_rate / 1000  # e.g. 44100 -> 44.1
+        sr_str = f"{sr:g}"  # drop trailing zeros
+        if bits:
+            return f"{codec} {sr_str}/{bits}"
+        return f"{codec} {sr_str}"
+
+    # Lossy formats: show bitrate in kbps
+    bitrate = getattr(info, "bitrate", 0)
+    if bitrate:
+        kbps = round(bitrate / 1000)
+        return f"{codec} {kbps}"
+
+    return codec
 
 
 def _first_tag(audio: object, key: str, default: str) -> str:
@@ -723,4 +778,5 @@ def _make_track_dict(file_path: Path, tags: dict) -> dict:
         "grandparentTitle": tags.get("artist", "Unknown Artist"),
         "streamUrl": file_path.as_uri(),
         "ratingKey": "",
+        "codecInfo": tags.get("codec_info", ""),
     }

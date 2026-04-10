@@ -537,45 +537,64 @@ FocusScope {
                 margins: root.vpx(24)
             }
 
-            // ── Left: album art ──────────────────────────────────────────────
-            Item {
+            // ── Left: album art + codec info ────────────────────────────────
+            Column {
                 id: nowPlayingArtArea
 
                 anchors {
-                    top: parent.top
+                    verticalCenter: parent.verticalCenter
                     left: parent.left
-                    bottom: parent.bottom
                 }
                 width: Math.min(root.vpx(250), parent.height * 0.55)
+                spacing: root.vpx(14)
 
-                Rectangle {
-                    anchors.fill: parent
-                    color: Qt.darker(Theme.colorSecondary, 1.4)
-                    radius: root.vpx(Theme.focusRingRadius)
-                    visible: nowPlayingArt.status !== Image.Ready
-                             || !homeScreen._playbackAlbumData.posterLocal
+                // Art container (square)
+                Item {
+                    width: parent.width
+                    height: width
 
-                    Text {
-                        anchors.centerIn: parent
-                        width: parent.width - root.vpx(8)
-                        text: homeScreen._playbackAlbumData.title || ""
-                        color: Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                        wrapMode: Text.Wrap
-                        horizontalAlignment: Text.AlignHCenter
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Qt.darker(Theme.colorSecondary, 1.4)
+                        radius: root.vpx(Theme.focusRingRadius)
+                        visible: nowPlayingArt.status !== Image.Ready
+                                 || !homeScreen._playbackAlbumData.posterLocal
+
+                        Text {
+                            anchors.centerIn: parent
+                            width: parent.width - root.vpx(8)
+                            text: homeScreen._playbackAlbumData.title || ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            wrapMode: Text.Wrap
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+
+                    Image {
+                        id: nowPlayingArt
+
+                        anchors.fill: parent
+                        source: homeScreen._playbackAlbumData.posterLocal || ""
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        visible: status === Image.Ready
+                                 && !!homeScreen._playbackAlbumData.posterLocal
                     }
                 }
 
-                Image {
-                    id: nowPlayingArt
+                // Codec info label directly below album art
+                Text {
+                    id: nowPlayingCodecInfo
 
-                    anchors.fill: parent
-                    source: homeScreen._playbackAlbumData.posterLocal || ""
-                    fillMode: Image.PreserveAspectFit
-                    asynchronous: true
-                    visible: status === Image.Ready
-                             && !!homeScreen._playbackAlbumData.posterLocal
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: homeScreen._nowPlayingTrack.codecInfo || ""
+                    visible: !!text
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    opacity: 0.8
                 }
             }
 

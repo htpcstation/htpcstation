@@ -214,6 +214,7 @@ class PlexTrack:
     parent_title: str = ""       # album name
     grandparent_title: str = ""  # artist name
     media_key: str = ""          # /library/parts/... path for streaming
+    codec_info: str = ""         # e.g. "FLAC 44.1/16", "MP3 320"
 
 
 # ---------------------------------------------------------------------------
@@ -255,13 +256,16 @@ def parse_album(data: dict) -> PlexAlbum:
 
 def parse_track(data: dict) -> PlexTrack:
     """Parse a Plex API JSON dict into a PlexTrack dataclass."""
-    # Extract the streaming path from Media[0].Part[0].key
+    # Extract the streaming path and codec info from Media[0]
     media_key = ""
+    codec_info = ""
     media_list = data.get("Media") or []
     if media_list and isinstance(media_list[0], dict):
-        parts = media_list[0].get("Part") or []
+        media = media_list[0]
+        parts = media.get("Part") or []
         if parts and isinstance(parts[0], dict):
             media_key = parts[0].get("key", "")
+        codec_info = _format_plex_codec_info(media)
     return PlexTrack(
         rating_key=str(data.get("ratingKey", "")),
         title=data.get("title", ""),
@@ -270,4 +274,47 @@ def parse_track(data: dict) -> PlexTrack:
         parent_title=data.get("parentTitle", ""),
         grandparent_title=data.get("grandparentTitle", ""),
         media_key=media_key,
+        codec_info=codec_info,
     )
+
+
+def _format_plex_codec_info(media: dict) -> str:
+    """Build a codec summary from a Plex Media dict.
+
+    Plex Media dict fields: audioCodec, bitrate, audioChannels,
+    plus nested Stream entries with samplingRate, bitDepth.
+    """
+    codec_raw = (media.get("audioCodec") or media.get("container") or "").lower()
+    codec_map = {
+        "flac": "FLAC", "mp3": "MP3", "aac": "AAC", "opus": "OPUS",
+        "vorbis": "OGG", "ogg": "OGG", "wav": "WAV", "wma": "WMA",
+        "alac": "ALAC", "aiff": "AIFF", "pcm": "PCM",
+    }
+    codec = codec_map.get(codec_raw, codec_raw.upper())
+    if not codec:
+        return ""
+
+    # Lossless: try to find sample rate and bit depth from Stream entries
+    if codec in ("FLAC", "ALAC", "WAV", "AIFF", "PCM"):
+        streams = media.get("Part", [{}])[0].get("Stream") if media.get("Part") else None
+        sample_rate = 0
+        bit_depth = 0
+        if streams:
+            for s in streams:
+                if s.get("streamType") == 2:  # audio stream
+                    sample_rate = int(s.get("samplingRate", 0) or 0)
+                    bit_depth = int(s.get("bitDepth", 0) or 0)
+                    break
+        if sample_rate:
+            sr = sample_rate / 1000
+            sr_str = f"{sr:g}"
+            if bit_depth:
+                return f"{codec} {sr_str}/{bit_depth}"
+            return f"{codec} {sr_str}"
+
+    # Lossy: show bitrate
+    bitrate = int(media.get("bitrate", 0) or 0)
+    if bitrate:
+        return f"{codec} {bitrate}"
+
+    return codec
