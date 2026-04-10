@@ -2,16 +2,13 @@ import QtQuick
 import ".."
 import "../components"
 
-// Settings screen — tabbed layout with three focus zones:
+// Settings screen — tabbed layout with two focus zones:
 //   1. Tab strip (horizontal) — Left/Right to switch tabs
-//   2. Sidebar (vertical, Games & User Interface tabs only) — Up/Down sub-categories
-//   3. Content list — the settings ListView
+//   2. Content list — the settings ListView
 //
 // Navigation:
-//   Down from tabs → sidebar (if present) or content list
-//   Right/A from sidebar → content list
-//   Left/B from sidebar → tab strip
-//   Left/B from content list → sidebar (if present) or tab strip
+//   Down from tabs → content list
+//   B from content list → tab strip
 //   B from tab strip → back()
 FocusScope {
     id: settingsScreen
@@ -30,12 +27,11 @@ FocusScope {
     property int _librariesVersion: 0
 
     // ── Focus zone tracking ──────────────────────────────────────────────────
-    // "tabs" | "sidebar" | "content"
+    // "tabs" | "content"
     property string _focusZone: "tabs"
 
     // ── Tab / sub-category indices ───────────────────────────────────────────
     property int _activeTabIndex: 0
-    property int _activeSubIndex: 0
 
     // ── Tabs data model ──────────────────────────────────────────────────────
     readonly property var _tabs: [
@@ -125,12 +121,19 @@ FocusScope {
     ]
 
     // ── Derived state ────────────────────────────────────────────────────────
-    readonly property bool _hasSidebar: _tabs[_activeTabIndex].subcategories !== null
-
     function _currentSettings() {
         var tab = _tabs[_activeTabIndex]
-        if (tab.subcategories)
-            return tab.subcategories[_activeSubIndex].settings
+        if (tab.subcategories) {
+            // Flatten sub-categories into a single list with header dividers
+            var items = []
+            for (var i = 0; i < tab.subcategories.length; i++) {
+                var sub = tab.subcategories[i]
+                items.push({ type: "header", label: sub.name })
+                for (var j = 0; j < sub.settings.length; j++)
+                    items.push(sub.settings[j])
+            }
+            return items
+        }
         return tab.settings
     }
 
@@ -274,8 +277,6 @@ FocusScope {
         }
         if (_focusZone === "tabs") {
             tabStrip.forceActiveFocus()
-        } else if (_focusZone === "sidebar") {
-            sidebarList.forceActiveFocus()
         } else {
             // Focus the loaded component inside the current delegate
             var item = settingsList.currentItem
@@ -300,18 +301,19 @@ FocusScope {
     }
 
     on_ActiveTabIndexChanged: {
-        _activeSubIndex = 0
-        settingsList.currentIndex = 0
-        _refreshModel()
-    }
-
-    on_ActiveSubIndexChanged: {
-        settingsList.currentIndex = 0
         _refreshModel()
     }
 
     function _refreshModel() {
-        settingsList.model = _currentSettings()
+        var items = _currentSettings()
+        settingsList.model = items
+        // Set index to first non-header row
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].type !== "header") {
+                settingsList.currentIndex = i
+                return
+            }
+        }
     }
 
     // ── Header bar ───────────────────────────────────────────────────────────
@@ -411,7 +413,7 @@ FocusScope {
                     settingsScreen._activeTabIndex++
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
-                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "content"
+                settingsScreen._focusZone = "content"
             } else if (keys.isCancel(event)) {
                 event.accepted = true
                 settingsScreen.back()
@@ -419,88 +421,55 @@ FocusScope {
         }
     }
 
-    // ── Sidebar ──────────────────────────────────────────────────────────────
-    Rectangle {
-        id: sidebarArea
+    // ── Delegate components (top-level) ──────────────────────────────────────
 
-        anchors {
-            top: tabStrip.bottom
-            left: parent.left
-            bottom: parent.bottom
-        }
-        width: settingsScreen._hasSidebar ? root.vpx(180) : 0
-        color: Theme.colorSecondary
-        visible: settingsScreen._hasSidebar
+    // ── Header component ─────────────────────────────────────────────────
+    Component {
+        id: headerComp
+        Item {
+            property var rowData
+            implicitHeight: root.vpx(48)
+            width: parent ? parent.width : 0
 
-        ListView {
-            id: sidebarList
-
-            anchors {
-                fill: parent
-                topMargin: root.vpx(12)
-            }
-            clip: true
-            keyNavigationEnabled: false
-            model: settingsScreen._hasSidebar ? settingsScreen._tabs[settingsScreen._activeTabIndex].subcategories : []
-            currentIndex: settingsScreen._activeSubIndex
-
-            delegate: Item {
-                width: sidebarList.width
-                height: root.vpx(40)
-
-                // Left accent bar for active sub-category
-                Rectangle {
-                    anchors {
-                        left: parent.left
-                        top: parent.top
-                        bottom: parent.bottom
-                    }
-                    width: root.vpx(3)
-                    color: Theme.colorPrimary
-                    visible: index === settingsScreen._activeSubIndex
+            // Separator line
+            Rectangle {
+                anchors {
+                    left: parent.left
+                    right: parent.right
+                    verticalCenter: headerLabel.verticalCenter
                 }
-
-                Text {
-                    anchors {
-                        left: parent.left
-                        leftMargin: root.vpx(16)
-                        verticalCenter: parent.verticalCenter
-                    }
-                    text: modelData.name
-                    color: index === settingsScreen._activeSubIndex
-                           ? Theme.colorPrimary : Theme.colorTextDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: root.vpx(Theme.fontSizeBody)
-                    font.bold: index === settingsScreen._activeSubIndex
-
-                    Behavior on color {
-                        ColorAnimation { duration: Theme.animDurationFast }
-                    }
-                }
+                height: root.vpx(1)
+                color: Theme.colorTextDim
+                opacity: 0.3
             }
 
-            Keys.onPressed: (event) => {
-                if (event.key === Qt.Key_Up) {
-                    event.accepted = true
-                    if (settingsScreen._activeSubIndex > 0)
-                        settingsScreen._activeSubIndex--
-                } else if (event.key === Qt.Key_Down) {
-                    event.accepted = true
-                    var subcats = settingsScreen._tabs[settingsScreen._activeTabIndex].subcategories
-                    if (settingsScreen._activeSubIndex < subcats.length - 1)
-                        settingsScreen._activeSubIndex++
-                } else if (event.key === Qt.Key_Right || keys.isAccept(event)) {
-                    event.accepted = true
-                    settingsScreen._focusZone = "content"
-                } else if (event.key === Qt.Key_Left || keys.isCancel(event)) {
-                    event.accepted = true
-                    settingsScreen._focusZone = "tabs"
+            // Header label on a background patch to "break" the line
+            Rectangle {
+                anchors {
+                    left: parent.left
+                    verticalCenter: headerLabel.verticalCenter
                 }
+                width: headerLabel.width + root.vpx(16)
+                height: headerLabel.height + root.vpx(4)
+                color: Theme.colorBackground
+            }
+
+            Text {
+                id: headerLabel
+                anchors {
+                    left: parent.left
+                    bottom: parent.bottom
+                    bottomMargin: root.vpx(6)
+                }
+                text: rowData ? rowData.label : ""
+                color: Theme.colorPrimary
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                font.bold: true
+                font.letterSpacing: root.vpx(2)
             }
         }
     }
-
-    // ── Delegate components (top-level) ──────────────────────────────────────
 
     // ── Text input component ─────────────────────────────────────────────
     Component {
@@ -759,7 +728,7 @@ FocusScope {
 
         anchors {
             top: tabStrip.bottom
-            left: sidebarArea.right
+            left: parent.left
             right: parent.right
             bottom: parent.bottom
             topMargin: root.vpx(16)
@@ -793,25 +762,31 @@ FocusScope {
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
                 _moveFocus(1)
-            } else if (event.key === Qt.Key_Left) {
-                event.accepted = true
-                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "tabs"
             } else if (keys.isCancel(event)) {
                 event.accepted = true
-                settingsScreen._focusZone = settingsScreen._hasSidebar ? "sidebar" : "tabs"
+                settingsScreen._focusZone = "tabs"
             }
         }
 
-        // Move focus by delta
+        // Move focus by delta, skipping header rows.
+        // When moving up past the first item, jump to the tab strip.
         function _moveFocus(delta) {
             var newIndex = currentIndex + delta
-            if (newIndex >= 0 && newIndex < model.length) {
-                currentIndex = newIndex
-                // Force active focus on the loaded component
-                var item = currentItem
-                if (item && item.children[0] && item.children[0].item) {
-                    item.children[0].item.forceActiveFocus()
+            while (newIndex >= 0 && newIndex < model.length) {
+                if (model[newIndex].type !== "header") {
+                    currentIndex = newIndex
+                    // Force active focus on the loaded component
+                    var item = currentItem
+                    if (item && item.children[0] && item.children[0].item) {
+                        item.children[0].item.forceActiveFocus()
+                    }
+                    return
                 }
+                newIndex += delta
+            }
+            // Ran off the top — move focus to tab strip
+            if (delta < 0) {
+                settingsScreen._focusZone = "tabs"
             }
         }
 
@@ -830,6 +805,7 @@ FocusScope {
 
                 // Pick the right component based on type
                 sourceComponent: {
+                    if (rowData.type === "header")  return headerComp
                     if (rowData.type === "text")    return textInputComp
                     if (rowData.type === "toggle")  return toggleComp
                     if (rowData.type === "button")  return buttonComp
@@ -845,9 +821,11 @@ FocusScope {
                         item.rowData = Qt.binding(function() {
                             return delegateWrapper.rowData
                         })
-                        item.focus = Qt.binding(function() {
-                            return delegateWrapper.isCurrentRow && settingsList.activeFocus
-                        })
+                        if (rowData.type !== "header") {
+                            item.focus = Qt.binding(function() {
+                                return delegateWrapper.isCurrentRow && settingsList.activeFocus
+                            })
+                        }
                     }
                 }
             }
@@ -960,5 +938,12 @@ FocusScope {
 
     Component.onCompleted: {
         _refreshModel()
+        // Set initial index to first non-header row
+        for (var i = 0; i < settingsList.model.length; i++) {
+            if (settingsList.model[i].type !== "header") {
+                settingsList.currentIndex = i
+                break
+            }
+        }
     }
 }
