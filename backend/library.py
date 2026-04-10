@@ -7,6 +7,7 @@ QAbstractListModel subclasses.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -28,6 +29,50 @@ from backend.models import Game, System
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Filesystem fallback helpers
+# ---------------------------------------------------------------------------
+
+
+def _clean_rom_title(filename: str) -> str:
+    """Derive a display title from a ROM filename.
+
+    Strips the extension, removes anything in parentheses or brackets
+    (including the delimiters themselves), and trims whitespace.
+    """
+    name = Path(filename).stem
+    name = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", name)
+    return name.strip()
+
+
+def _scan_rom_files(
+    system_path: Path,
+    folder_name: str,
+    extensions: list[str],
+) -> list[Game]:
+    """Scan *system_path* for ROM files matching *extensions*.
+
+    Returns a list of :class:`Game` objects with cleaned filenames as titles,
+    sorted case-insensitively by name.  Only top-level files are considered
+    (no recursive descent).
+    """
+    ext_lower = {ext.lower() for ext in extensions}
+    games: list[Game] = []
+    for child in sorted(system_path.iterdir()):
+        if not child.is_file():
+            continue
+        if child.suffix.lower() not in ext_lower:
+            continue
+        games.append(
+            Game(
+                path=child.resolve(),
+                name=_clean_rom_title(child.name),
+                system_folder=folder_name,
+            )
+        )
+    games.sort(key=lambda g: g.name.lower())
+    return games
 
 
 # ---------------------------------------------------------------------------
@@ -640,13 +685,17 @@ class GameLibrary(QObject):
         for entry in sorted(rom_dir.iterdir()):
             if not entry.is_dir():
                 continue
-            gamelist_file = entry / "gamelist.xml"
-            if not gamelist_file.exists():
-                continue
 
+            gamelist_file = entry / "gamelist.xml"
             folder_name = entry.name
             sys_config = self._config.get_system(folder_name)
-            games = parse_gamelist(entry)
+
+            if gamelist_file.exists():
+                games = parse_gamelist(entry)
+            elif sys_config.extensions:
+                games = _scan_rom_files(entry, folder_name, sys_config.extensions)
+            else:
+                continue
 
             system = System(
                 folder_name=folder_name,
