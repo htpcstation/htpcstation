@@ -500,7 +500,8 @@ FocusScope {
                 "moonlight":  "moonlight",
                 "plexvideo":  "plexmedia",
                 "plexmusic":  "plexmusic",
-                "localmusic": "localmusic"
+                "localmusic": "localmusic",
+                "localvideo": "localvideos"
             }
             var targetSlug = slugMap[source] || ""
             var tabIndex = homeScreen.tabSlugs.indexOf(targetSlug)

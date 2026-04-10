@@ -23,7 +23,6 @@ FocusScope {
     signal back()
 
     // Navigation target passed by HomeScreen when navigating from recently played.
-    // navTarget deep-link routing is a future milestone.
     property var navTarget: null
 
     // Only process input when this screen is active.
@@ -40,8 +39,41 @@ FocusScope {
     property string _currentCategoryName: ""
     property int _selectedCategoryIndex: -1
 
+    // Guard: navTarget navigation fires only once (on first active focus).
+    property bool _navTargetApplied: false
+
     onCurrentViewChanged: _routeFocus()
-    onActiveFocusChanged: if (activeFocus) _routeFocus()
+    onActiveFocusChanged: {
+        if (activeFocus) {
+            _routeFocus()
+            if (navTarget && !_navTargetApplied) {
+                _navTargetApplied = true
+                if (navTarget.type === "movie" && navTarget.path) {
+                    localVideosScreen._selectedMovieData = {
+                        "path":        navTarget.path,
+                        "title":       navTarget.title       || "",
+                        "posterPath":  navTarget.poster_path || "",
+                        "year":        0,
+                        "genre":       "",
+                        "description": ""
+                    }
+                    localVideosScreen.currentView = "movieDetail"
+                    _routeFocus()
+                } else if (navTarget.type === "show" && navTarget.show_path) {
+                    localVideosScreen._selectedShowData = {
+                        "name":        navTarget.show_name        || "",
+                        "path":        navTarget.show_path        || "",
+                        "posterPath":  navTarget.show_poster_path || "",
+                        "year":        0,
+                        "description": "",
+                        "seasonCount": 0
+                    }
+                    localVideosScreen.currentView = "showDetail"
+                    _routeFocus()
+                }
+            }
+        }
+    }
 
     Component.onCompleted: {
         if (settings) _viewMode = settings.localVideoViewMode || "grid"
@@ -260,9 +292,26 @@ FocusScope {
         moviePosterPath:  localVideosScreen._selectedMovieData.posterPath  || ""
 
         onPlay: (path) => {
+            if (recentlyPlayed) {
+                var art = localVideosScreen._selectedMovieData.posterPath || ""
+                if (art && !art.startsWith("file://")) art = "file://" + art
+                recentlyPlayed.record("localvideo",
+                    localVideosScreen._selectedMovieData.title || "",
+                    art,
+                    {
+                        "type":        "movie",
+                        "path":        localVideosScreen._selectedMovieData.path  || "",
+                        "title":       localVideosScreen._selectedMovieData.title || "",
+                        "poster_path": localVideosScreen._selectedMovieData.posterPath || ""
+                    }
+                )
+            }
             if (localVideos) localVideos.playVideo(path, localVideos.getResumePosition(path))
         }
-        onBack: localVideosScreen.currentView = "videos"
+        onBack: {
+            if (localVideosScreen._navTargetApplied) localVideosScreen.back()
+            else localVideosScreen.currentView = "videos"
+        }
     }
 
     // ── Shows grid ────────────────────────────────────────────────────────────
@@ -328,8 +377,25 @@ FocusScope {
         showSeasonCount: localVideosScreen._selectedShowData.seasonCount || 0
 
         onPlayEpisode: (path) => {
+            if (recentlyPlayed) {
+                var art = localVideosScreen._selectedShowData.posterPath || ""
+                if (art && !art.startsWith("file://")) art = "file://" + art
+                recentlyPlayed.record("localvideo",
+                    localVideosScreen._selectedShowData.name || "",
+                    art,
+                    {
+                        "type":             "show",
+                        "show_path":        localVideosScreen._selectedShowData.path       || "",
+                        "show_name":        localVideosScreen._selectedShowData.name       || "",
+                        "show_poster_path": localVideosScreen._selectedShowData.posterPath || ""
+                    }
+                )
+            }
             if (localVideos) localVideos.playVideo(path, localVideos.getResumePosition(path))
         }
-        onBack: localVideosScreen.currentView = "shows"
+        onBack: {
+            if (localVideosScreen._navTargetApplied) localVideosScreen.back()
+            else localVideosScreen.currentView = "shows"
+        }
     }
 }
