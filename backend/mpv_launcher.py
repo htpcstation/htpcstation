@@ -232,6 +232,10 @@ class LibMpvPlayer(QObject):
                 Qt.ConnectionType.QueuedConnection,
             )
 
+        # Short-lived fire-and-forget thread: blocks on player.wait_until_playing()
+        # then uses QMetaObject.invokeMethod(QueuedConnection) to marshal back to the
+        # main thread. QThread/moveToThread is not used here because these threads are
+        # sub-second, have no Qt event loop requirement, and are never reused.
         t = threading.Thread(target=_wait_and_signal, daemon=True)
         t.start()
 
@@ -294,6 +298,10 @@ class LibMpvPlayer(QObject):
                 Qt.ConnectionType.QueuedConnection,
             )
 
+        # Short-lived fire-and-forget thread: blocks on player.wait_until_playing()
+        # then uses QMetaObject.invokeMethod(QueuedConnection) to marshal back to the
+        # main thread. QThread/moveToThread is not used here because these threads are
+        # sub-second, have no Qt event loop requirement, and are never reused.
         t = threading.Thread(target=_wait_and_signal, daemon=True)
         t.start()
 
@@ -309,6 +317,10 @@ class LibMpvPlayer(QObject):
         logger.info("LibMpvPlayer: stopping playback")
         self._cancel_requested.set()
         player = self._player
+        # Short-lived fire-and-forget thread: blocks on player.stop() (which may
+        # block briefly while MPV processes the stop command) then returns.
+        # QThread/moveToThread is not used here because these threads are sub-second,
+        # have no Qt event loop requirement, and are never reused.
         t = threading.Thread(target=player.stop, daemon=True)
         t.start()
 

@@ -6,14 +6,17 @@ All methods are safe to call from worker threads.
 
 from __future__ import annotations
 
+import atexit
 import enum
 import logging
 import threading
 import time
+import weakref
 from typing import Callable, Optional
 from urllib.parse import urlencode
 
 import requests
+from PySide6.QtCore import QObject, QThread, Slot
 
 logger = logging.getLogger(__name__)
 
@@ -674,9 +677,121 @@ class PlexClient:
 
 _LIBRARY_EVENT_TYPES = {"library.update", "library.new", "library.refresh.all"}
 
+# Module-level registry of active SSE threads. Weak references so we don't
+# prevent GC. atexit handler stops any threads that are still running at
+# process exit, preventing "QThread destroyed while still running" aborts.
+_active_sse_threads: list[weakref.ref] = []
+_active_sse_threads_lock = threading.Lock()
+
+
+def _stop_all_sse_threads() -> None:
+    """atexit handler: stop all active SSE threads before process exit."""
+    with _active_sse_threads_lock:
+        refs = list(_active_sse_threads)
+        _active_sse_threads.clear()
+    for ref in refs:
+        thread = ref()
+        if thread is not None and thread.isRunning():
+            thread.close_connection()
+            thread.wait(10000)  # up to 10s per thread
+
+
+atexit.register(_stop_all_sse_threads)
+
+
+class _PlexSSEThread(QThread):
+    """QThread subclass that streams SSE events directly in its run() override.
+
+    Overrides run() instead of using the QObject worker + moveToThread pattern
+    to avoid the DirectConnection/exec() race: when a blocking slot is connected
+    to `started`, exec() never gets a chance to run, so quit() from outside the
+    thread has no effect. With run() overridden, the thread exits naturally when
+    run() returns, with no event loop needed.
+
+    Calls on_library_changed (a plain Python callable) when a library event
+    arrives. The callback is invoked from the worker thread — callers must
+    ensure thread safety (e.g. emit a Qt signal inside the callback).
+    """
+
+    def __init__(
+        self,
+        server_url: str,
+        token: str,
+        stop_event: threading.Event,
+        on_library_changed: Callable[[], None],
+    ) -> None:
+        super().__init__()
+        self.setObjectName("plex-sse")
+        self._server_url = server_url
+        self._token = token
+        self._stop_event = stop_event
+        self._on_library_changed = on_library_changed
+        self._session: Optional[object] = None  # requests.Session, held for close()
+        # Register for atexit cleanup — ensures Qt doesn't abort when the thread
+        # is still running at process exit (e.g. in tests without explicit cleanup).
+        with _active_sse_threads_lock:
+            _active_sse_threads.append(weakref.ref(self))
+
+    def run(self) -> None:
+        """Run the SSE loop. Called by Qt's thread machinery."""
+        import requests as _requests
+        url = f"{self._server_url}/:/eventsource/notifications"
+        params = {"X-Plex-Token": self._token}
+        logger.debug("PlexEventListener: connecting to %s", url)
+        session = _requests.Session()
+        self._session = session
+        try:
+            with session.get(url, params=params, stream=True, timeout=(10, None)) as resp:
+                resp.raise_for_status()
+                for raw_line in resp.iter_lines():
+                    if self._stop_event.is_set():
+                        break
+                    if not raw_line:
+                        continue
+                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    if not line.startswith("data:"):
+                        continue
+                    payload = line[5:].strip()
+                    self._handle_payload(payload)
+        except Exception as exc:  # noqa: BLE001
+            if not self._stop_event.is_set():
+                logger.warning("PlexEventListener: connection lost: %s", exc)
+        finally:
+            self._session = None
+            try:
+                session.close()
+            except Exception:  # noqa: BLE001
+                pass
+        # run() returning naturally causes the thread to finish (no exec() loop).
+
+    def close_connection(self) -> None:
+        """Close the HTTP session to interrupt DNS/connect/iter_lines()."""
+        session = self._session
+        if session is not None:
+            try:
+                session.close()  # type: ignore[union-attr]
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _handle_payload(self, payload: str) -> None:
+        import json as _json
+        try:
+            data = _json.loads(payload)
+            # Plex wraps the event in a NotificationContainer
+            container = data.get("NotificationContainer", {})
+            event_type = container.get("type", "")
+            if event_type in _LIBRARY_EVENT_TYPES:
+                logger.info("PlexEventListener: library event '%s' — triggering refresh", event_type)
+                self._on_library_changed()
+        except Exception:  # noqa: BLE001
+            pass
+
 
 class PlexEventListener:
-    """Daemon thread that streams SSE from /:/eventsource/notifications.
+    """Streams SSE from /:/eventsource/notifications on a QThread.
+
+    Uses a QThread subclass with an overridden run() to avoid the event loop
+    complexity of the QObject + moveToThread pattern for blocking I/O.
 
     Calls on_library_changed() (no args) when a library update event arrives.
     Stops cleanly when stop() is called or the connection drops.
@@ -692,51 +807,60 @@ class PlexEventListener:
         self._token = token
         self._on_library_changed = on_library_changed
         self._stop_event = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._thread: Optional[_PlexSSEThread] = None
 
     def start(self) -> None:
         """Start the listener thread. No-op if already running."""
-        if self._thread and self._thread.is_alive():
+        if self._thread is not None and self._thread.isRunning():
             return
         self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run, daemon=True, name="plex-sse")
+        self._thread = _PlexSSEThread(
+            self._server_url,
+            self._token,
+            self._stop_event,
+            self._on_library_changed,
+        )
         self._thread.start()
 
     def stop(self) -> None:
-        """Signal the listener to stop. Returns immediately (does not join)."""
+        """Signal the listener to stop and wait for clean shutdown."""
         self._stop_event.set()
+        if self._thread is not None:
+            self._thread.close_connection()  # interrupt blocking iter_lines()
+            self._thread.wait()
+            self._thread = None
 
-    def _run(self) -> None:
-        url = f"{self._server_url}/:/eventsource/notifications"
-        params = {"X-Plex-Token": self._token}
-        logger.debug("PlexEventListener: connecting to %s", url)
-        try:
-            import requests as _requests
-            with _requests.get(url, params=params, stream=True, timeout=60) as resp:
-                resp.raise_for_status()
-                for raw_line in resp.iter_lines():
-                    if self._stop_event.is_set():
-                        break
-                    if not raw_line:
-                        continue
-                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
-                    if not line.startswith("data:"):
-                        continue
-                    payload = line[5:].strip()
-                    self._handle_payload(payload)
-        except Exception as exc:  # noqa: BLE001
-            if not self._stop_event.is_set():
-                logger.warning("PlexEventListener: connection lost: %s", exc)
+    def __del__(self) -> None:
+        """Ensure the QThread is stopped before this object is garbage collected.
 
-    def _handle_payload(self, payload: str) -> None:
-        import json as _json
+        Qt raises a fatal assertion if a QThread object is destroyed while the
+        underlying OS thread is still running. Closing the HTTP response
+        interrupts the blocking iter_lines() call so the thread exits quickly.
+        """
         try:
-            data = _json.loads(payload)
-            # Plex wraps the event in a NotificationContainer
-            container = data.get("NotificationContainer", {})
-            event_type = container.get("type", "")
-            if event_type in _LIBRARY_EVENT_TYPES:
-                logger.info("PlexEventListener: library event '%s' — triggering refresh", event_type)
-                self._on_library_changed()
+            if self._thread is not None and self._thread.isRunning():
+                self._stop_event.set()
+                self._thread.close_connection()
+                self._thread.wait(15000)  # wait up to 15s for clean shutdown
         except Exception:  # noqa: BLE001
             pass
+
+    def _run(self) -> None:
+        """Compatibility shim for tests that call _run() directly on the listener."""
+        worker = _PlexSSEThread(
+            self._server_url,
+            self._token,
+            self._stop_event,
+            self._on_library_changed,
+        )
+        worker.run()
+
+    def _handle_payload(self, payload: str) -> None:
+        """Compatibility shim for tests that call _handle_payload() directly."""
+        worker = _PlexSSEThread(
+            self._server_url,
+            self._token,
+            self._stop_event,
+            self._on_library_changed,
+        )
+        worker._handle_payload(payload)

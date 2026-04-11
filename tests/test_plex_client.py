@@ -838,8 +838,9 @@ class TestPlexEventListener:
         # callback should not have been called
         callback.assert_not_called()
 
-    def test_start_creates_daemon_thread(self) -> None:
-        """start() creates a daemon thread named 'plex-sse'."""
+    def test_start_creates_qthread(self) -> None:
+        """start() creates a QThread named 'plex-sse' that is running."""
+        from PySide6.QtCore import QThread
         callback = MagicMock()
         listener = PlexEventListener("http://server:32400", "tok", callback)
 
@@ -855,15 +856,15 @@ class TestPlexEventListener:
         with patch("requests.get", side_effect=fake_get):
             listener.start()
             assert listener._thread is not None
-            assert listener._thread.daemon is True
-            assert listener._thread.name == "plex-sse"
-            assert listener._thread.is_alive()
+            assert isinstance(listener._thread, QThread)
+            assert listener._thread.objectName() == "plex-sse"
+            assert listener._thread.isRunning()
             # Clean up
             stop_barrier.set()
             listener.stop()
 
     def test_start_noop_if_already_running(self) -> None:
-        """start() is a no-op if the thread is already alive."""
+        """start() is a no-op if the thread is already running."""
         callback = MagicMock()
         listener = PlexEventListener("http://server:32400", "tok", callback)
 

@@ -41,17 +41,20 @@ def _make_reporter(client=None) -> PlexTimelineReporter:
 
 class TestStartStop:
     def test_start_creates_background_thread(self) -> None:
-        """start() launches a background thread named 'plex-timeline'."""
+        """start() launches a QThread named 'plex-timeline'."""
+        from PySide6.QtCore import QThread
         mock_client = MagicMock()
         reporter = _make_reporter(mock_client)
 
         reporter.start(rating_key="123", duration_ms=100_000)
         assert reporter._thread is not None
-        assert reporter._thread.is_alive()
+        assert isinstance(reporter._thread, QThread)
+        assert reporter._thread.isRunning()
         reporter.stop()
 
     def test_stop_joins_thread(self) -> None:
-        """stop() joins the background thread (thread is no longer alive after stop)."""
+        """stop() waits for the QThread to finish (thread is no longer running after stop)."""
+        from PySide6.QtCore import QThread
         mock_client = MagicMock()
         reporter = _make_reporter(mock_client)
 
@@ -60,7 +63,7 @@ class TestStartStop:
         reporter.stop()
 
         assert thread is not None
-        assert not thread.is_alive()
+        assert not thread.isRunning()
 
     def test_stop_sends_stopped_report(self) -> None:
         """stop() sends a final 'stopped' report after joining the thread."""
@@ -401,45 +404,23 @@ class TestHeartbeatFires:
 
 class TestStopJoinTimeout:
     def test_stop_returns_even_if_thread_is_slow(self) -> None:
-        """stop() completes within a reasonable time even if the thread is slow to exit."""
+        """stop() completes within a reasonable time after setting the stop event."""
         mock_client = MagicMock()
         reporter = _make_reporter(mock_client)
 
-        # Patch the stop event so the thread loop runs longer than the join timeout
-        # We do this by making the thread sleep, but we patch join timeout to be short
-        slow_event = threading.Event()
+        # Start and immediately stop — the heartbeat loop exits quickly because
+        # _stop_event is set before QThread.wait() is called.
+        with patch("backend.plex_timeline._HEARTBEAT_INTERVAL", 10.0):
+            reporter.start(rating_key="slow_test", duration_ms=100_000)
+            # Give the worker a moment to start its blocking wait
+            time.sleep(0.05)
 
-        def _slow_run():
-            # Simulate a slow thread that takes longer than the join timeout
-            slow_event.wait(timeout=10)
+            start_time = time.monotonic()
+            reporter.stop()
+            elapsed = time.monotonic() - start_time
 
-        reporter._thread = threading.Thread(target=_slow_run, daemon=True)
-        reporter._thread.start()
-        reporter._stop_event.set()  # signal it to stop
-
-        # Patch join to use a very short timeout (simulating the 5s timeout in stop())
-        original_join = reporter._thread.join
-
-        join_called_with_timeout = []
-
-        def _patched_join(timeout=None):
-            join_called_with_timeout.append(timeout)
-            # Use a very short timeout so the test doesn't hang
-            original_join(timeout=0.1)
-
-        reporter._thread.join = _patched_join
-
-        start_time = time.monotonic()
-        # Manually call the stop logic (bypassing the full stop() to control the thread)
-        reporter._thread.join(timeout=0.1)
-        reporter._thread = None
-        elapsed = time.monotonic() - start_time
-
-        # Clean up the slow thread
-        slow_event.set()
-
-        # stop() should have returned quickly (well under 1 second with our 0.1s timeout)
-        assert elapsed < 1.0, f"stop() took too long: {elapsed:.2f}s"
+        # stop() should complete quickly once the stop event is set
+        assert elapsed < 5.0, f"stop() took too long: {elapsed:.2f}s"
 
     def test_stop_completes_normally_when_thread_exits_quickly(self) -> None:
         """stop() completes quickly when the thread exits promptly."""

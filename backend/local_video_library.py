@@ -24,6 +24,7 @@ from PySide6.QtCore import (
     QMetaObject,
     QModelIndex,
     QObject,
+    QThread,
     Property,
     Q_ARG,
     Qt,
@@ -927,6 +928,86 @@ class EpisodeListModel(QAbstractListModel):
 
 
 # ---------------------------------------------------------------------------
+# Scrape worker
+# ---------------------------------------------------------------------------
+
+
+class _ScrapeThread(QThread):
+    """QThread subclass that runs a TMDb scrape directly in its run() override.
+
+    Overrides run() instead of using the QObject worker + moveToThread pattern,
+    because the scrape is a single blocking operation with no need for an event
+    loop. This avoids the DirectConnection/exec() race that occurs when a
+    blocking slot is connected to `started`.
+
+    Uses QMetaObject.invokeMethod with QueuedConnection to marshal
+    progress/finish signals back to the owning LocalVideoLibrary on the
+    main thread (the same approach as the original threading.Thread closure).
+    """
+
+    def __init__(
+        self,
+        library: "LocalVideoLibrary",
+        category_type: str,
+        items: list,
+        cache,
+        display_name: str,
+        scraper: "TmdbScraper",
+    ) -> None:
+        super().__init__()
+        self._library = library
+        self._category_type = category_type
+        self._items = items
+        self._cache = cache
+        self._display_name = display_name
+        self._scraper = scraper
+
+    def run(self) -> None:
+        """Run the scrape on the QThread. Called by Qt's thread machinery."""
+        scraped = tombstoned = skipped = 0
+
+        def _on_progress(done: int, total: int) -> None:
+            QMetaObject.invokeMethod(
+                self._library,
+                "_emit_scrape_progress",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(int, done),
+                Q_ARG(int, total),
+            )
+
+        try:
+            if self._category_type == "movies":
+                scraped, tombstoned, skipped = self._scraper.scrape_movies(
+                    self._items, self._cache, _on_progress
+                )
+            else:
+                scraped, tombstoned, skipped = self._scraper.scrape_tv_shows(
+                    self._items, self._cache, _on_progress
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("TmdbScraper error: %s", exc)
+            QMetaObject.invokeMethod(
+                self._library,
+                "_emit_scrape_error",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, f"Scrape failed: {exc}"),
+            )
+        finally:
+            self._scraper.close()
+            QMetaObject.invokeMethod(
+                self._library,
+                "_emit_scrape_finished",
+                Qt.ConnectionType.QueuedConnection,
+                Q_ARG(str, self._display_name),
+                Q_ARG(str, self._category_type),
+                Q_ARG(int, scraped),
+                Q_ARG(int, tombstoned),
+                Q_ARG(int, skipped),
+            )
+        # run() returning naturally causes the thread to finish (no exec() loop).
+
+
+# ---------------------------------------------------------------------------
 # LocalVideoLibrary — main orchestrator
 # ---------------------------------------------------------------------------
 
@@ -981,7 +1062,7 @@ class LocalVideoLibrary(QObject):
         )
 
         self._is_launching = False
-        self._scrape_thread: Optional[threading.Thread] = None
+        self._scrape_thread: Optional[QThread] = None
 
         # Empty models
         self._videos = VideoListModel(self)
@@ -1302,7 +1383,7 @@ class LocalVideoLibrary(QObject):
         if not api_key:
             self.scrapeError.emit("TMDb API key not configured. Set it in Settings → Videos.")
             return
-        if self._scrape_thread and self._scrape_thread.is_alive():
+        if self._scrape_thread is not None and self._scrape_thread.isRunning():
             self.scrapeError.emit("A scrape is already in progress.")
             return
 
@@ -1341,45 +1422,9 @@ class LocalVideoLibrary(QObject):
         cache.clear_tombstones()
         scraper = TmdbScraper(api_key)
 
-        def _on_progress(done: int, total: int) -> None:
-            QMetaObject.invokeMethod(
-                self,
-                "_emit_scrape_progress",
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(int, done),
-                Q_ARG(int, total),
-            )
-
-        def _run() -> None:
-            scraped = tombstoned = skipped = 0
-            try:
-                if category_type == "movies":
-                    scraped, tombstoned, skipped = scraper.scrape_movies(items, cache, _on_progress)
-                else:
-                    scraped, tombstoned, skipped = scraper.scrape_tv_shows(items, cache, _on_progress)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("TmdbScraper error: %s", exc)
-                QMetaObject.invokeMethod(
-                    self,
-                    "_emit_scrape_error",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, f"Scrape failed: {exc}"),
-                )
-            finally:
-                scraper.close()
-                QMetaObject.invokeMethod(
-                    self,
-                    "_emit_scrape_finished",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, display_name),
-                    Q_ARG(str, category_type),
-                    Q_ARG(int, scraped),
-                    Q_ARG(int, tombstoned),
-                    Q_ARG(int, skipped),
-                )
-
-        self._scrape_thread = threading.Thread(target=_run, daemon=True)
-        self._scrape_thread.start()
+        thread = _ScrapeThread(self, category_type, items, cache, display_name, scraper)
+        self._scrape_thread = thread
+        thread.start()
 
     @Slot(int, int)
     def _emit_scrape_progress(self, done: int, total: int) -> None:
@@ -1414,6 +1459,8 @@ class LocalVideoLibrary(QObject):
     @Slot()
     def shutdown(self) -> None:
         """Shutdown the executor. Called on app quit."""
+        if self._scrape_thread is not None and self._scrape_thread.isRunning():
+            self._scrape_thread.wait()
         self._executor.shutdown(wait=False)
 
     # ------------------------------------------------------------------

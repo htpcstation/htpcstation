@@ -11,10 +11,29 @@ import time
 import uuid
 from typing import Optional
 
+from PySide6.QtCore import QObject, QThread, Slot
+
 logger = logging.getLogger(__name__)
 
 _HEARTBEAT_INTERVAL = 10  # seconds between timeline reports
 _IDENTIFIER = "com.plexapp.plugins.library"
+
+
+class _TimelineWorker(QObject):
+    """QObject worker that runs the heartbeat loop on a QThread."""
+
+    def __init__(self, reporter: "PlexTimelineReporter") -> None:
+        super().__init__()
+        self._reporter = reporter
+
+    @Slot()
+    def start(self) -> None:
+        """Heartbeat loop — runs on the QThread. Called via QThread.started signal."""
+        self._reporter._send_report("playing")
+        while not self._reporter._stop_event.wait(timeout=_HEARTBEAT_INTERVAL):
+            with self._reporter._lock:
+                state = "paused" if self._reporter._paused else "playing"
+            self._reporter._send_report(state)
 
 
 class PlexTimelineReporter:
@@ -38,7 +57,8 @@ class PlexTimelineReporter:
         even if it changes between sessions.
         """
         self._client_factory = client_factory
-        self._thread: Optional[threading.Thread] = None
+        self._thread: Optional[QThread] = None
+        self._worker: Optional[_TimelineWorker] = None
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
 
@@ -75,9 +95,11 @@ class PlexTimelineReporter:
             self._play_queue_item_id: int = play_queue_item_id
 
         self._stop_event.clear()
-        self._thread = threading.Thread(
-            target=self._run, name="plex-timeline", daemon=True
-        )
+        self._thread = QThread()
+        self._thread.setObjectName("plex-timeline")
+        self._worker = _TimelineWorker(self)
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.start)
         self._thread.start()
         logger.info(
             "PlexTimelineReporter: started for ratingKey=%s session=%s",
@@ -104,8 +126,10 @@ class PlexTimelineReporter:
         if self._thread is None:
             return
         self._stop_event.set()
-        self._thread.join(timeout=5)
+        self._thread.quit()
+        self._thread.wait()
         self._thread = None
+        self._worker = None
         self._send_report("stopped")
         logger.info("PlexTimelineReporter: stopped for ratingKey=%s", self._rating_key)
 
@@ -114,8 +138,7 @@ class PlexTimelineReporter:
     # ------------------------------------------------------------------
 
     def _run(self) -> None:
-        """Heartbeat loop — runs on the reporter thread."""
-        # Send initial 'playing' report immediately
+        """Heartbeat loop — kept for test compatibility; production code uses _TimelineWorker."""
         self._send_report("playing")
         while not self._stop_event.wait(timeout=_HEARTBEAT_INTERVAL):
             with self._lock:

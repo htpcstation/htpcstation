@@ -819,7 +819,7 @@ class TestScrapeSlots:
         lib = _make_library(tmp_path / "cfg", config)
 
         alive_thread = MagicMock()
-        alive_thread.is_alive.return_value = True
+        alive_thread.isRunning.return_value = True
         lib._scrape_thread = alive_thread
 
         errors: list[str] = []
@@ -842,7 +842,7 @@ class TestScrapeSlots:
         ) as scraper_cls:
             lib.scrapeMovies()
             assert lib._scrape_thread is not None
-            lib._scrape_thread.join(timeout=5)
+            lib._scrape_thread.wait(5000)
             scraper_cls.assert_called_once_with("fake_key")
             scraper_mock.scrape_movies.assert_called_once()
             scraper_mock.close.assert_called_once()
@@ -864,7 +864,7 @@ class TestScrapeSlots:
         ) as scraper_cls:
             lib.scrapeTvShows()
             assert lib._scrape_thread is not None
-            lib._scrape_thread.join(timeout=5)
+            lib._scrape_thread.wait(5000)
             scraper_cls.assert_called_once_with("fake_key")
             scraper_mock.scrape_tv_shows.assert_called_once()
             scraper_mock.close.assert_called_once()
@@ -885,7 +885,7 @@ class TestScrapeSlots:
         scraper_mock.scrape_movies.return_value = (0, 0, 0)
         with patch("backend.local_video_library.TmdbScraper", return_value=scraper_mock):
             lib.scrapeMovies()
-            lib._scrape_thread.join(timeout=5)  # type: ignore[union-attr]
+            lib._scrape_thread.wait(5000)  # type: ignore[union-attr]
 
         # _emit_scrape_finished was invoked via QMetaObject on the main thread;
         # since there's no event loop running in tests, invoke directly to verify logic
