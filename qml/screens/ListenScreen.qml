@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Listen section screen — Plex music library browser.
 //
@@ -114,7 +115,7 @@ FocusScope {
     // ── Try to find and select the music library ────────────────────────────
     function _trySelectMusicLibrary() {
         if (_musicSectionKey) return  // already selected
-        if (!plex || !settings) return
+        if (!plex || !Settings) return
 
         // Wait until libraries are loaded — selectLibrary needs the
         // libraries model to resolve the section type.  If we call it
@@ -123,7 +124,7 @@ FocusScope {
         var libs = plex.getLibraryList()
         if (libs.length === 0) return  // not loaded yet — wait for onLibrariesModelChanged
 
-        var configuredKey = settings.musicLibraryKey
+        var configuredKey = Settings.musicLibraryKey
         if (configuredKey) {
             // Verify the configured library still exists
             for (var i = 0; i < libs.length; i++) {
@@ -144,7 +145,7 @@ FocusScope {
                 _noLibrary = false
                 plex.selectLibrary(libs[j].sectionKey)
                 // Auto-save the selection
-                if (settings) settings.setMusicLibraryKey(libs[j].sectionKey)
+                if (Settings) Settings.setMusicLibraryKey(libs[j].sectionKey)
                 return
             }
         }
@@ -389,8 +390,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            var savedMode = settings.listenViewMode
+        if (Settings) {
+            var savedMode = Settings.listenViewMode
             if (savedMode) _viewMode = savedMode
         }
     }
@@ -506,7 +507,7 @@ FocusScope {
         }
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = listenMenu.currentItem
                 if (item) {
@@ -527,7 +528,7 @@ FocusScope {
                         }
                     }
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 listenScreen.back()
             }
@@ -647,7 +648,7 @@ FocusScope {
             Keys.onPressed: (event) => {
                 if (trackList._playAllFocused) {
                     // Play All button is focused
-                    if (keys.isAccept(event)) {
+                    if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
                         listenScreen._goToNowPlaying()
@@ -655,7 +656,7 @@ FocusScope {
                         event.accepted = true
                         trackList._playAllFocused = false
                         trackList.currentIndex = 0
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         if (listenScreen._navTargetApplied) listenScreen.back()
                         else listenScreen.currentView = listenScreen._albumReturnView
@@ -677,18 +678,18 @@ FocusScope {
                             // Scroll to top to show the Play All button
                             trackList.positionViewAtBeginning()
                         }
-                    } else if (keys.isAccept(event)) {
+                    } else if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, trackList.currentIndex)
                         listenScreen._goToNowPlaying()
-                    } else if (keys.isContext1(event)) {
+                    } else if (KeyHandler.isContext1(event)) {
                         // X button — Play All (from track 1)
                         // Note: HomeScreen's global X handler will catch this if music is already playing.
                         // If no music is loaded yet, start playback here.
                         event.accepted = true
                         homeScreen._playAlbum(listenScreen._tracks, listenScreen._albumData, 0)
                         listenScreen._goToNowPlaying()
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         if (listenScreen._navTargetApplied) listenScreen.back()
                         else listenScreen.currentView = listenScreen._albumReturnView
@@ -1054,10 +1055,10 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels
-                    ? "[" + keys.acceptLabel + "] Play from track    ["
-                      + keys.context1Label + "] Play All    ["
-                      + keys.cancelLabel + "] Back"
+                text: KeyHandler.useGamepadLabels
+                    ? "[" + KeyHandler.acceptLabel + "] Play from track    ["
+                      + KeyHandler.context1Label + "] Play All    ["
+                      + KeyHandler.cancelLabel + "] Back"
                     : "[Enter] Play from track    [Esc] Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1141,7 +1142,7 @@ FocusScope {
                     if (recentAlbumsList.currentIndex > 0) {
                         recentAlbumsList.currentIndex--
                     }
-                } else if (keys.isAccept(event)) {
+                } else if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var album = listenScreen._recentAlbums[recentAlbumsList.currentIndex]
                     if (album) {
@@ -1149,7 +1150,7 @@ FocusScope {
                         listenScreen._albumReturnView = "recentlyadded"
                         listenScreen.currentView = "album"
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     listenScreen.currentView = "menu"
                 }
@@ -1381,14 +1382,14 @@ FocusScope {
                     if (playlistsList.currentIndex > 0) {
                         playlistsList.currentIndex--
                     }
-                } else if (keys.isAccept(event)) {
+                } else if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var pl = listenScreen._playlists[playlistsList.currentIndex]
                     if (pl) {
                         listenScreen._selectedPlaylist = pl
                         listenScreen.currentView = "playlistdetail"
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     listenScreen.currentView = "menu"
                 }
@@ -1567,7 +1568,7 @@ FocusScope {
             Keys.onPressed: (event) => {
                 if (playlistTrackList._playAllFocused) {
                     // Play All button is focused
-                    if (keys.isAccept(event)) {
+                    if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         var playlistAlbumData = {
                             ratingKey: listenScreen._selectedPlaylist.ratingKey,
@@ -1582,7 +1583,7 @@ FocusScope {
                         event.accepted = true
                         playlistTrackList._playAllFocused = false
                         playlistTrackList.currentIndex = 0
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         listenScreen.currentView = "playlists"
                     }
@@ -1602,7 +1603,7 @@ FocusScope {
                             playlistTrackList._playAllFocused = true
                             playlistTrackList.positionViewAtBeginning()
                         }
-                    } else if (keys.isAccept(event)) {
+                    } else if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         var albumData = {
                             ratingKey: listenScreen._selectedPlaylist.ratingKey,
@@ -1613,7 +1614,7 @@ FocusScope {
                         }
                         homeScreen._playAlbum(listenScreen._playlistTracks, albumData, playlistTrackList.currentIndex)
                         listenScreen._goToNowPlaying()
-                    } else if (keys.isContext1(event)) {
+                    } else if (KeyHandler.isContext1(event)) {
                         // X button — Play All (from track 1)
                         event.accepted = true
                         var albumDataX = {
@@ -1625,7 +1626,7 @@ FocusScope {
                         }
                         homeScreen._playAlbum(listenScreen._playlistTracks, albumDataX, 0)
                         listenScreen._goToNowPlaying()
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         listenScreen.currentView = "playlists"
                     }
@@ -1849,10 +1850,10 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels
-                    ? "[" + keys.acceptLabel + "] Play from track    ["
-                      + keys.context1Label + "] Play All    ["
-                      + keys.cancelLabel + "] Back"
+                text: KeyHandler.useGamepadLabels
+                    ? "[" + KeyHandler.acceptLabel + "] Play from track    ["
+                      + KeyHandler.context1Label + "] Play All    ["
+                      + KeyHandler.cancelLabel + "] Back"
                     : "[Enter] Play from track    [Esc] Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1958,7 +1959,7 @@ FocusScope {
                     var prev = albumList.currentIndex - 1
                     while (prev >= 0 && listenScreen._albums[prev].type === "header") prev--
                     if (prev >= 0) albumList.currentIndex = prev
-                } else if (keys.isAccept(event)) {
+                } else if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var album = listenScreen._albums[albumList.currentIndex]
                     if (album && album.type === "album") {
@@ -1966,7 +1967,7 @@ FocusScope {
                         listenScreen._albumReturnView = "detail"
                         listenScreen.currentView = "album"
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     listenScreen.currentView = "artists"
                 }

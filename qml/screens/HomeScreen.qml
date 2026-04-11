@@ -3,6 +3,7 @@ import QtMultimedia
 import ".."
 import "../components"
 import "."
+import HTPCBackend 1.0
 
 // Home screen with two-level launcher UI.
 //
@@ -37,10 +38,10 @@ FocusScope {
         { name: "Settings",    source: "SettingsScreen.qml",    setting: null,                  slug: "settings"    },
     ]
 
-    // Tab visibility — built once on startup from saved settings.
+    // Tab visibility — built once on startup from saved Settings.
     // Changes take effect on next launch (toggling in Settings saves
     // the preference and shows a "Restart to apply" toast).
-    // IMPORTANT: These must NOT be bindings to settings properties,
+    // IMPORTANT: These must NOT be bindings to Settings properties,
     // otherwise toggling a setting triggers a live Repeater rebuild
     // which freezes the UI.
     property var tabNames:   []
@@ -80,7 +81,7 @@ FocusScope {
         var allTabs = _allTabs
         for (var i = 0; i < allTabs.length; i++) {
             var tab = allTabs[i]
-            var show = tab.setting === null || !settings || settings[tab.setting]
+            var show = tab.setting === null || Settings[tab.setting]
             if (show) {
                 names.push(tab.name)
                 sources.push(tab.source)
@@ -317,10 +318,10 @@ FocusScope {
     // Intercept Start and X button (isContext1) at the HomeScreen level.
     // Also intercept X button (isContext1) for global play/pause when music is loaded.
     Keys.onPressed: (event) => {
-        if (keys.isMenu(event)) {
+        if (KeyHandler.isMenu(event)) {
             event.accepted = true
             homeScreen.requestQuit()
-        } else if (keys.isContext1(event) && musicPlayer.playbackState !== MediaPlayer.StoppedState) {
+        } else if (KeyHandler.isContext1(event) && musicPlayer.playbackState !== MediaPlayer.StoppedState) {
             // Global X button play/pause — only when music is actively playing or paused.
             // When stopped (no music loaded or album ended), let the event pass through
             // to child screens (e.g. Retro Games uses X for Favorite).
@@ -333,7 +334,7 @@ FocusScope {
     Image {
         id: launcherBackground
         anchors.fill: parent
-        source: (settings && settings.themeAvailable) ? settings.themeDir + "homescreen/home-background.png" : ""
+        source: (Settings && Settings.themeAvailable) ? Settings.themeDir + "homescreen/home-background.png" : ""
         fillMode: Image.PreserveAspectCrop
         asynchronous: true
         cache: true
@@ -397,14 +398,14 @@ FocusScope {
                         if (recentlyPlayedWidget.items.length > 0) {
                             recentlyPlayedWidget.forceActiveFocus()
                         }
-                    } else if (keys.isAccept(event)) {
+                    } else if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         homeScreen._lastFocusedButton = index
                         homeScreen._activeTab = index
                         contentLoader.source = homeScreen.tabSources[index]
                         homeScreen._launcherOpacity = 0.0   // start fade-out
                         tabEnterTimer.restart()
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         // do nothing — Start still handles quit at HomeScreen level
                     }
@@ -414,8 +415,8 @@ FocusScope {
                 Image {
                     id: buttonImage
                     anchors.fill: parent
-                    source: (settings && settings.themeAvailable && index < homeScreen.tabSlugs.length && homeScreen.tabSlugs[index])
-                        ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png"
+                    source: (Settings && Settings.themeAvailable && index < homeScreen.tabSlugs.length && homeScreen.tabSlugs[index])
+                        ? Settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png"
                         : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
@@ -564,14 +565,14 @@ FocusScope {
         }
 
         Keys.onPressed: (event) => {
-            if (keys.isCancel(event)) {
+            if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 homeScreen._hideNowPlaying()
-            } else if (keys.isPrevTab(event)) {
+            } else if (KeyHandler.isPrevTab(event)) {
                 // LB — always prev track regardless of which button has focus
                 event.accepted = true
                 homeScreen._playPrev()
-            } else if (keys.isNextTab(event)) {
+            } else if (KeyHandler.isNextTab(event)) {
                 // RB — always next track regardless of which button has focus
                 event.accepted = true
                 homeScreen._playNext()
@@ -769,7 +770,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._playPrev()
                             }
@@ -802,7 +803,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._togglePlayPause()
                             }
@@ -834,7 +835,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._playNext()
                             }
@@ -876,7 +877,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._toggleShuffle()
                             }
@@ -910,7 +911,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._cycleRepeat()
                             }
@@ -952,7 +953,7 @@ FocusScope {
                         KeyNavigation.down: progressBar
 
                         Keys.onPressed: (event) => {
-                            if (keys.isAccept(event)) {
+                            if (KeyHandler.isAccept(event)) {
                                 event.accepted = true
                                 homeScreen._lyricsEnabled = !homeScreen._lyricsEnabled
                             }
@@ -999,10 +1000,10 @@ FocusScope {
                         } else if (event.key === Qt.Key_Right) {
                             event.accepted = true
                             homeScreen._seekBy(10000)
-                        } else if (keys.isPrevTab(event)) {
+                        } else if (KeyHandler.isPrevTab(event)) {
                             event.accepted = true
                             homeScreen._seekBy(-30000)
-                        } else if (keys.isNextTab(event)) {
+                        } else if (KeyHandler.isNextTab(event)) {
                             event.accepted = true
                             homeScreen._seekBy(30000)
                         }
@@ -1167,9 +1168,9 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                    text: keys.useGamepadLabels
-                        ? "[" + keys.acceptLabel + "] Select    ["
-                          + keys.cancelLabel + "] Back    [LB] Prev    [RB] Next    [" + keys.context1Label + "] Play/Pause    [↓] Seek bar    [←][→] Navigate/Seek"
+                    text: KeyHandler.useGamepadLabels
+                        ? "[" + KeyHandler.acceptLabel + "] Select    ["
+                          + KeyHandler.cancelLabel + "] Back    [LB] Prev    [RB] Next    [" + KeyHandler.context1Label + "] Play/Pause    [↓] Seek bar    [←][→] Navigate/Seek"
                         : "[Enter] Select    [Esc] Back    [PgUp] Prev    [PgDn] Next    [1] Play/Pause    [↓] Seek bar    [←][→] Navigate/Seek"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1197,8 +1198,8 @@ FocusScope {
             rightMargin: root.vpx(12)
             verticalCenter: clockDisplay.verticalCenter
         }
-        online: networkMonitor ? networkMonitor.online : true
-        visible: settings ? settings.showNetworkIndicator : true
+        online: NetworkMonitor ? NetworkMonitor.online : true
+        visible: Settings ? Settings.showNetworkIndicator : true
     }
 
     // ── Now Playing persistent indicator ─────────────────────────────────────

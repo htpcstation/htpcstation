@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local Videos screen — browse and play local video files.
 //
@@ -77,7 +78,7 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) _viewMode = settings.localVideoViewMode || "grid"
+        if (Settings) _viewMode = Settings.localVideoViewMode || "grid"
     }
 
     Connections {
@@ -154,7 +155,7 @@ FocusScope {
         enabled: visible
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (localVideos && currentIndex >= 0 && currentItem) {
                     localVideosScreen._selectedCategoryIndex = currentIndex
@@ -162,7 +163,7 @@ FocusScope {
                     localVideosScreen._selectedCategoryType = currentItem.categoryType
                     localVideos.selectCategory(currentIndex)
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 localVideosScreen.back()
             }

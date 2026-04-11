@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video movie list view — split-panel browse view for local movie libraries.
 //
@@ -53,7 +54,7 @@ FocusScope {
                 parts.push("Genre: " + movieListView._currentGenre)
             return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        rightText1: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Split content area ────────────────────────────────────────────────────
@@ -243,7 +244,7 @@ FocusScope {
             preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = movieList.currentItem
                     if (item) {
@@ -256,10 +257,10 @@ FocusScope {
                             posterPath:  item.posterPathValue
                         })
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     movieListView.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortFilterOverlay.open()
                 }
@@ -433,7 +434,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -694,7 +695,7 @@ FocusScope {
             var genreCount = sortFilterOverlay._genres.length + 1
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.close()
 
@@ -734,7 +735,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -757,7 +758,7 @@ FocusScope {
                 var newView = viewKeys[sortFilterOverlay._viewIndex]
                 if (newView !== movieListView._viewMode) {
                     sortFilterOverlay.visible = false
-                    if (settings) settings.setLocalVideoViewMode(newView)
+                    if (Settings) Settings.setLocalVideoViewMode(newView)
                     movieListView.viewModeChanged(newView)
                 } else {
                     sortFilterOverlay.close()

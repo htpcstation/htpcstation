@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Horizontal card row showing recently played items.
 //
@@ -73,10 +74,10 @@ FocusScope {
                         } else if (event.key === Qt.Key_Up) {
                             event.accepted = true
                             widget.back()
-                        } else if (keys.isCancel(event)) {
+                        } else if (KeyHandler.isCancel(event)) {
                             event.accepted = true
                             widget.back()
-                        } else if (keys.isAccept(event)) {
+                        } else if (KeyHandler.isAccept(event)) {
                             event.accepted = true
                             var d = cardItem.itemData
                             widget.activated(d.source || "", d.nav_params || null)

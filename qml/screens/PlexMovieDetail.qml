@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Plex movie detail view — shows full metadata for a selected movie.
 //
@@ -37,10 +38,10 @@ FocusScope {
 
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             movieDetailView.play(movieDetailView.movieData.ratingKey || "")
-        } else if (keys.isContext1(event)) {
+        } else if (KeyHandler.isContext1(event)) {
             event.accepted = true
             if (plex && movieDetailView.movieData.ratingKey) {
                 plex.toggleMyList(movieDetailView.movieData.ratingKey,
@@ -49,7 +50,7 @@ FocusScope {
                                   movieDetailView.movieData.posterLocal || "",
                                   "")
             }
-        } else if (keys.isContext2(event)) {
+        } else if (KeyHandler.isContext2(event)) {
             event.accepted = true
             if (plex && movieDetailView.movieData.ratingKey) {
                 if (movieDetailView._viewCount > 0) {
@@ -60,7 +61,7 @@ FocusScope {
                     movieDetailView._viewCount = 1
                 }
             }
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             movieDetailView.back()
         } else if (event.key === Qt.Key_Left) {
@@ -139,14 +140,14 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -155,8 +156,8 @@ FocusScope {
             Text {
                 text: {
                     var watchLabel = movieDetailView._viewCount > 0 ? "Mark Unwatched" : "Mark Watched"
-                    return keys.useGamepadLabels
-                        ? keys.context2Label + "  " + watchLabel
+                    return KeyHandler.useGamepadLabels
+                        ? KeyHandler.context2Label + "  " + watchLabel
                         : "2  " + watchLabel
                 }
                 color: Theme.colorTextDim

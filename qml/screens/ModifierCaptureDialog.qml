@@ -72,7 +72,7 @@ FocusScope {
         timeoutTimer.stop()
         captureDialog.visible = false
         // Emit signal BEFORE stopRawMode so the SDL resolver is still open
-        // when the handler calls settings.setHotkeyActionByEvdev().
+        // when the handler calls Settings.setHotkeyActionByEvdev().
         captureDialog.buttonCaptured(evdev_code)
         if (typeof gamepadManager !== "undefined" && gamepadManager) {
             gamepadManager.stopRawMode()
@@ -89,7 +89,7 @@ FocusScope {
         timeoutTimer.stop()
         captureDialog.visible = false
         // Emit signal BEFORE stopRawMode so the SDL resolver is still open
-        // when the handler calls settings.setHotkeyActionByAxis().
+        // when the handler calls Settings.setHotkeyActionByAxis().
         captureDialog.axisCaptured(code, value)
         if (typeof gamepadManager !== "undefined" && gamepadManager) {
             gamepadManager.stopRawMode()

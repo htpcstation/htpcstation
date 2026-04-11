@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // System Cores sub-screen — lists all discovered ROM systems and lets the
 // user cycle through installed .so cores for each one using Left/Right arrows.
@@ -13,7 +14,7 @@ import "../components"
 //   }
 //
 //   function showSystemCores() {
-//       systemCoresScreen.systems = settings.getSystemsList()
+//       systemCoresScreen.systems = Settings.getSystemsList()
 //       systemCoresScreen.visible = true
 //       systemCoresScreen.forceActiveFocus()
 //   }
@@ -44,8 +45,8 @@ FocusScope {
         var sys = systemsList.currentIndex >= 0
             ? systemCoresScreen.systems[systemsList.currentIndex]
             : null
-        systemCoresScreen._currentRowCores = (sys && settings)
-            ? settings.getAvailableCores(sys.folderName) : []
+        systemCoresScreen._currentRowCores = (sys && Settings)
+            ? Settings.getAvailableCores(sys.folderName) : []
     }
 
     // Update _currentRowCores when the selected row changes.
@@ -55,8 +56,8 @@ FocusScope {
             var sys = systemsList.currentIndex >= 0
                 ? systemCoresScreen.systems[systemsList.currentIndex]
                 : null
-            systemCoresScreen._currentRowCores = (sys && settings)
-                ? settings.getAvailableCores(sys.folderName) : []
+            systemCoresScreen._currentRowCores = (sys && Settings)
+                ? Settings.getAvailableCores(sys.folderName) : []
         }
     }
 
@@ -79,7 +80,7 @@ FocusScope {
             next = (idx + delta + cores.length) % cores.length
         }
         var newCore = cores[next]
-        if (settings) settings.setSystemCore(sys.folderName, newCore)
+        if (Settings) Settings.setSystemCore(sys.folderName, newCore)
         // Assign a new object so QML detects the change and re-evaluates delegate bindings
         var patch = Object.assign({}, systemCoresScreen._corePatch)
         patch[sys.folderName] = newCore
@@ -103,10 +104,10 @@ FocusScope {
         } else if (event.key === Qt.Key_Left) {
             event.accepted = true
             systemCoresScreen._cycleCore(-1)
-        } else if (event.key === Qt.Key_Right || keys.isAccept(event)) {
+        } else if (event.key === Qt.Key_Right || KeyHandler.isAccept(event)) {
             event.accepted = true
             systemCoresScreen._cycleCore(1)
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             systemCoresScreen.back()
         }
@@ -160,7 +161,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + "  Back" : "Esc  Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -178,7 +179,7 @@ FocusScope {
             margins: root.vpx(48)
         }
         visible: systemCoresScreen.systems.length === 0
-        text: "No systems found. Set your ROM directory in Retro Games settings."
+        text: "No systems found. Set your ROM directory in Retro Games Settings."
         color: Theme.colorTextDim
         font.family: Theme.fontFamily
         font.pixelSize: root.vpx(Theme.fontSizeBody)

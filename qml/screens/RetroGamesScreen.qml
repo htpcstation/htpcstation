@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Games section screen.
 //
@@ -136,14 +137,14 @@ FocusScope {
         visible: retroGamesScreen.currentView === "systems"
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (currentItem) {
                     library.selectSystem(currentItem.folderNameValue)
                     retroGamesScreen.selectedSystemName = currentItem.displayNameValue
                     retroGamesScreen.currentView = "games"
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 retroGamesScreen.back()
             }
@@ -349,8 +350,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            _viewMode = settings.retroGamesViewMode || "grid"
+        if (Settings) {
+            _viewMode = Settings.retroGamesViewMode || "grid"
         }
     }
 }

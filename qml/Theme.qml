@@ -1,5 +1,6 @@
 pragma Singleton
 import QtQuick
+import HTPCBackend 1.0
 
 QtObject {
 
@@ -31,8 +32,8 @@ QtObject {
     readonly property color colorSurface:       _surface
     readonly property color colorSurfaceHigh:   _surfaceHigh
 
-    // Accent — settings-driven, not readonly so QML re-evaluates on settings changes
-    property color colorAccent:    settings ? settings.accentColor    : "#e94560"
+    // Accent — Settings-driven, not readonly so QML re-evaluates on Settings changes
+    property color colorAccent:    Settings.accentColor
     // Keep colorPrimary as an alias — widely used, renaming is 4b/4c work
     readonly property color colorPrimary:       colorAccent
 
@@ -42,7 +43,7 @@ QtObject {
     readonly property color colorTextOnAccent:  _white    // text drawn on accent-colored backgrounds
 
     // Interactive surfaces
-    property color colorFocusRing: settings ? settings.focusRingColor : "#e94560"
+    property color colorFocusRing: Settings.focusRingColor
     readonly property color colorTabUnderline:  colorAccent
     readonly property color colorHighlight:     Qt.rgba(colorAccent.r, colorAccent.g, colorAccent.b, 0.15)
 

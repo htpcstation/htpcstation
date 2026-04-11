@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
-// Reusable numeric slider row for settings.
+// Reusable numeric slider row for Settings.
 //
 // A (Return) → enters adjust mode (arrows become visible).
 // Left/Right in adjust mode → decrease/increase by step.
@@ -127,7 +128,7 @@ FocusScope {
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
         if (!sliderRoot.adjusting) {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 sliderRoot._adjustValue = sliderRoot.value
                 sliderRoot.adjusting = true
@@ -139,11 +140,11 @@ FocusScope {
             } else if (event.key === Qt.Key_Right) {
                 event.accepted = true
                 sliderRoot._adjustValue = Math.min(sliderRoot.maxValue, sliderRoot._adjustValue + sliderRoot.step)
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 sliderRoot.adjusting = false
                 sliderRoot.valueEdited(sliderRoot._adjustValue)
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 sliderRoot._adjustValue = sliderRoot.value  // revert
                 sliderRoot.adjusting = false

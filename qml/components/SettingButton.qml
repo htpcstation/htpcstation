@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
-// Reusable action button row for settings.
+// Reusable action button row for Settings.
 //
 // A (Return) → emits clicked().
 // Shows statusText briefly after action (auto-clears after 3 seconds).
@@ -96,7 +97,7 @@ FocusScope {
 
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             buttonRoot.clicked()
             statusClearTimer.restart()

@@ -1,12 +1,13 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video show poster grid — shows a scrollable grid of show posters.
 //
 // Focus flow:
 //   Gains focus when LocalVideosScreen switches to "shows" view (grid mode).
-//   Arrow keys navigate the grid natively.
+//   Arrow Keys navigate the grid natively.
 //   A (Return) on a cell → emits showSelected(index, showData).
 //   B (Escape) → emits back() so LocalVideosScreen returns to categories.
 //   Y (2)      → opens the sort/filter overlay panel.
@@ -52,7 +53,7 @@ FocusScope {
         statusText: showGridView._currentSort !== ""
             ? "Sort: " + showGridView._sortLabel
             : "Default order"
-        rightText1: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Show grid ─────────────────────────────────────────────────────────────
@@ -87,10 +88,10 @@ FocusScope {
         preferredHighlightEnd:   height * 0.65
 
         Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
+            if (KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.open()
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = showGrid.currentItem
                 if (item) {
@@ -102,7 +103,7 @@ FocusScope {
                         seasonCount: item.itemSeasonCount
                     })
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 showGridView.back()
             }
@@ -380,7 +381,7 @@ FocusScope {
                             rightMargin: root.vpx(16)
                             topMargin: root.vpx(14)
                         }
-                        text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                        text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                         color: Theme.colorTextDim
                         font.family: Theme.fontFamily
                         font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -537,7 +538,7 @@ FocusScope {
                     var sortCount = overlay._sortOptions.length
                     var viewCount = 2
 
-                    if (keys.isCancel(event) || keys.isContext2(event)) {
+                    if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                         event.accepted = true
                         sortFilterOverlay.close()
 
@@ -571,7 +572,7 @@ FocusScope {
                                 overlay._viewIndex += 1
                         }
 
-                    } else if (keys.isAccept(event)) {
+                    } else if (KeyHandler.isAccept(event)) {
                         event.accepted = true
 
                         // Apply sort
@@ -584,7 +585,7 @@ FocusScope {
                         var newView = viewKeys[overlay._viewIndex]
                         if (newView !== showGridView._viewMode) {
                             sortFilterOverlay.close()  // close() is fine here — viewModeChanged replaces the screen, superseding any focus restore
-                            if (settings) settings.setLocalVideoViewMode(newView)
+                            if (Settings) Settings.setLocalVideoViewMode(newView)
                             showGridView.viewModeChanged(newView)
                         } else {
                             sortFilterOverlay.close()

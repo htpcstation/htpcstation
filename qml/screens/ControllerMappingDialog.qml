@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Full-screen controller mapping dialog.
 // Walk the user through pressing each of the 14 controller inputs sequentially,
@@ -65,7 +66,7 @@ FocusScope {
 
     // Called externally to begin the mapping flow.
     function start() {
-        _actions = settings ? settings.getControllerActions() : []
+        _actions = Settings ? Settings.getControllerActions() : []
         _recordedMappings = []
         _coFiringEvents = []
         _heldButtons = {}
@@ -73,8 +74,8 @@ FocusScope {
         _state = "idle"
 
         // Load start/select evdev codes for combo-cancel detection
-        if (settings) {
-            var m = settings.getControllerActionEvdevCodes()
+        if (Settings) {
+            var m = Settings.getControllerActionEvdevCodes()
             mappingDialog._startCode  = m["start"]  !== undefined ? m["start"]  : -1
             mappingDialog._selectCode = m["select"] !== undefined ? m["select"] : -1
         }
@@ -112,8 +113,8 @@ FocusScope {
             _statusText = "Saved!"
             // Save BEFORE stopping raw mode so the SDL resolver is still open
             // when saveControllerMapping resolves SDL records for each input.
-            if (settings) {
-                settings.saveControllerMapping(_recordedMappings)
+            if (Settings) {
+                Settings.saveControllerMapping(_recordedMappings)
             }
             if (typeof gamepadManager !== "undefined" && gamepadManager) {
                 gamepadManager.stopRawMode()
@@ -392,12 +393,12 @@ FocusScope {
     // ── Key handling ─────────────────────────────────────────────────────────
 
     Keys.onPressed: (event) => {
-        event.accepted = true  // consume all keys while dialog is open
+        event.accepted = true  // consume all Keys while dialog is open
 
         // Complete state auto-saves and auto-closes — no input needed.
         // Only handle cancel during the mapping flow (waiting/recorded).
         if (mappingDialog._state === "waiting" || mappingDialog._state === "recorded") {
-            if (keys.isCancel(event)) {
+            if (KeyHandler.isCancel(event)) {
                 mappingDialog._cancel()
             }
         }
@@ -506,7 +507,7 @@ FocusScope {
                 bottomMargin: root.vpx(20)
             }
             visible: mappingDialog._state !== "complete"
-            text: keys && keys.useGamepadLabels ? "Start+Select  —  Cancel" : "Esc  —  Cancel"
+            text: KeyHandler && KeyHandler.useGamepadLabels ? "Start+Select  —  Cancel" : "Esc  —  Cancel"
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
             color: Theme.colorTextDim

@@ -8,8 +8,8 @@ import ".."
 //       id: header
 //       title: systemName
 //       statusText: "Sorted: " + _sortLabel
-//       rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/..." : "PgUp/PgDn  Scroll"
-//       rightText2: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
+//       rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/..." : "PgUp/PgDn  Scroll"
+//       rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort" : "2  Sort"
 //   }
 //   SomeContent { anchors.top: header.bottom ... }
 Item {

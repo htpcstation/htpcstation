@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video movie detail view — shows metadata for a selected local video.
 //
@@ -31,10 +32,10 @@ FocusScope {
 
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             movieDetailView.play(movieDetailView.moviePath)
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             movieDetailView.back()
         } else if (event.key === Qt.Key_Up) {
@@ -87,7 +88,7 @@ FocusScope {
 
         Text {
             anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-            text: keys.useGamepadLabels ? keys.acceptLabel + "  Play" : "A  Play"
+            text: KeyHandler.useGamepadLabels ? KeyHandler.acceptLabel + "  Play" : "A  Play"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)

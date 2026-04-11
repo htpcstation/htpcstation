@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Moonlight section screen.
 //
@@ -80,7 +81,7 @@ FocusScope {
         _routeFocus()
     }
     on_ViewModeChanged: {
-        if (settings) settings.setMoonlightViewMode(_viewMode)
+        if (Settings) Settings.setMoonlightViewMode(_viewMode)
         if (currentView === "games") _routeFocus()
     }
     onActiveFocusChanged: {
@@ -185,7 +186,7 @@ FocusScope {
         visible: moonlightScreen.currentView === "sources"
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (currentItem) {
                     var sourceKey = currentItem.sourceKeyValue
@@ -212,7 +213,7 @@ FocusScope {
                     moonlightScreen.selectedSourceKey = sourceKey
                     moonlightScreen.currentView = "games"
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 moonlightScreen.back()
             }
@@ -573,8 +574,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            _viewMode = settings.moonlightViewMode || "grid"
+        if (Settings) {
+            _viewMode = Settings.moonlightViewMode || "grid"
         }
 
         // Build source list

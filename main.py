@@ -53,7 +53,7 @@ if "--debug" not in sys.argv:
 
 from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtGui import QFontDatabase, QGuiApplication, QKeyEvent
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, qmlRegisterSingletonType
 
 # Qt resets LC_NUMERIC on import — restore it for libmpv.
 locale.setlocale(locale.LC_NUMERIC, "C")
@@ -106,9 +106,13 @@ def main() -> None:
 
     engine = QQmlApplicationEngine()
 
-    # Semantic key abstraction — exposed to QML as `keys`
+    # Semantic key abstraction — registered as HTPCBackend.KeyHandler QML singleton.
+    # Named "KeyHandler" (not "Keys") to avoid shadowing the built-in QML Keys
+    # attached-property type (used for Keys.onPressed handlers throughout QML).
+    # The instance is created Python-side so it can be passed to SettingsManager
+    # and GamepadManager; qmlRegisterSingletonType ensures QML gets the same object.
     keys = Keys()
-    engine.rootContext().setContextProperty("keys", keys)
+    qmlRegisterSingletonType(Keys, "HTPCBackend", 1, 0, "KeyHandler", lambda _e: keys)
 
     # Recently-played history — exposed to QML as `recentlyPlayed`
     recently_played = RecentlyPlayedManager(config)
@@ -162,7 +166,9 @@ def main() -> None:
     # Gamepad manager — created early so it can be passed to SettingsManager
     gamepad_manager = GamepadManager(app)
 
-    # Settings manager — exposed to QML as `settings`
+    # Settings manager — registered as HTPCBackend.Settings QML singleton.
+    # Constructor requires several already-constructed objects, so we create it
+    # Python-side and register via qmlRegisterSingletonType (same pattern as Keys).
     settings_manager = SettingsManager(
         config, library, plex_library, browser_launcher,
         moonlight_library=moonlight, gamepad_manager=gamepad_manager,
@@ -170,11 +176,17 @@ def main() -> None:
     )
     # Initialize button layout from config
     keys.setButtonLayout(config.button_layout)
-    engine.rootContext().setContextProperty("settings", settings_manager)
+    qmlRegisterSingletonType(
+        SettingsManager, "HTPCBackend", 1, 0, "Settings",
+        lambda _e: settings_manager,
+    )
 
-    # Network monitor — exposed to QML as `networkMonitor`
+    # Network monitor — registered as HTPCBackend.NetworkMonitor QML singleton.
     network_monitor = NetworkMonitor()
-    engine.rootContext().setContextProperty("networkMonitor", network_monitor)
+    qmlRegisterSingletonType(
+        NetworkMonitor, "HTPCBackend", 1, 0, "NetworkMonitor",
+        lambda _e: network_monitor,
+    )
 
     # Allow QML files to import siblings and the Theme singleton via `import "."`
     engine.addImportPath(str(QML_DIR))

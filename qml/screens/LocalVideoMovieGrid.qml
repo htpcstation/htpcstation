@@ -1,12 +1,13 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video movie poster grid — shows a scrollable grid of movie posters.
 //
 // Focus flow:
 //   Gains focus when LocalVideosScreen switches to "videos" view (grid mode).
-//   Arrow keys navigate the grid natively.
+//   Arrow Keys navigate the grid natively.
 //   A (Return) on a cell → emits movieSelected(index, movieData).
 //   B (Escape) → emits back() so LocalVideosScreen returns to categories.
 //   Y (2)      → opens the sort/filter overlay panel.
@@ -58,7 +59,7 @@ FocusScope {
                 parts.push("Genre: " + movieGridView._currentGenre)
             return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        rightText1: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Movie grid ────────────────────────────────────────────────────────────
@@ -93,10 +94,10 @@ FocusScope {
         preferredHighlightEnd:   height * 0.65
 
         Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
+            if (KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.open()
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = movieGrid.currentItem
                 if (item) {
@@ -109,7 +110,7 @@ FocusScope {
                         posterPath:  item.itemPosterPath
                     })
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 movieGridView.back()
             }
@@ -371,7 +372,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -631,7 +632,7 @@ FocusScope {
             var genreCount = sortFilterOverlay._genres.length + 1
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.close()
 
@@ -671,7 +672,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -694,7 +695,7 @@ FocusScope {
                 var newView = viewKeys[sortFilterOverlay._viewIndex]
                 if (newView !== movieGridView._viewMode) {
                     sortFilterOverlay.visible = false
-                    if (settings) settings.setLocalVideoViewMode(newView)
+                    if (Settings) Settings.setLocalVideoViewMode(newView)
                     movieGridView.viewModeChanged(newView)
                 } else {
                     sortFilterOverlay.close()

@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video show list view — split-panel browse view for local TV shows.
 //
@@ -47,7 +48,7 @@ FocusScope {
         statusText: showListView._currentSort !== ""
             ? "Sort: " + showListView._sortLabel
             : "Default order"
-        rightText1: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Split content area ────────────────────────────────────────────────────
@@ -235,7 +236,7 @@ FocusScope {
             preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = showList.currentItem
                     if (item) {
@@ -247,10 +248,10 @@ FocusScope {
                             seasonCount: item.seasonCountValue
                         })
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     showListView.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortFilterOverlay.open()
                 }
@@ -409,7 +410,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -568,7 +569,7 @@ FocusScope {
             var sortCount = sortFilterOverlay._sortOptions.length
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.close()
 
@@ -602,7 +603,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -615,7 +616,7 @@ FocusScope {
                 var newView = viewKeys[sortFilterOverlay._viewIndex]
                 if (newView !== showListView._viewMode) {
                     sortFilterOverlay.visible = false
-                    if (settings) settings.setLocalVideoViewMode(newView)
+                    if (Settings) Settings.setLocalVideoViewMode(newView)
                     showListView.viewModeChanged(newView)
                 } else {
                     sortFilterOverlay.close()

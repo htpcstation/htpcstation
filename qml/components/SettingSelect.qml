@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
-// Reusable selection row for settings.
+// Reusable selection row for Settings.
 //
 // A (Return) → cycles to the next option in the list and emits selected(id).
 // Shows label on left, currentValue on right (same layout as SettingTextInput
@@ -72,7 +73,7 @@ FocusScope {
 
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             // Fetch fresh options on each press (API data may have changed)
             var opts = selectRoot.optionsProvider

@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local video show detail — season tabs + episode list for a local TV show.
 //
@@ -90,7 +91,7 @@ FocusScope {
 
         Text {
             anchors { right: parent.right; rightMargin: root.vpx(16); verticalCenter: parent.verticalCenter }
-            text: keys.useGamepadLabels ? "[ ◀▶ ]  Season" : "[ ←→ ]  Season"
+            text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Season" : "[ ←→ ]  Season"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -256,7 +257,7 @@ FocusScope {
                     event.accepted = true
                     episodeList.forceActiveFocus()
                     episodeList.currentIndex = 0
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     showDetailView.back()
                 }
@@ -370,13 +371,13 @@ FocusScope {
             preferredHighlightEnd: height * 0.65
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = episodeList.currentItem
                     if (item) {
                         showDetailView.playEpisode(item.episodePath)
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     showDetailView.back()
                 } else if (event.key === Qt.Key_Up && episodeList.currentIndex <= 0) {

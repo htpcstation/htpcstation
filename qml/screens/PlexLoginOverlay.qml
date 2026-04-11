@@ -1,5 +1,6 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
 // In-app Plex PIN login overlay.
 // Shown when the user selects "Sign in with Plex" in Settings.
@@ -13,7 +14,7 @@ import ".."
 //   // Show:
 //   plexLoginOverlay.visible = true
 //   plexLoginOverlay.forceActiveFocus()
-//   settings.startPlexPinLogin()
+//   Settings.startPlexPinLogin()
 //
 // Wire plexLoginStatus signal in the parent (SettingsScreen), not here.
 FocusScope {
@@ -130,7 +131,7 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels ? keys.cancelLabel + "  Cancel" : "Esc  Cancel"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + "  Cancel" : "Esc  Cancel"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -140,9 +141,9 @@ FocusScope {
 
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isCancel(event)) {
+        if (KeyHandler.isCancel(event)) {
             event.accepted = true
-            settings.cancelPlexPinLogin()
+            Settings.cancelPlexPinLogin()
         }
     }
 }

@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Local music artist list view — split-panel browse view for local music artists.
 //
@@ -77,8 +78,8 @@ FocusScope {
         statusText: localArtistList._currentSort !== ""
             ? "Sorted: " + localArtistList._sortLabel
             : "Default order"
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort" : "2  Sort"
     }
 
     // ── Split content area ────────────────────────────────────────────────────
@@ -205,26 +206,26 @@ FocusScope {
             }
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = artistList.currentItem
                     if (item) {
                         localArtistList.artistSelected(item.artistName)
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     localArtistList.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortOverlay.open()
-                } else if (keys.isPageDown(event)) {
+                } else if (KeyHandler.isPageDown(event)) {
                     event.accepted = true
                     var mdl = localMusic ? localMusic.artistsModel : null
                     artistList.currentIndex = JumpHelper.jumpIndex(
                         artistList.count, artistList.currentIndex, localArtistList._currentSort,
                         function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                     )
-                } else if (keys.isPageUp(event)) {
+                } else if (KeyHandler.isPageUp(event)) {
                     event.accepted = true
                     var mdl2 = localMusic ? localMusic.artistsModel : null
                     artistList.currentIndex = JumpHelper.jumpIndex(
@@ -412,7 +413,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -562,7 +563,7 @@ FocusScope {
             var sortCount = 2
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortOverlay.close()
@@ -597,7 +598,7 @@ FocusScope {
                         sortOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -605,7 +606,7 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 localArtistList._currentSort = newSort
                 if (localMusic) localMusic.sortArtists(newSort)
-                if (settings) settings.setSortLocalMusicArtists(newSort)
+                if (Settings) Settings.setSortLocalMusicArtists(newSort)
 
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
@@ -614,7 +615,7 @@ FocusScope {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // LocalMusicScreen will route focus to the newly visible view.
                     sortOverlay.visible = false
-                    if (settings) settings.setLocalMusicViewMode(newView)
+                    if (Settings) Settings.setLocalMusicViewMode(newView)
                     localArtistList.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).
@@ -625,8 +626,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            var savedSort = settings.sortLocalMusicArtists
+        if (Settings) {
+            var savedSort = Settings.sortLocalMusicArtists
             if (savedSort) {
                 _currentSort = savedSort
                 if (localMusic) localMusic.sortArtists(savedSort)

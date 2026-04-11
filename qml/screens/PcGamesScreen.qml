@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // PC Games section screen.
 //
@@ -173,7 +174,7 @@ FocusScope {
         visible: pcGamesScreen.currentView === "sources"
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (!steam) return
                 if (currentItem) {
@@ -202,7 +203,7 @@ FocusScope {
                     pcGamesScreen.selectedSourceKey = sourceKey
                     pcGamesScreen.currentView = "games"
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 pcGamesScreen.back()
             }
@@ -569,8 +570,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            _viewMode = settings.pcGamesViewMode || "grid"
+        if (Settings) {
+            _viewMode = Settings.pcGamesViewMode || "grid"
         }
     }
 }

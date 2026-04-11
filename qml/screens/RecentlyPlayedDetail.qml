@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Recently Played detail panel — simplified detail view for a recently played game.
 //
@@ -83,7 +84,7 @@ FocusScope {
 
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             var data = recentlyPlayedDetail.gameData
             recentlyPlayedDetail.launch(
@@ -92,7 +93,7 @@ FocusScope {
                 data.hostAddress || "",
                 data.name || ""
             )
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             recentlyPlayedDetail.back()
         } else if (event.key === Qt.Key_Left) {
@@ -143,7 +144,7 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

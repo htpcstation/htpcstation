@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Plex show detail view — combined show metadata + season/episode browser.
 //
@@ -172,14 +173,14 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels ? "[ ◀▶ ]  Season" : "[ ←→ ]  Season"
+                text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Season" : "[ ←→ ]  Season"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -188,8 +189,8 @@ FocusScope {
             Text {
                 text: {
                     var watchLabel = showDetailView._viewCount > 0 ? "Mark Unwatched" : "Mark Watched"
-                    return keys.useGamepadLabels
-                        ? keys.context2Label + "  " + watchLabel
+                    return KeyHandler.useGamepadLabels
+                        ? KeyHandler.context2Label + "  " + watchLabel
                         : "2  " + watchLabel
                 }
                 color: Theme.colorTextDim
@@ -412,7 +413,7 @@ FocusScope {
                             var tabsBottom = seasonTabsArea.y + seasonTabsArea.height
                             mainFlickable.contentY = tabsBottom
                         }
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         showDetailView.back()
                     }
@@ -562,13 +563,13 @@ FocusScope {
                 model: showDetailView.episodes
 
                 Keys.onPressed: (event) => {
-                    if (keys.isAccept(event)) {
+                    if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         var ep = showDetailView.episodes[episodeList.currentIndex]
                         if (ep) {
                             showDetailView.playEpisode(ep.ratingKey)
                         }
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         showDetailView.back()
                     } else if (event.key === Qt.Key_Up
@@ -760,7 +761,7 @@ FocusScope {
 
     // ── X/Y key handler for My List toggle and Mark Watched ──────────────────
     Keys.onPressed: (event) => {
-        if (keys.isContext1(event)) {
+        if (KeyHandler.isContext1(event)) {
             event.accepted = true
             if (plex && showDetailView.showData.ratingKey) {
                 plex.toggleMyList(showDetailView.showData.ratingKey,
@@ -769,7 +770,7 @@ FocusScope {
                                   showDetailView.showData.posterLocal || "",
                                   "")
             }
-        } else if (keys.isContext2(event)) {
+        } else if (KeyHandler.isContext2(event)) {
             event.accepted = true
             if (plex && showDetailView.showData.ratingKey) {
                 if (showDetailView._viewCount > 0) {

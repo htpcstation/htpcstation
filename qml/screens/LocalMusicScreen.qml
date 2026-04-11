@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Local Music screen — browse and play local music files.
 //
@@ -198,8 +199,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            var savedMode = settings.localMusicViewMode
+        if (Settings) {
+            var savedMode = Settings.localMusicViewMode
             if (savedMode) _viewMode = savedMode
         }
     }
@@ -314,7 +315,7 @@ FocusScope {
         }
 
         Keys.onPressed: (event) => {
-            if (keys.isAccept(event)) {
+            if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = localMusicMenu.currentItem
                 if (item) {
@@ -323,7 +324,7 @@ FocusScope {
                     } else if (item.menuAction === "artists") {
                         localMusicScreen.currentView = "artists"
                     } else if (item.menuAction === "folders") {
-                        var musicDir = settings ? settings.localMusicDirectory : ""
+                        var musicDir = Settings.localMusicDirectory
                         if (musicDir && localMusic) {
                             localMusicScreen._currentFolder = musicDir
                             localMusicScreen._folderHistory = []
@@ -339,7 +340,7 @@ FocusScope {
                         }
                     }
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 localMusicScreen.back()
             }
@@ -441,7 +442,7 @@ FocusScope {
                     var prev = albumList.currentIndex - 1
                     while (prev >= 0 && localMusicScreen._albums[prev].type === "header") prev--
                     if (prev >= 0) albumList.currentIndex = prev
-                } else if (keys.isAccept(event)) {
+                } else if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var album = localMusicScreen._albums[albumList.currentIndex]
                     if (album && album.type === "album") {
@@ -449,7 +450,7 @@ FocusScope {
                         localMusicScreen._albumReturnView = "detail"
                         localMusicScreen.currentView = "album"
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     localMusicScreen.currentView = "artists"
                 }
@@ -711,7 +712,7 @@ FocusScope {
             Keys.onPressed: (event) => {
                 if (trackList._playAllFocused) {
                     // Play All button is focused
-                    if (keys.isAccept(event)) {
+                    if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(localMusicScreen._tracks, localMusicScreen._albumData, 0)
                         localMusicScreen._goToNowPlaying()
@@ -719,7 +720,7 @@ FocusScope {
                         event.accepted = true
                         trackList._playAllFocused = false
                         trackList.currentIndex = 0
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         if (localMusicScreen._navTargetApplied) localMusicScreen.back()
                         else localMusicScreen.currentView = localMusicScreen._albumReturnView
@@ -740,16 +741,16 @@ FocusScope {
                             trackList._playAllFocused = true
                             trackList.positionViewAtBeginning()
                         }
-                    } else if (keys.isAccept(event)) {
+                    } else if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         homeScreen._playAlbum(localMusicScreen._tracks, localMusicScreen._albumData, trackList.currentIndex)
                         localMusicScreen._goToNowPlaying()
-                    } else if (keys.isContext1(event)) {
+                    } else if (KeyHandler.isContext1(event)) {
                         // X button — Play All (from track 1)
                         event.accepted = true
                         homeScreen._playAlbum(localMusicScreen._tracks, localMusicScreen._albumData, 0)
                         localMusicScreen._goToNowPlaying()
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         if (localMusicScreen._navTargetApplied) localMusicScreen.back()
                         else localMusicScreen.currentView = localMusicScreen._albumReturnView
@@ -1067,10 +1068,10 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels
-                    ? "[" + keys.acceptLabel + "] Play from track    ["
-                      + keys.context1Label + "] Play All    ["
-                      + keys.cancelLabel + "] Back"
+                text: KeyHandler.useGamepadLabels
+                    ? "[" + KeyHandler.acceptLabel + "] Play from track    ["
+                      + KeyHandler.context1Label + "] Play All    ["
+                      + KeyHandler.cancelLabel + "] Back"
                     : "[Enter] Play from track    [Esc] Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1135,10 +1136,10 @@ FocusScope {
 
             Text {
                 anchors.centerIn: parent
-                text: keys.useGamepadLabels
-                    ? "[" + keys.acceptLabel + "] Open    ["
-                      + keys.context2Label + "] Play Folder    ["
-                      + keys.cancelLabel + "] Back"
+                text: KeyHandler.useGamepadLabels
+                    ? "[" + KeyHandler.acceptLabel + "] Open    ["
+                      + KeyHandler.context2Label + "] Play Folder    ["
+                      + KeyHandler.cancelLabel + "] Back"
                     : "[Enter] Open    [2] Play Folder    [Esc] Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -1182,7 +1183,7 @@ FocusScope {
             preferredHighlightEnd:   height * 0.65
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = folderList.model[folderList.currentIndex]
                     if (!item) return
@@ -1209,7 +1210,7 @@ FocusScope {
                         homeScreen._playAlbum(tracks, albumData, item.trackIndex)
                         localMusicScreen._goToNowPlaying()
                     }
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     // Y button — play entire current folder
                     event.accepted = true
                     var folderTracks = localMusicScreen._folderData.tracks || []
@@ -1225,7 +1226,7 @@ FocusScope {
                         homeScreen._playAlbum(folderTracks, fAlbumData, 0)
                         localMusicScreen._goToNowPlaying()
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     var hist = localMusicScreen._folderHistory
                     if (hist.length > 0) {

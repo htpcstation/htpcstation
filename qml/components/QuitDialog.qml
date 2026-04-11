@@ -1,5 +1,6 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
 // Modal quit confirmation dialog.
 // Place at the window level (above HomeScreen) so it overlays everything.
@@ -154,14 +155,14 @@ FocusScope {
         } else if (event.key === Qt.Key_Right) {
             event.accepted = true
             _selectedButton = 1
-        } else if (keys.isAccept(event)) {
+        } else if (KeyHandler.isAccept(event)) {
             event.accepted = true
             if (_selectedButton === 0) {
                 quitDialog.quit()
             } else {
                 quitDialog.cancel()
             }
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             quitDialog.cancel()
         }

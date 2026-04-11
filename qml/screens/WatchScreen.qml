@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Watch section screen — Plex library browser.
 //
@@ -100,7 +101,7 @@ FocusScope {
     property bool _resumeDialogVisible: false
     property string _resumeRatingKey: ""
     property int _resumeViewOffset: 0   // ms
-    // Per-section focus memory: keys are selectedLibraryType strings
+    // Per-section focus memory: Keys are selectedLibraryType strings
     // ("movie", "show", "ondeck", "mylist") plus "show-episode" for the
     // episode list inside a show detail view.
     property var _focusMemory: ({})
@@ -152,7 +153,7 @@ FocusScope {
     }
 
     function _playContent(ratingKey, knownViewOffset) {
-        if (!settings || (settings.plexPlayer || "mpv") === "browser") {
+        if (!Settings || (Settings.plexPlayer || "mpv") === "browser") {
             plex.launchContent(ratingKey)
             return
         }
@@ -366,7 +367,7 @@ FocusScope {
             watchScreen._introSkipped = false
         }
         function onMpvPositionChanged(posMs) {
-            if (!settings || !settings.autoSkipIntro) return
+            if (!Settings || !Settings.autoSkipIntro) return
             if (watchScreen._introEndMs <= 0) return
             if (watchScreen._introSkipped) return
             // Seek when position enters the intro window (any position < introEndMs
@@ -559,7 +560,7 @@ FocusScope {
             }
 
                 Keys.onPressed: (event) => {
-                    if (keys.isAccept(event)) {
+                    if (KeyHandler.isAccept(event)) {
                         event.accepted = true
                         if (currentItem) {
                             if (currentItem.entryType === "refresh") {
@@ -579,7 +580,7 @@ FocusScope {
                                 watchScreen.currentView = "content"
                             }
                         }
-                    } else if (keys.isCancel(event)) {
+                    } else if (KeyHandler.isCancel(event)) {
                         event.accepted = true
                         watchScreen.back()
                     }
@@ -1034,7 +1035,7 @@ FocusScope {
         focus: false
 
         Keys.onPressed: (event) => {
-            if (keys.isCancel(event)) {
+            if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 watchScreen.currentView = "libraries"
             }
@@ -1052,8 +1053,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            _viewMode = settings.watchViewMode || "grid"
+        if (Settings) {
+            _viewMode = Settings.watchViewMode || "grid"
         }
         if (plex) _libraryEntries = _getVideoLibraries()
     }
@@ -1079,7 +1080,7 @@ FocusScope {
             if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
                 event.accepted = true
                 resumeDialog._focusedButton = resumeDialog._focusedButton === 0 ? 1 : 0
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 watchScreen._resumeDialogVisible = false
                 // Keep _loadingOverlayVisible = true — the backdrop transitions
@@ -1089,7 +1090,7 @@ FocusScope {
                 } else {
                     watchScreen._launchMpv(watchScreen._resumeRatingKey, 0)
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 watchScreen._resumeDialogVisible = false
                 watchScreen._loadingOverlayVisible = false
@@ -1209,7 +1210,7 @@ FocusScope {
         }
 
         Keys.onPressed: (event) => {
-            if (keys.isCancel(event)) {
+            if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 watchScreen._clearLoading()
             }
@@ -1229,8 +1230,8 @@ FocusScope {
 
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: keys.useGamepadLabels
-                    ? "[" + keys.cancelLabel + "] Cancel"
+                text: KeyHandler.useGamepadLabels
+                    ? "[" + KeyHandler.cancelLabel + "] Cancel"
                     : "[Esc] Cancel"
                 color: Theme.colorOverlayText
                 font.family: Theme.fontFamily

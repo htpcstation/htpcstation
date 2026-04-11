@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Plex movie list view — split-panel browse view for Plex movie libraries.
 //
@@ -114,9 +115,9 @@ FocusScope {
                 parts.push("Genre: " + movieListView._currentGenreTitle)
             return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
-        rightText3: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
+        rightText3: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Loading indicator — shown while a sort/filter re-fetch is in progress ─
@@ -325,33 +326,33 @@ FocusScope {
             }
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = movieList.currentItem
                     if (item) {
                         movieListView.movieSelected(item.ratingKeyValue, movieList.currentIndex)
                     }
-                } else if (keys.isContext1(event)) {
+                } else if (KeyHandler.isContext1(event)) {
                     event.accepted = true
                     var item = movieList.currentItem
                     if (item) {
                         plex.toggleMyList(item.ratingKeyValue, item.titleValue, "movie",
                                           item.posterLocalValue, "")
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     movieListView.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortFilterOverlay.open()
-                } else if (keys.isPageDown(event)) {
+                } else if (KeyHandler.isPageDown(event)) {
                     event.accepted = true
                     var mdl = plex ? plex.moviesModel : null
                     movieList.currentIndex = JumpHelper.jumpIndex(
                         movieList.count, movieList.currentIndex, movieListView._currentSort,
                         function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                     )
-                } else if (keys.isPageUp(event)) {
+                } else if (KeyHandler.isPageUp(event)) {
                     event.accepted = true
                     var mdl2 = plex ? plex.moviesModel : null
                     movieList.currentIndex = JumpHelper.jumpIndex(
@@ -443,7 +444,7 @@ FocusScope {
     // Navigation:
     //   Up/Down moves between sections (sort=0, genre=1, view=2).
     //   Left/Right moves between options in the focused section.
-    //   A (Return) applies all three settings together.
+    //   A (Return) applies all three Settings together.
     //   B (Escape) or Y dismisses without changing.
     FocusScope {
         id: sortFilterOverlay
@@ -539,7 +540,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -801,7 +802,7 @@ FocusScope {
             var genreCount = sortFilterOverlay._genres.length + 1
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortFilterOverlay.close()
@@ -842,7 +843,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -850,7 +851,7 @@ FocusScope {
                 movieListView._currentSort = newSort
                 movieListView._loading = true
                 plex.sortMovies(newSort)
-                if (settings) settings.setSortPlexMovies(newSort)
+                if (Settings) Settings.setSortPlexMovies(newSort)
 
                 // Apply genre filter
                 if (sortFilterOverlay._genreIndex === 0) {
@@ -858,14 +859,14 @@ FocusScope {
                     movieListView._currentGenreKey = ""
                     movieListView._currentGenreTitle = ""
                     plex.filterByGenre("")
-                    if (settings) settings.setFilterPlexMovieGenre("")
+                    if (Settings) Settings.setFilterPlexMovieGenre("")
                 } else {
                     var gi = sortFilterOverlay._genreIndex - 1
                     var genre = sortFilterOverlay._genres[gi]
                     movieListView._currentGenreKey = genre.key
                     movieListView._currentGenreTitle = genre.title
                     plex.filterByGenre(genre.key)
-                    if (settings) settings.setFilterPlexMovieGenre(genre.key)
+                    if (Settings) Settings.setFilterPlexMovieGenre(genre.key)
                 }
 
                 // Apply view mode
@@ -875,7 +876,7 @@ FocusScope {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // WatchScreen will route focus to the newly visible view.
                     sortFilterOverlay.visible = false
-                    if (settings) settings.setWatchViewMode(newView)
+                    if (Settings) Settings.setWatchViewMode(newView)
                     movieListView.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).

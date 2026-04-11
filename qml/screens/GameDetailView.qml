@@ -2,6 +2,7 @@ import QtQuick
 import QtMultimedia
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Game detail panel — shows full metadata for a selected game.
 //
@@ -37,7 +38,7 @@ FocusScope {
     // Start/stop video when gameData changes or the view is shown/hidden.
     onGameDataChanged: {
         mediaPlayer.stop()
-        if (gameDetailView.gameData.videoPath && settings.videoSnapAutoplay) {
+        if (gameDetailView.gameData.videoPath && Settings.videoSnapAutoplay) {
             // Small delay to let source load before playing
             playTimer.restart()
         }
@@ -46,7 +47,7 @@ FocusScope {
     onVisibleChanged: {
         if (!visible) {
             mediaPlayer.stop()
-        } else if (gameDetailView.gameData.videoPath && settings.videoSnapAutoplay) {
+        } else if (gameDetailView.gameData.videoPath && Settings.videoSnapAutoplay) {
             playTimer.restart()
         }
     }
@@ -54,20 +55,20 @@ FocusScope {
     // Delay play() slightly so the source has time to load
     Timer {
         id: playTimer
-        interval: settings ? settings.videoSnapDelayMs : 1000
+        interval: Settings ? Settings.videoSnapDelayMs : 1000
         repeat: false
         onTriggered: mediaPlayer.play()
     }
 
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             gameDetailView.launch()
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             gameDetailView.back()
-        } else if (keys.isContext1(event)) {
+        } else if (KeyHandler.isContext1(event)) {
             // X button (context1 / 1)
             event.accepted = true
             gameDetailView.toggleFavorite()
@@ -161,14 +162,14 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  Favorite" : "1  Favorite"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

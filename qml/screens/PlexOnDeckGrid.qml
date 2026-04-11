@@ -2,12 +2,13 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Plex on-deck (Continue Watching) grid — shows a scrollable grid of in-progress items.
 //
 // Focus flow:
 //   Gains focus when WatchScreen switches to "content" view for the ondeck library.
-//   Arrow keys navigate the grid natively.
+//   Arrow Keys navigate the grid natively.
 //   A (Return) on a cell → emits itemSelected(ratingKey).
 //   B (Escape) → emits back() so WatchScreen can return to the library list.
 //
@@ -73,9 +74,9 @@ FocusScope {
         id: header
         title: onDeckGridView.sourceTitle
         statusText: "Continue Watching"
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
-        rightText3: keys.useGamepadLabels ? keys.context2Label + "  View" : "2  View"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
+        rightText3: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  View" : "2  View"
     }
 
     // ── On-deck grid ──────────────────────────────────────────────────────────
@@ -107,32 +108,32 @@ FocusScope {
         preferredHighlightEnd:   height * 0.65
 
         Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
+            if (KeyHandler.isContext2(event)) {
                 event.accepted = true
                 viewOverlay.open()
-            } else if (keys.isContext1(event)) {
+            } else if (KeyHandler.isContext1(event)) {
                 event.accepted = true
                 var item = onDeckGrid.currentItem
                 if (item) {
                     plex.toggleMyList(item.itemRatingKey, item.itemTitle, item.itemType,
                                       item.itemPosterLocal, item.itemGrandparentTitle)
                 }
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = onDeckGrid.currentItem
                 if (item) {
                     onDeckGridView.itemSelected(item.itemRatingKey)
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 onDeckGridView.back()
-            } else if (keys.isPageDown(event)) {
+            } else if (KeyHandler.isPageDown(event)) {
                 event.accepted = true
                 onDeckGrid.currentIndex = JumpHelper.jumpIndex(
                     onDeckGrid.count, onDeckGrid.currentIndex, null,
                     function(i) { return "" }, 1
                 )
-            } else if (keys.isPageUp(event)) {
+            } else if (KeyHandler.isPageUp(event)) {
                 event.accepted = true
                 onDeckGrid.currentIndex = JumpHelper.jumpIndex(
                     onDeckGrid.count, onDeckGrid.currentIndex, null,
@@ -426,8 +427,8 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels
-                      ? keys.cancelLabel + " / " + keys.context2Label + "  Close"
+                text: KeyHandler.useGamepadLabels
+                      ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close"
                       : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -502,7 +503,7 @@ FocusScope {
         Keys.onPressed: (event) => {
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 viewOverlay.close()
@@ -517,7 +518,7 @@ FocusScope {
                 if (viewOverlay._viewIndex < viewCount - 1)
                     viewOverlay._viewIndex += 1
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
@@ -526,7 +527,7 @@ FocusScope {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // WatchScreen will route focus to the newly visible view.
                     viewOverlay.visible = false
-                    if (settings) settings.setWatchViewMode(newView)
+                    if (Settings) Settings.setWatchViewMode(newView)
                     onDeckGridView.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).

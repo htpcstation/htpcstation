@@ -26,7 +26,7 @@ ApplicationWindow {
     }
 
     // Guard to prevent the mapping dialog from reopening immediately
-    // after closing (the A-press that saves can propagate to the settings
+    // after closing (the A-press that saves can propagate to the Settings
     // screen and re-trigger the "Map Controller" button).
     property bool _mappingDialogCooldown: false
 

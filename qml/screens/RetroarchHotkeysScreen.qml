@@ -1,9 +1,10 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // RetroArch Hotkeys sub-screen — shows the hotkey modifier and the
-// hotkey action → button mapping, plus rewind settings.
+// hotkey action → button mapping, plus rewind Settings.
 //
 // Usage (from SettingsScreen.qml):
 //   RetroarchHotkeysScreen {
@@ -13,7 +14,7 @@ import "../components"
 //   }
 //
 //   function showRetroarchHotkeys() {
-//       retroarchHotkeysScreen.config = settings ? settings.getRetroarchHotkeyConfig() : {}
+//       retroarchHotkeysScreen.config = Settings ? Settings.getRetroarchHotkeyConfig() : {}
 //       retroarchHotkeysScreen.visible = true
 //       retroarchHotkeysScreen.forceActiveFocus()
 //   }
@@ -66,7 +67,7 @@ FocusScope {
             hotkeysScreen._rewindGranularity = config.rewind_granularity || 1
         }
         // Warn if the controller mapping wizard hasn't been run yet.
-        if (settings && !settings.hasControllerMappingWithSdl()) {
+        if (Settings && !Settings.hasControllerMappingWithSdl()) {
             hotkeysScreen._showToast("Recommended: run the controller mapping wizard before assigning hotkeys")
         }
     }
@@ -118,7 +119,7 @@ FocusScope {
         }
         var newVal = opts[idx]
         hotkeysScreen._rewindBufferSize = newVal
-        if (settings) settings.setRewindBufferSize(newVal)
+        if (Settings) Settings.setRewindBufferSize(newVal)
     }
 
     function _cycleGranularity(forward) {
@@ -132,7 +133,7 @@ FocusScope {
         }
         var newVal = opts[idx]
         hotkeysScreen._rewindGranularity = newVal
-        if (settings) settings.setRewindGranularity(newVal)
+        if (Settings) Settings.setRewindGranularity(newVal)
     }
 
     // ── Key handling ──────────────────────────────────────────────────────────
@@ -168,10 +169,10 @@ FocusScope {
                 _activateFocused()
             }
             // hotkey rows and rewind enable: Right does nothing
-        } else if (keys.isAccept(event)) {
+        } else if (KeyHandler.isAccept(event)) {
             event.accepted = true
             _activateFocused()
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             hotkeysScreen.back()
         }
@@ -201,7 +202,7 @@ FocusScope {
             // Toggle rewind enable
             var newVal = !hotkeysScreen._rewindEnable
             hotkeysScreen._rewindEnable = newVal
-            if (settings) settings.setRewindEnable(newVal)
+            if (Settings) Settings.setRewindEnable(newVal)
         } else if (hotkeysScreen._focusedRow === _bufferSizeRow()) {
             // Cycle buffer size forward on Accept
             _cycleBufferSize(true)
@@ -215,12 +216,12 @@ FocusScope {
     }
 
     function _applyHotkeys() {
-        if (!settings) {
+        if (!Settings) {
             hotkeysScreen._showToast("Error — check logs")
             return
         }
         try {
-            settings.applyRetroarchHotkeys()
+            Settings.applyRetroarchHotkeys()
             hotkeysScreen._showToast("Applied")
         } catch (e) {
             hotkeysScreen._showToast("Error — check logs")
@@ -273,7 +274,7 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + "  Back" : "Esc  Back"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -790,19 +791,19 @@ FocusScope {
         visible: false
 
         onButtonCaptured: (evdev_code) => {
-            if (settings) {
-                settings.setHotkeyModifier(evdev_code)
+            if (Settings) {
+                Settings.setHotkeyModifier(evdev_code)
                 // Refresh config so modifier_label updates
-                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+                hotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
             }
             // Focus the list directly — FocusScope needs a focused child to receive Keys events
             hotkeysList.forceActiveFocus()
         }
 
         onButtonCleared: {
-            if (settings) {
-                settings.clearHotkeyModifier()
-                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            if (Settings) {
+                Settings.clearHotkeyModifier()
+                hotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
             }
             hotkeysList.forceActiveFocus()
         }
@@ -820,25 +821,25 @@ FocusScope {
         allowAxisInput: true
 
         onButtonCaptured: (evdev_code) => {
-            if (settings && hotkeysScreen._captureTargetAction !== "") {
-                settings.setHotkeyActionByEvdev(hotkeysScreen._captureTargetAction, evdev_code)
-                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            if (Settings && hotkeysScreen._captureTargetAction !== "") {
+                Settings.setHotkeyActionByEvdev(hotkeysScreen._captureTargetAction, evdev_code)
+                hotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
             }
             hotkeysList.forceActiveFocus()
         }
 
         onAxisCaptured: (evdev_code, value) => {
-            if (settings && hotkeysScreen._captureTargetAction !== "") {
-                settings.setHotkeyActionByAxis(hotkeysScreen._captureTargetAction, evdev_code, value)
-                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            if (Settings && hotkeysScreen._captureTargetAction !== "") {
+                Settings.setHotkeyActionByAxis(hotkeysScreen._captureTargetAction, evdev_code, value)
+                hotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
             }
             hotkeysList.forceActiveFocus()
         }
 
         onButtonCleared: {
-            if (settings && hotkeysScreen._captureTargetAction !== "") {
-                settings.clearHotkeyAction(hotkeysScreen._captureTargetAction)
-                hotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            if (Settings && hotkeysScreen._captureTargetAction !== "") {
+                Settings.clearHotkeyAction(hotkeysScreen._captureTargetAction)
+                hotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
             }
             hotkeysList.forceActiveFocus()
         }

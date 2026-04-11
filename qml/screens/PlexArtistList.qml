@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Plex artist list view — split-panel browse view for Plex music artists.
 //
@@ -92,8 +93,8 @@ FocusScope {
         statusText: plexArtistList._currentSort !== ""
             ? "Sorted: " + plexArtistList._sortLabel
             : "Default order"
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort" : "2  Sort"
     }
 
     // ── Split content area ────────────────────────────────────────────────────
@@ -252,26 +253,26 @@ FocusScope {
             }
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = artistList.currentItem
                     if (item) {
                         plexArtistList.artistSelected(item.artistRatingKey)
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     plexArtistList.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortOverlay.open()
-                } else if (keys.isPageDown(event)) {
+                } else if (KeyHandler.isPageDown(event)) {
                     event.accepted = true
                     var mdl = plex ? plex.artistsModel : null
                     artistList.currentIndex = JumpHelper.jumpIndex(
                         artistList.count, artistList.currentIndex, plexArtistList._currentSort,
                         function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                     )
-                } else if (keys.isPageUp(event)) {
+                } else if (KeyHandler.isPageUp(event)) {
                     event.accepted = true
                     var mdl2 = plex ? plex.artistsModel : null
                     artistList.currentIndex = JumpHelper.jumpIndex(
@@ -477,7 +478,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -627,7 +628,7 @@ FocusScope {
             var sortCount = 2
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortOverlay.close()
@@ -662,7 +663,7 @@ FocusScope {
                         sortOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -670,7 +671,7 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 plexArtistList._currentSort = newSort
                 if (plex) plex.sortArtists(newSort)
-                if (settings) settings.setSortPlexArtists(newSort)
+                if (Settings) Settings.setSortPlexArtists(newSort)
 
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
@@ -679,7 +680,7 @@ FocusScope {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // ListenScreen will route focus to the newly visible view.
                     sortOverlay.visible = false
-                    if (settings) settings.setListenViewMode(newView)
+                    if (Settings) Settings.setListenViewMode(newView)
                     plexArtistList.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).

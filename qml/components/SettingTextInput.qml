@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
-// Reusable text input row for settings (paths, URLs, commands).
+// Reusable text input row for Settings (paths, URLs, commands).
 //
 // Normal mode: shows label on left, value on right (masked if masked=true).
 // Edit mode (entered via A/Return): value becomes editable TextInput.
@@ -156,13 +157,13 @@ FocusScope {
 
     // ── Key handling (normal mode) ────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (!textInputRoot.editing && keys.isAccept(event)) {
+        if (!textInputRoot.editing && KeyHandler.isAccept(event)) {
             event.accepted = true
             textInputRoot._editText = textInputRoot.value
             textInputRoot.editing = true
             textField.forceActiveFocus()
             textField.selectAll()
-        } else if (!textInputRoot.editing && keys.isCancel(event)) {
+        } else if (!textInputRoot.editing && KeyHandler.isCancel(event)) {
             // Let the parent ListView handle cancel (back navigation)
         }
     }

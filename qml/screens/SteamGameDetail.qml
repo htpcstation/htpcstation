@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Steam game detail panel — shows metadata for a selected Steam game.
 //
@@ -90,14 +91,14 @@ FocusScope {
 
     // ── Key handling ─────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event)) {
+        if (KeyHandler.isAccept(event)) {
             event.accepted = true
             var appId = steamGameDetail.gameData.appId || ""
             steamGameDetail.launch(appId)
-        } else if (keys.isCancel(event)) {
+        } else if (KeyHandler.isCancel(event)) {
             event.accepted = true
             steamGameDetail.back()
-        } else if (keys.isContext1(event)) {
+        } else if (KeyHandler.isContext1(event)) {
             event.accepted = true
             if (steam) steam.toggleFavorite(pcGamesScreen.selectedGameIndex)
         } else if (event.key === Qt.Key_Left) {
@@ -160,14 +161,14 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
+                text: KeyHandler.useGamepadLabels ? "[ ◀▶ ]  Prev/Next" : "[ ←→ ]  Prev/Next"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
             }
 
             Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  Favorite" : "1  Favorite"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)

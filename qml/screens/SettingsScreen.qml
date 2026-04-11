@@ -1,10 +1,11 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Settings screen — tabbed layout with two focus zones:
 //   1. Tab strip (horizontal) — Left/Right to switch tabs
-//   2. Content list — the settings ListView
+//   2. Content list — the Settings ListView
 //
 // Navigation:
 //   Down from tabs → content list
@@ -169,14 +170,14 @@ FocusScope {
 
     // ── System Cores sub-screen ──────────────────────────────────────────────
     function showSystemCores() {
-        systemCoresScreen.systems = settings ? settings.getSystemsList() : []
+        systemCoresScreen.systems = Settings ? Settings.getSystemsList() : []
         systemCoresScreen.visible = true
         systemCoresScreen.forceActiveFocus()
     }
 
     // ── RetroArch Hotkeys sub-screen ─────────────────────────────────────────
     function showRetroarchHotkeys() {
-        retroarchHotkeysScreen.config = settings ? settings.getRetroarchHotkeyConfig() : {}
+        retroarchHotkeysScreen.config = Settings ? Settings.getRetroarchHotkeyConfig() : {}
         retroarchHotkeysScreen.visible = true
         retroarchHotkeysScreen.forceActiveFocus()
     }
@@ -198,61 +199,61 @@ FocusScope {
 
     // ── Helper: get current value for a setting key ──────────────────────────
     function _getValue(key) {
-        if (!settings) return ""
-        if (key === "romDirectory")       return settings.romDirectory
-        if (key === "retroarchCommand")   return settings.retroarchCommand
-        if (key === "coresDirectory")     return settings.coresDirectory
+        if (!Settings) return ""
+        if (key === "romDirectory")       return Settings.romDirectory
+        if (key === "retroarchCommand")   return Settings.retroarchCommand
+        if (key === "coresDirectory")     return Settings.coresDirectory
         if (key === "plexServer") {
-            return settings.plexServerName || "Not selected"
+            return Settings.plexServerName || "Not selected"
         }
         if (key === "plexUser") {
-            return settings.plexUserTitle || "Not selected"
+            return Settings.plexUserTitle || "Not selected"
         }
         if (key === "musicLibrary") {
             if (!plex) return "Not selected"
             var musicLibs = plex.getMusicLibraries()
             for (var m = 0; m < musicLibs.length; m++) {
-                if (musicLibs[m].id === settings.musicLibraryKey) return musicLibs[m].label
+                if (musicLibs[m].id === Settings.musicLibraryKey) return musicLibs[m].label
             }
             return "Not selected"
         }
-        if (key === "browserCommand")     return settings.browserCommand
-        if (key === "moonlightCommand")   return settings.moonlightCommand
+        if (key === "browserCommand")     return Settings.browserCommand
+        if (key === "moonlightCommand")   return Settings.moonlightCommand
         if (key === "moonlightHost") {
             if (!moonlight) return "Not selected"
-            var hosts = settings.getHostsList()
+            var hosts = Settings.getHostsList()
             for (var k = 0; k < hosts.length; k++) {
-                if (hosts[k].id === settings.moonlightHostUuid) return hosts[k].label
+                if (hosts[k].id === Settings.moonlightHostUuid) return hosts[k].label
             }
             return "Not selected"
         }
-        if (key === "videoSnapAutoplay")      return settings.videoSnapAutoplay
-        if (key === "videoSnapDelayMs")       return settings.videoSnapDelayMs
-        if (key === "showNetworkIndicator")   return settings.showNetworkIndicator
+        if (key === "videoSnapAutoplay")      return Settings.videoSnapAutoplay
+        if (key === "videoSnapDelayMs")       return Settings.videoSnapDelayMs
+        if (key === "showNetworkIndicator")   return Settings.showNetworkIndicator
         if (key === "buttonLayout") {
-            return settings.buttonLayout === "alternate" ? "Alternate (A=South)" : "Standard (A=East)"
+            return Settings.buttonLayout === "alternate" ? "Alternate (A=South)" : "Standard (A=East)"
         }
-        if (key === "showRetroGamesTab")  return settings.showRetroGamesTab
-        if (key === "showPcGamesTab")     return settings.showPcGamesTab
-        if (key === "showMoonlightTab")   return settings.showMoonlightTab
-        if (key === "showWatchTab")       return settings.showWatchTab
-        if (key === "showListenTab")      return settings.showListenTab
-        if (key === "showLocalMusicTab")  return settings.showLocalMusicTab
-        if (key === "showLocalVideosTab") return settings.showLocalVideosTab
+        if (key === "showRetroGamesTab")  return Settings.showRetroGamesTab
+        if (key === "showPcGamesTab")     return Settings.showPcGamesTab
+        if (key === "showMoonlightTab")   return Settings.showMoonlightTab
+        if (key === "showWatchTab")       return Settings.showWatchTab
+        if (key === "showListenTab")      return Settings.showListenTab
+        if (key === "showLocalMusicTab")  return Settings.showLocalMusicTab
+        if (key === "showLocalVideosTab") return Settings.showLocalVideosTab
         if (key === "localVideoMoviesPath") {
-            var movieCats = settings ? settings.localVideoCategories : []
+            var movieCats = Settings ? Settings.localVideoCategories : []
             return movieCats.length > 0 && movieCats[0].paths && movieCats[0].paths.length > 0 ? movieCats[0].paths[0] : ""
         }
         if (key === "localVideoTvShowsPath") {
-            var tvCats = settings ? settings.localVideoCategories : []
+            var tvCats = Settings ? Settings.localVideoCategories : []
             return tvCats.length > 1 && tvCats[1].paths && tvCats[1].paths.length > 0 ? tvCats[1].paths[0] : ""
         }
-        if (key === "tmdbApiKey") return settings ? settings.tmdbApiKey : ""
-        if (key === "localMusicDirectory") return settings.localMusicDirectory
-        if (key === "autoSkipIntro")      return settings.autoSkipIntro
+        if (key === "tmdbApiKey") return Settings.tmdbApiKey
+        if (key === "localMusicDirectory") return Settings.localMusicDirectory
+        if (key === "autoSkipIntro")      return Settings.autoSkipIntro
         if (key === "transcodeMode") {
             var modeMap = { "direct": "Direct Play", "auto": "Auto", "480p": "480p", "720p": "720p", "1080p": "1080p" }
-            return modeMap[settings.transcodeMode] || "Auto"
+            return modeMap[Settings.transcodeMode] || "Auto"
         }
 
         return ""
@@ -260,79 +261,79 @@ FocusScope {
 
     // ── Helper: call the appropriate setter ──────────────────────────────────
     function _setValue(key, value, label) {
-        if (!settings) return
-        if (key === "romDirectory")       settings.setRomDirectory(value)
-        else if (key === "retroarchCommand")   settings.setRetroarchCommand(value)
-        else if (key === "coresDirectory")     settings.setCoresDirectory(value)
+        if (!Settings) return
+        if (key === "romDirectory")       Settings.setRomDirectory(value)
+        else if (key === "retroarchCommand")   Settings.setRetroarchCommand(value)
+        else if (key === "coresDirectory")     Settings.setCoresDirectory(value)
         else if (key === "plexServer") {
             if (plex) plex.selectServer(value)
-            settings.setPlexServerId(value, label || "")
+            Settings.setPlexServerId(value, label || "")
         }
         else if (key === "plexUser") {
             if (plex) {
                 plex.selectUser(parseInt(value))
                 plex.refresh()
             }
-            settings.setPlexUserId(parseInt(value), label || "")
+            Settings.setPlexUserId(parseInt(value), label || "")
         }
-        else if (key === "browserCommand")     settings.setBrowserCommand(value)
-        else if (key === "moonlightCommand")   settings.setMoonlightCommand(value)
-        else if (key === "moonlightHost")      settings.setMoonlightHostUuid(value)
-        else if (key === "musicLibrary")       settings.setMusicLibraryKey(value)
-        else if (key === "videoSnapAutoplay")      settings.setVideoSnapAutoplay(value)
-        else if (key === "videoSnapDelayMs")       settings.setVideoSnapDelayMs(value)
-        else if (key === "showNetworkIndicator")   settings.setShowNetworkIndicator(value)
+        else if (key === "browserCommand")     Settings.setBrowserCommand(value)
+        else if (key === "moonlightCommand")   Settings.setMoonlightCommand(value)
+        else if (key === "moonlightHost")      Settings.setMoonlightHostUuid(value)
+        else if (key === "musicLibrary")       Settings.setMusicLibraryKey(value)
+        else if (key === "videoSnapAutoplay")      Settings.setVideoSnapAutoplay(value)
+        else if (key === "videoSnapDelayMs")       Settings.setVideoSnapDelayMs(value)
+        else if (key === "showNetworkIndicator")   Settings.setShowNetworkIndicator(value)
         else if (key === "buttonLayout") {
-            settings.setButtonLayout(value)
+            Settings.setButtonLayout(value)
             // Refresh hotkey screen labels — face button labels depend on layout
-            if (retroarchHotkeysScreen.visible && settings)
-                retroarchHotkeysScreen.config = settings.getRetroarchHotkeyConfig()
+            if (retroarchHotkeysScreen.visible && Settings)
+                retroarchHotkeysScreen.config = Settings.getRetroarchHotkeyConfig()
         }
         else if (key === "showRetroGamesTab") {
-            settings.setShowRetroGamesTab(value)
+            Settings.setShowRetroGamesTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showPcGamesTab") {
-            settings.setShowPcGamesTab(value)
+            Settings.setShowPcGamesTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showMoonlightTab") {
-            settings.setShowMoonlightTab(value)
+            Settings.setShowMoonlightTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showWatchTab") {
-            settings.setShowWatchTab(value)
+            Settings.setShowWatchTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showListenTab") {
-            settings.setShowListenTab(value)
+            Settings.setShowListenTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showLocalMusicTab") {
-            settings.setShowLocalMusicTab(value)
+            Settings.setShowLocalMusicTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "showLocalVideosTab") {
-            settings.setShowLocalVideosTab(value)
+            Settings.setShowLocalVideosTab(value)
             if (settingsScreen._showToast) settingsScreen._showToast("Restart to apply")
         }
         else if (key === "localVideoMoviesPath") {
-            var moviesCats = settings.localVideoCategories
+            var moviesCats = Settings.localVideoCategories
             var moviesName = moviesCats.length > 0 ? moviesCats[0].name : "Movies"
-            settings.updateLocalVideoCategory(0, moviesName, [value], "flat")
+            Settings.updateLocalVideoCategory(0, moviesName, [value], "flat")
         }
         else if (key === "localVideoTvShowsPath") {
-            var tvCatsSet = settings.localVideoCategories
+            var tvCatsSet = Settings.localVideoCategories
             var tvName = tvCatsSet.length > 1 ? tvCatsSet[1].name : "TV Shows"
-            settings.updateLocalVideoCategory(1, tvName, [value], "tv_shows")
+            Settings.updateLocalVideoCategory(1, tvName, [value], "tv_shows")
         }
-        else if (key === "tmdbApiKey") settings.setTmdbApiKey(value)
-        else if (key === "localMusicDirectory") settings.setLocalMusicDirectory(value)
+        else if (key === "tmdbApiKey") Settings.setTmdbApiKey(value)
+        else if (key === "localMusicDirectory") Settings.setLocalMusicDirectory(value)
         else if (key === "autoSkipIntro") {
-            settings.setAutoSkipIntro(value)
+            Settings.setAutoSkipIntro(value)
         }
         else if (key === "transcodeMode") {
-            settings.setTranscodeMode(value)
+            Settings.setTranscodeMode(value)
         }
 
     }
@@ -490,7 +491,7 @@ FocusScope {
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
                 settingsScreen._focusZone = "content"
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 settingsScreen.back()
             }
@@ -595,22 +596,22 @@ FocusScope {
                 if (!rowData) return
                 var action = rowData.action
                 if (action === "rescan") {
-                    settings.rescanLibrary()
+                    Settings.rescanLibrary()
                     actionButton.statusText = "Rescanned!"
                 } else if (action === "testPlex") {
                     actionButton.statusText = "Testing..."
                     // Defer the synchronous call to next event loop turn
                     // so "Testing..." is rendered before blocking.
                     Qt.callLater(function() {
-                        var ok = settings.testPlexConnection()
+                        var ok = Settings.testPlexConnection()
                         actionButton.statusText = ok ? "Connected!" : "Failed"
                     })
                 } else if (action === "plexSignIn") {
                     plexLoginOverlay.visible = true
                     plexLoginOverlay.forceActiveFocus()
-                    settings.startPlexPinLogin()
+                    Settings.startPlexPinLogin()
                 } else if (action === "openMoonlight") {
-                    settings.openMoonlight()
+                    Settings.openMoonlight()
                     actionButton.statusText = "Opening..."
                 } else if (action === "systemCores") {
                     settingsScreen.showSystemCores()
@@ -619,7 +620,7 @@ FocusScope {
                 } else if (action === "mapController") {
                     settingsScreen.showControllerMapping()
                 } else if (action === "resetController") {
-                    if (settings) settings.resetControllerMapping()
+                    if (Settings) Settings.resetControllerMapping()
                     settingsScreen._showToast("Controller mapping reset")
                 } else if (action === "clearRetroRecent") {
                     if (library) library.clearRecentlyPlayed()
@@ -690,8 +691,8 @@ FocusScope {
                     ]
                 }
                 if (rowData.settingKey === "moonlightHost") {
-                    if (!settings) return []
-                    return settings.getHostsList()
+                    if (!Settings) return []
+                    return Settings.getHostsList()
                 }
                 if (rowData.settingKey === "musicLibrary") {
                     if (!plex) return []
@@ -787,7 +788,7 @@ FocusScope {
                 Text {
                     id: valueLabel
                     anchors.centerIn: parent
-                    text: (settings && (settings.plexPlayer || "mpv") === "mpv")
+                    text: (Settings && (Settings.plexPlayer || "mpv") === "mpv")
                         ? "MPV"
                         : "Browser"
                     color: cycleRoot.activeFocus ? Theme.colorText : Theme.colorTextDim
@@ -805,13 +806,13 @@ FocusScope {
 
             // ── Key handling ─────────────────────────────────────────────
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)
+                if (KeyHandler.isAccept(event)
                         || event.key === Qt.Key_Left
                         || event.key === Qt.Key_Right) {
                     event.accepted = true
-                    if (settings) {
-                        settings.setPlexPlayer(
-                            (settings.plexPlayer || "mpv") === "mpv" ? "browser" : "mpv"
+                    if (Settings) {
+                        Settings.setPlexPlayer(
+                            (Settings.plexPlayer || "mpv") === "mpv" ? "browser" : "mpv"
                         )
                     }
                 }
@@ -848,7 +849,7 @@ FocusScope {
 
         // ── Key handling for the list ────────────────────────────────────
         Keys.onPressed: (event) => {
-            // If a child is in edit/adjust mode, let it handle keys
+            // If a child is in edit/adjust mode, let it handle Keys
             if (settingsList._childEditing) {
                 return
             }
@@ -859,7 +860,7 @@ FocusScope {
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
                 _moveFocus(1)
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 settingsScreen._focusZone = "tabs"
             }
@@ -994,13 +995,13 @@ FocusScope {
         z: 10
         enabled: focus
 
-        // List model: custom categories only (index 2+ from settings.localVideoCategories)
+        // List model: custom categories only (index 2+ from Settings.localVideoCategories)
         property var _listModel: []
 
         // Form state
         property bool _formVisible: false
         property bool _formIsEdit: false
-        property int  _formEditIndex: -1   // index into _listModel (not the settings array)
+        property int  _formEditIndex: -1   // index into _listModel (not the Settings array)
         property string _formName: ""
         property string _formPath: ""
         property string _formType: "flat"  // "flat" | "tv_shows"
@@ -1025,7 +1026,7 @@ FocusScope {
         }
 
         function _refreshList() {
-            var all = settings ? settings.localVideoCategories : []
+            var all = Settings ? Settings.localVideoCategories : []
             var custom = []
             for (var i = 2; i < all.length; i++)
                 custom.push(all[i])
@@ -1058,12 +1059,12 @@ FocusScope {
             var nm = videoCategoriesScreen._formName.trim()
             var ph = videoCategoriesScreen._formPath.trim()
             if (nm === "") return
-            if (!settings) return
+            if (!Settings) return
             if (videoCategoriesScreen._formIsEdit) {
                 var settingsIdx = videoCategoriesScreen._formEditIndex + 2
-                settings.updateLocalVideoCategory(settingsIdx, nm, [ph], videoCategoriesScreen._formType)
+                Settings.updateLocalVideoCategory(settingsIdx, nm, [ph], videoCategoriesScreen._formType)
             } else {
-                settings.addLocalVideoCategory(nm, [ph], videoCategoriesScreen._formType)
+                Settings.addLocalVideoCategory(nm, [ph], videoCategoriesScreen._formType)
             }
             videoCategoriesScreen._formVisible = false
         }
@@ -1073,8 +1074,8 @@ FocusScope {
         }
 
         function _deleteRow(listIndex) {
-            if (!settings) return
-            settings.removeLocalVideoCategory(listIndex + 2)
+            if (!Settings) return
+            Settings.removeLocalVideoCategory(listIndex + 2)
             // _refreshList() will be called by the Connections block
         }
 
@@ -1097,7 +1098,7 @@ FocusScope {
                 event.accepted = true
                 if (videoCategoriesScreen._focusedRow < rowCount - 1)
                     videoCategoriesScreen._focusedRow++
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var addRowIndex = videoCategoriesScreen._listModel.length
                 if (videoCategoriesScreen._focusedRow === addRowIndex) {
@@ -1112,7 +1113,7 @@ FocusScope {
                 if (delIdx < videoCategoriesScreen._listModel.length) {
                     _deleteRow(delIdx)
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 videoCategoriesScreen.close()
             }
@@ -1133,7 +1134,7 @@ FocusScope {
                 event.accepted = true
                 videoCategoriesScreen._formType =
                     videoCategoriesScreen._formType === "flat" ? "tv_shows" : "flat"
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (ff === 2) {
                     // Toggle type
@@ -1145,7 +1146,7 @@ FocusScope {
                     _cancelForm()
                 }
                 // fields 0 and 1 (name/path) are text inputs; accept handled by them
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 _cancelForm()
             }
@@ -1185,7 +1186,7 @@ FocusScope {
                 }
 
                 Text {
-                    text: keys.useGamepadLabels ? keys.cancelLabel + "  Back" : "Esc  Back"
+                    text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + "  Back" : "Esc  Back"
                     color: Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -1661,7 +1662,7 @@ FocusScope {
 
     // ── React to localVideoCategoriesChanged while sub-screen is open ────────
     Connections {
-        target: settings
+        target: Settings
         function onLocalVideoCategoriesChanged() {
             if (videoCategoriesScreen.visible) videoCategoriesScreen._refreshList()
         }
@@ -1669,7 +1670,7 @@ FocusScope {
 
     // ── Plex PIN login: signal connections ───────────────────────────────────
     Connections {
-        target: settings
+        target: Settings
         function onPlexLoginStatus(status) {
             if (status.startsWith("waiting:")) {
                 plexLoginOverlay._pinCode = status.substring(8)

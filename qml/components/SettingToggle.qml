@@ -1,7 +1,8 @@
 import QtQuick
 import ".."
+import HTPCBackend 1.0
 
-// Reusable toggle row for boolean settings.
+// Reusable toggle row for boolean Settings.
 //
 // A (Return) or Left/Right toggles the value and emits toggled(newValue).
 // Shows "ON" in Theme.colorPrimary or "OFF" in Theme.colorTextDim.
@@ -85,7 +86,7 @@ FocusScope {
 
     // ── Key handling ──────────────────────────────────────────────────────────
     Keys.onPressed: (event) => {
-        if (keys.isAccept(event) || event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
+        if (KeyHandler.isAccept(event) || event.key === Qt.Key_Left || event.key === Qt.Key_Right) {
             event.accepted = true
             toggleRoot.toggled(!toggleRoot.checked)
         }

@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Moonlight app list view — split-panel browse view for Moonlight apps.
 //
@@ -74,9 +75,9 @@ FocusScope {
         id: header
         title: moonlightAppList.sourceName
         statusText: "Sorted: " + moonlightAppList._sortLabel
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context1Label + "  Favorite" : "1  Favorite"
-        rightText3: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  Favorite" : "1  Favorite"
+        rightText3: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort" : "2  Sort"
     }
 
     // ── Split content area ────────────────────────────────────────────────────
@@ -231,26 +232,26 @@ FocusScope {
             }
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     moonlightAppList.appSelected(appList.currentIndex)
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     moonlightAppList.back()
-                } else if (keys.isContext1(event)) {
+                } else if (KeyHandler.isContext1(event)) {
                     event.accepted = true
                     if (moonlight) moonlight.toggleFavorite(appList.currentIndex)
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortOverlay.open()
-                } else if (keys.isPageDown(event)) {
+                } else if (KeyHandler.isPageDown(event)) {
                     event.accepted = true
                     var mdl = moonlight ? moonlight.appsModel : null
                     appList.currentIndex = JumpHelper.jumpIndex(
                         appList.count, appList.currentIndex, moonlightAppList._currentSort,
                         function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                     )
-                } else if (keys.isPageUp(event)) {
+                } else if (KeyHandler.isPageUp(event)) {
                     event.accepted = true
                     var mdl2 = moonlight ? moonlight.appsModel : null
                     appList.currentIndex = JumpHelper.jumpIndex(
@@ -409,7 +410,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -552,7 +553,7 @@ FocusScope {
             var sortCount = 2
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortOverlay.close()
@@ -587,14 +588,14 @@ FocusScope {
                         sortOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 // Apply sort
                 var sortKeys = ["az", "za"]
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 moonlightAppList._currentSort = newSort
                 if (moonlight) moonlight.sortApps(newSort)
-                if (settings) settings.setSortMoonlightApps(newSort)
+                if (Settings) Settings.setSortMoonlightApps(newSort)
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
                 var newView = viewKeys[sortOverlay._viewIndex]
@@ -602,7 +603,7 @@ FocusScope {
                     // View mode is changing — hide overlay but don't grab focus locally.
                     // PcGamesScreen will route focus to the newly visible view.
                     sortOverlay.visible = false
-                    if (settings) settings.setPcGamesViewMode(newView)
+                    if (Settings) Settings.setPcGamesViewMode(newView)
                     moonlightAppList.viewModeChanged(newView)
                 } else {
                     // Same view mode — close normally (focus stays local).
@@ -613,8 +614,8 @@ FocusScope {
     }
 
     Component.onCompleted: {
-        if (settings) {
-            var saved = settings.sortMoonlightApps
+        if (Settings) {
+            var saved = Settings.sortMoonlightApps
             if (saved) {
                 _currentSort = saved
                 if (moonlight) moonlight.sortApps(saved)

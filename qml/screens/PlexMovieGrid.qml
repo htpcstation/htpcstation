@@ -2,12 +2,13 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Plex movie poster grid — shows a scrollable grid of movie posters.
 //
 // Focus flow:
 //   Gains focus when WatchScreen switches to "content" view for a movie library.
-//   Arrow keys navigate the grid natively.
+//   Arrow Keys navigate the grid natively.
 //   A (Return) on a cell → emits movieSelected(ratingKey).
 //   B (Escape) → emits back() so WatchScreen can return to the library list.
 //   Y (2)      → opens the sort/filter overlay panel.
@@ -105,9 +106,9 @@ FocusScope {
                 parts.push("Genre: " + movieGridView._currentGenreTitle)
             return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
-        rightText3: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
+        rightText3: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Movie grid ────────────────────────────────────────────────────────────
@@ -145,33 +146,33 @@ FocusScope {
         }
 
         Keys.onPressed: (event) => {
-            if (keys.isContext2(event)) {
+            if (KeyHandler.isContext2(event)) {
                 event.accepted = true
                 sortFilterOverlay.open()
-            } else if (keys.isContext1(event)) {
+            } else if (KeyHandler.isContext1(event)) {
                 event.accepted = true
                 var item = movieGrid.currentItem
                 if (item) {
                     plex.toggleMyList(item.itemRatingKey, item.itemTitle, "movie",
                                       item.itemPosterLocal, "")
                 }
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var item = movieGrid.currentItem
                 if (item) {
                     movieGridView.movieSelected(item.movieRatingKey, movieGrid.currentIndex)
                 }
-            } else if (keys.isCancel(event)) {
+            } else if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 movieGridView.back()
-            } else if (keys.isPageDown(event)) {
+            } else if (KeyHandler.isPageDown(event)) {
                 event.accepted = true
                 var mdl = plex ? plex.moviesModel : null
                 movieGrid.currentIndex = JumpHelper.jumpIndex(
                     movieGrid.count, movieGrid.currentIndex, movieGridView._currentSort,
                     function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                 )
-            } else if (keys.isPageUp(event)) {
+            } else if (KeyHandler.isPageUp(event)) {
                 event.accepted = true
                 var mdl2 = plex ? plex.moviesModel : null
                 movieGrid.currentIndex = JumpHelper.jumpIndex(
@@ -458,7 +459,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -718,7 +719,7 @@ FocusScope {
             var genreCount = sortFilterOverlay._genres.length + 1
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortFilterOverlay.close()
@@ -759,7 +760,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
 
                 // Apply sort
@@ -767,20 +768,20 @@ FocusScope {
                 movieGridView._currentSort = newSort
                 movieGridView._loading = true
                 plex.sortMovies(newSort)
-                if (settings) settings.setSortPlexMovies(newSort)
+                if (Settings) Settings.setSortPlexMovies(newSort)
 
                 // Apply genre
                 if (sortFilterOverlay._genreIndex === 0) {
                     movieGridView._currentGenreKey = ""
                     movieGridView._currentGenreTitle = ""
                     plex.filterByGenre("")
-                    if (settings) settings.setFilterPlexMovieGenre("")
+                    if (Settings) Settings.setFilterPlexMovieGenre("")
                 } else {
                     var genre = sortFilterOverlay._genres[sortFilterOverlay._genreIndex - 1]
                     movieGridView._currentGenreKey = genre.key
                     movieGridView._currentGenreTitle = genre.title
                     plex.filterByGenre(genre.key)
-                    if (settings) settings.setFilterPlexMovieGenre(genre.key)
+                    if (Settings) Settings.setFilterPlexMovieGenre(genre.key)
                 }
 
                 // Apply view mode
@@ -788,7 +789,7 @@ FocusScope {
                 var newView = viewKeys[sortFilterOverlay._viewIndex]
                 if (newView !== movieGridView._viewMode) {
                     sortFilterOverlay.visible = false
-                    if (settings) settings.setWatchViewMode(newView)
+                    if (Settings) Settings.setWatchViewMode(newView)
                     movieGridView.viewModeChanged(newView)
                 } else {
                     sortFilterOverlay.close()

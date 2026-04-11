@@ -1,6 +1,7 @@
 import QtQuick
 import ".."
 import "../components"
+import HTPCBackend 1.0
 
 // Live TV channel guide screen.
 //
@@ -11,7 +12,7 @@ import "../components"
 // Focus flow:
 //   Gains focus when WatchScreen switches to "content" view for "livetv".
 //   Up/Down — navigate channel list.
-//   A (Return) — play selected channel (MPV or browser depending on settings).
+//   A (Return) — play selected channel (MPV or browser depending on Settings).
 //   B (Escape) or Up from first row — emit back() to return to library list.
 //   PgUp/PgDn — jump 10 rows at a time.
 FocusScope {
@@ -120,8 +121,8 @@ FocusScope {
             spacing: root.vpx(16)
 
             Text {
-                text: keys.useGamepadLabels
-                      ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll"
+                text: KeyHandler.useGamepadLabels
+                      ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll"
                       : "PgUp/PgDn  Scroll"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -129,8 +130,8 @@ FocusScope {
             }
 
             Text {
-                text: keys.useGamepadLabels
-                      ? keys.context2Label + "  Refresh"
+                text: KeyHandler.useGamepadLabels
+                      ? KeyHandler.context2Label + "  Refresh"
                       : "2  Refresh"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
@@ -193,29 +194,29 @@ FocusScope {
         preferredHighlightEnd:   height * 0.65
 
         Keys.onPressed: (event) => {
-            if (keys.isCancel(event)) {
+            if (KeyHandler.isCancel(event)) {
                 event.accepted = true
                 liveTvScreen.back()
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 var ch = channelList.currentItem
                 if (ch && ch.channelStreamUrl !== "") {
-                    if (!settings || (settings.plexPlayer || "mpv") === "mpv") {
+                    if (!Settings || (Settings.plexPlayer || "mpv") === "mpv") {
                         liveTvScreen.playbackLoading()
                         liveTV.playChannel(ch.channelVcn)
                     } else {
                         liveTV.playChannelBrowser(ch.channelVcn)
                     }
                 }
-            } else if (keys.isPageDown(event)) {
+            } else if (KeyHandler.isPageDown(event)) {
                 event.accepted = true
                 channelList.currentIndex = Math.min(channelList.count - 1,
                     channelList.currentIndex + 10)
-            } else if (keys.isPageUp(event)) {
+            } else if (KeyHandler.isPageUp(event)) {
                 event.accepted = true
                 channelList.currentIndex = Math.max(0,
                     channelList.currentIndex - 10)
-            } else if (keys.isContext2(event)) {
+            } else if (KeyHandler.isContext2(event)) {
                 event.accepted = true
                 liveTV.forceRefresh()
             }
@@ -474,7 +475,7 @@ FocusScope {
                 onDoubleClicked: {
                     channelList.currentIndex = index
                     if (model.streamUrl !== "") {
-                        if (!settings || (settings.plexPlayer || "mpv") === "mpv") {
+                        if (!Settings || (Settings.plexPlayer || "mpv") === "mpv") {
                             liveTvScreen.playbackLoading()
                             liveTV.playChannel(model.vcn)
                         } else {

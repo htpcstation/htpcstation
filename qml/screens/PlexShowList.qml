@@ -2,6 +2,7 @@ import QtQuick
 import ".."
 import "../components"
 import "../helpers/JumpHelper.js" as JumpHelper
+import HTPCBackend 1.0
 
 // Plex TV show list view — split-panel browse view for Plex TV shows.
 //
@@ -102,9 +103,9 @@ FocusScope {
                 parts.push("Genre: " + showListView._currentGenreTitle)
             return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-        rightText2: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
-        rightText3: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
+        rightText1: KeyHandler.useGamepadLabels ? KeyHandler.pageUpLabel + "/" + KeyHandler.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: KeyHandler.useGamepadLabels ? KeyHandler.context1Label + "  My List" : "1  My List"
+        rightText3: KeyHandler.useGamepadLabels ? KeyHandler.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Loading indicator ─────────────────────────────────────────────────────
@@ -290,33 +291,33 @@ FocusScope {
             }
 
             Keys.onPressed: (event) => {
-                if (keys.isAccept(event)) {
+                if (KeyHandler.isAccept(event)) {
                     event.accepted = true
                     var item = showList.currentItem
                     if (item) {
                         showListView.showSelected(item.ratingKeyValue)
                     }
-                } else if (keys.isContext1(event)) {
+                } else if (KeyHandler.isContext1(event)) {
                     event.accepted = true
                     var item = showList.currentItem
                     if (item) {
                         plex.toggleMyList(item.ratingKeyValue, item.titleValue, "show",
                                           item.posterLocalValue, "")
                     }
-                } else if (keys.isCancel(event)) {
+                } else if (KeyHandler.isCancel(event)) {
                     event.accepted = true
                     showListView.back()
-                } else if (keys.isContext2(event)) {
+                } else if (KeyHandler.isContext2(event)) {
                     event.accepted = true
                     sortFilterOverlay.open()
-                } else if (keys.isPageDown(event)) {
+                } else if (KeyHandler.isPageDown(event)) {
                     event.accepted = true
                     var mdl = plex ? plex.showsModel : null
                     showList.currentIndex = JumpHelper.jumpIndex(
                         showList.count, showList.currentIndex, showListView._currentSort,
                         function(i) { return mdl ? mdl.titleAt(i) : "" }, 1
                     )
-                } else if (keys.isPageUp(event)) {
+                } else if (KeyHandler.isPageUp(event)) {
                     event.accepted = true
                     var mdl2 = plex ? plex.showsModel : null
                     showList.currentIndex = JumpHelper.jumpIndex(
@@ -525,7 +526,7 @@ FocusScope {
                     rightMargin: root.vpx(16)
                     topMargin: root.vpx(14)
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                text: KeyHandler.useGamepadLabels ? KeyHandler.cancelLabel + " / " + KeyHandler.context2Label + "  Close" : "Esc / 2  Close"
                 color: Theme.colorTextDim
                 font.family: Theme.fontFamily
                 font.pixelSize: root.vpx(Theme.fontSizeSmall)
@@ -787,7 +788,7 @@ FocusScope {
             var genreCount = sortFilterOverlay._genres.length + 1
             var viewCount = 2
 
-            if (keys.isCancel(event) || keys.isContext2(event)) {
+            if (KeyHandler.isCancel(event) || KeyHandler.isContext2(event)) {
                 // B or Y — dismiss without applying
                 event.accepted = true
                 sortFilterOverlay.close()
@@ -828,7 +829,7 @@ FocusScope {
                         sortFilterOverlay._viewIndex += 1
                 }
 
-            } else if (keys.isAccept(event)) {
+            } else if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (sortFilterOverlay._section === 0) {
                     // Apply sort — dismiss overlay so user sees list with loading indicator
@@ -837,7 +838,7 @@ FocusScope {
                     showListView._loading = true
                     sortFilterOverlay.close()
                     plex.sortShows(newSort)
-                    if (settings) settings.setSortPlexShows(newSort)
+                    if (Settings) Settings.setSortPlexShows(newSort)
                 } else if (sortFilterOverlay._section === 1) {
                     // Apply genre filter
                     sortFilterOverlay.close()
@@ -847,7 +848,7 @@ FocusScope {
                         showListView._currentGenreTitle = ""
                         showListView._loading = true
                         plex.filterShowsByGenre("")
-                        if (settings) settings.setFilterPlexShowGenre("")
+                        if (Settings) Settings.setFilterPlexShowGenre("")
                     } else {
                         var gi = sortFilterOverlay._genreIndex - 1
                         var genre = sortFilterOverlay._genres[gi]
@@ -855,7 +856,7 @@ FocusScope {
                         showListView._currentGenreTitle = genre.title
                         showListView._loading = true
                         plex.filterShowsByGenre(genre.key)
-                        if (settings) settings.setFilterPlexShowGenre(genre.key)
+                        if (Settings) Settings.setFilterPlexShowGenre(genre.key)
                     }
                 } else {
                     // Apply view mode
@@ -865,7 +866,7 @@ FocusScope {
                         // View mode is changing — hide overlay but don't grab focus locally.
                         // WatchScreen will route focus to the newly visible view.
                         sortFilterOverlay.visible = false
-                        if (settings) settings.setWatchViewMode(newView)
+                        if (Settings) Settings.setWatchViewMode(newView)
                         showListView.viewModeChanged(newView)
                     } else {
                         // Same view mode — close normally (focus stays local).
