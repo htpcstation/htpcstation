@@ -826,6 +826,7 @@ class TestPlexEventListener:
 
         callback.assert_not_called()
 
+    @pytest.mark.real_sse_run
     def test_handles_connection_error_silently(self) -> None:
         """Connection error logs warning and does not raise."""
         callback = MagicMock()
@@ -838,6 +839,7 @@ class TestPlexEventListener:
         # callback should not have been called
         callback.assert_not_called()
 
+    @pytest.mark.real_sse_run
     def test_start_creates_qthread(self) -> None:
         """start() creates a QThread named 'plex-sse' that is running."""
         from PySide6.QtCore import QThread
@@ -850,7 +852,7 @@ class TestPlexEventListener:
         stop_barrier = _threading.Event()
 
         def fake_get(*args, **kwargs):
-            stop_barrier.wait(timeout=2)
+            stop_barrier.wait(timeout=0.2)
             raise ConnectionError("stopped")
 
         with patch("requests.get", side_effect=fake_get):
@@ -863,6 +865,7 @@ class TestPlexEventListener:
             stop_barrier.set()
             listener.stop()
 
+    @pytest.mark.real_sse_run
     def test_start_noop_if_already_running(self) -> None:
         """start() is a no-op if the thread is already running."""
         callback = MagicMock()
@@ -873,7 +876,7 @@ class TestPlexEventListener:
         stop_barrier = _threading.Event()
 
         def fake_get(*args, **kwargs):
-            stop_barrier.wait(timeout=2)
+            stop_barrier.wait(timeout=0.2)
             raise ConnectionError("stopped")
 
         with patch("requests.get", side_effect=fake_get):

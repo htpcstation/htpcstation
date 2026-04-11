@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 import backend.config as _config_module
 import backend.plex_library as _plex_lib_module
 import backend.live_tv_library as _live_tv_lib_module
+import backend.plex_client as _plex_client_module
 from backend.plex_library import PlexLibrary as _PlexLibrary
 
 
@@ -83,4 +84,32 @@ def _mock_probe_requests_get():
     """
     with patch.object(_plex_lib_module, "requests",
                       MagicMock(get=MagicMock(return_value=MagicMock(status_code=200)))):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _mock_sse_thread_run(request, monkeypatch):
+    """Prevent _PlexSSEThread from making real network calls in tests.
+
+    _PlexSSEThread.run() streams SSE from the Plex server. When the server
+    URL is unreachable (e.g. 'http://server:32400'), the DNS lookup stalls
+    each affected test by 3-4 seconds. This fixture replaces run() with a
+    no-op that exits immediately, keeping the full PlexEventListener lifecycle
+    (start/stop, QThread creation, objectName) intact.
+
+    Tests in test_plex_client.py that verify the SSE _run() / _handle_payload()
+    behaviour call those methods directly on a listener instance and are
+    unaffected by this patch.
+
+    Tests marked with @pytest.mark.real_sse_run opt out of this patch so they
+    can exercise the real run() path with their own requests.get patches.
+    """
+    if request.node.get_closest_marker("real_sse_run"):
+        yield
+        return
+
+    def _fast_run(self) -> None:
+        """No-op replacement: exits without making any network calls."""
+
+    with patch.object(_plex_client_module._PlexSSEThread, "run", _fast_run):
         yield

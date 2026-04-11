@@ -3,3 +3,4 @@ evdev>=1.6
 requests>=2.28
 mpv>=1.0.8
 mutagen>=1.45
+pytest-xdist>=3.0
