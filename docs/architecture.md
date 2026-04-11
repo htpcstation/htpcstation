@@ -9,8 +9,13 @@
 
 ```
 htpcstation/
-  main.py                              # Entry point, PySide6 engine, context properties, font loading,
-                                       # keyboard/gamepad detection, window hide/show on process launch
+  main.py                              # Entry point, PySide6 engine, font loading,
+                                       # keyboard/gamepad detection, window hide/show on process launch.
+                                       # keys/settings/networkMonitor registered via qmlRegisterSingletonType
+                                       # into HTPCBackend 1.0 QML module (BEFORE QQmlApplicationEngine
+                                       # is created — PySide6 6.11 requirement). gamepadManager still
+                                       # exposed via setContextProperty (assigned post-engine-load).
+  pytest.ini                           # testpaths=tests, addopts=-n auto --dist loadfile (pytest-xdist)
   assets/
     fonts/
       NotoEmoji-Regular.ttf            # Bundled emoji font (OFL) — loaded but Qt doesn't reliably use
@@ -25,14 +30,18 @@ htpcstation/
                                        # generate_mapping_js(). Path derived from CONFIG_DIR (imported from config.py).
     gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode,
                                        # startRawMode/stopRawMode (opens/closes SdlResolver),
-                                       # getDeviceCapabilities(), setExternalAppActive()
+                                       # getDeviceCapabilities(), setExternalAppActive().
+                                       # setup(window, keys) must be called before start() — sets private
+                                       # _window/_keys refs used for key injection. start() warns if skipped.
     sdl_resolver.py                    # SdlResolver: ctypes SDL wrapper, probes libSDL2/libSDL3 at
                                        # import, opens SDL joystick on startRawMode, resolves evdev
                                        # events to SDL records via GameControllerDB (compiled into SDL).
                                        # seed_from_controller_mapping() builds primary lookup from saved
                                        # mapping. Module-level singleton: resolver.
     gamelist.py                        # gamelist.xml parser, write_game_stats()
-    keys.py                            # Semantic key abstraction, input source tracking, button layout
+    keys.py                            # Semantic key abstraction, input source tracking, button layout.
+                                       # Registered in QML as HTPCBackend.KeyHandler (not "Keys" —
+                                       # that would shadow the built-in QML Keys attached property).
     launcher.py                        # QProcess emulator launcher, async signal-based start
     library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
     local_video_library.py             # LocalVideoLibrary QObject: flat and TV-shows scanning,
@@ -42,9 +51,11 @@ htpcstation/
                                        # LocalVideoCache: library.json I/O, poster resolution
                                        # (custom > scraped), metadata merge, tombstone pattern.
                                        # TmdbScraper: TMDb v3 search + poster download, rate-limited
-                                       # (0.26s/item). scrapeMovies/scrapeTvShows run on daemon
-                                       # threading.Thread; progress routed via QMetaObject.invokeMethod
-                                       # trampolines. Cache dirs: ~/.config/htpcstation/local_videos_cache/
+                                       # (0.26s/item). scrapeMovies/scrapeTvShows run on _ScrapeThread
+                                       # (QThread subclass, overrides run()); progress routed via
+                                       # QMetaObject.invokeMethod trampolines. shutdown() calls
+                                       # _scrape_thread.wait() to avoid "QThread destroyed while running".
+                                       # Cache dirs: ~/.config/htpcstation/local_videos_cache/
     live_tv_library.py                 # LiveTvLibrary QObject: HDHomeRun guide API fetch, guide cache,
                                        # warm/cold start, background refresh, LiveTvChannelModel
     live_tv_models.py                  # LiveTvChannel dataclass
@@ -71,7 +82,10 @@ htpcstation/
     plex_account.py                    # plex.tv API: OAuth, server discovery, home users, user switching
     plex_client.py                     # Plex Media Server HTTP client, get_stream_url(), report_timeline(),
                                        # persist_stream_selection(), mark_played/unplayed, transient token,
-                                       # get_metadata(include_markers=True), get_markers()
+                                       # get_metadata(include_markers=True), get_markers().
+                                       # PlexEventListener: SSE library-change listener running in
+                                       # _PlexSSEThread (QThread subclass, overrides run()). Created/
+                                       # destroyed dynamically as the Plex connection changes.
     plex_library.py                    # PlexLibrary QObject: threaded data loading, models, sort/filter,
                                        # music slots, server/user management, MPV/browser launch,
                                        # My List (plex_cache/plex_mylist.json), subtitle IPC slots,
@@ -81,6 +95,9 @@ htpcstation/
                                        # plex_cache/ and loaded at startup via _worker_load_all_caches
                                        # (_cache_executor, dedicated thread). Sort/genre state persisted
                                        # per section key in plex_cache/state.json.
+                                       # Sort-on-cache-load: selectLibrary() applies persisted sort to
+                                       # movies/shows immediately when loading from disk cache, so content
+                                       # appears in the correct order before the server fetch completes.
                                        # Incremental model early-exit: PlexLibraryListModel.set_items(),
                                        # PlexOnDeckModel.set_items(), PlexArtistListModel.set_artists()
                                        # skip beginResetModel/endResetModel when incoming data == current.
@@ -117,7 +134,9 @@ htpcstation/
                                        # popup/dropdown navigation, focus stack, stale focus recovery,
                                        # auto-user-select, auto-play, auto-expand mini player (~900 lines)
   qml/
-    main.qml                           # ApplicationWindow, vpx(), QuitDialog
+    main.qml                           # ApplicationWindow, vpx(). QuitDialog and
+                                       # ControllerMappingDialog are Loader { active: false } —
+                                       # not instantiated until first opened; destroyed on close.
     Theme.qml                          # Singleton: two-layer token system — _palette vars (neutral dark:
                                        # #111111/#1c1c1c/#2a2a2a) + semantic tokens (colorAccent,
                                        # colorSurface, colorOverlay, colorBadgeSteam, etc.). colorPrimary
@@ -242,7 +261,7 @@ htpcstation/
     test_video_snap.py                 # 5 tests
     test_browser_launch.py             # 31 tests
     test_keys.py                       # 17 tests (key code changes: 1/2 replace F1/F2)
-    test_gamepad_disconnect.py         # 10 tests (disconnect crash fix, hint flash fix)
+    test_gamepad_disconnect.py         # 13 tests (disconnect crash fix, hint flash fix, setup() method)
     test_theme_config.py               # ~226 tests (theme palette, accent/focus ring colors, config persistence)
     test_local_video_config.py         # 28 tests (Config/SettingsManager: local_video_categories, tmdb_api_key)
     test_local_video_cache.py          # 44 tests (LocalVideoCache: load/save, resolve_poster, resolve_metadata,
@@ -253,13 +272,15 @@ htpcstation/
                                        # scrape_movies, scrape_tv_shows — all HTTP mocked)
     test_recently_played.py            # 21 tests (RecentlyPlayedManager: record, de-dup, getRecent, persist)
     test_hook_launches.py              # 15 tests (record() called on launch for all 6 categories)
-    test_plex_section_sort_restore.py  # 13 tests (_SORT_MAP_REVERSE, getSectionSort, getSectionGenre)
+    test_plex_section_sort_restore.py  # 19 tests (_SORT_MAP_REVERSE, getSectionSort, getSectionGenre,
+                                       # sort applied to cached data on selectLibrary())
 ```
 
-**Test isolation:** `tests/conftest.py` has an autouse fixture `isolate_plex_cache` that
-patches `_PLEX_CACHE_DIR`, `_POSTER_CACHE_DIR`, and `_CACHE_DIR` (live TV) to `tmp_path`
-for every test, and stubs `_migrate_cache_dirs` to a no-op. Tests never touch
-`~/.config/htpcstation/` at runtime.
+**Test isolation:** `tests/conftest.py` has two autouse fixtures:
+- `isolate_plex_cache` — patches `_PLEX_CACHE_DIR`, `_POSTER_CACHE_DIR`, and `_CACHE_DIR` (live TV) to `tmp_path`; stubs `_migrate_cache_dirs` to a no-op. Tests never touch `~/.config/htpcstation/` at runtime.
+- `_mock_sse_thread_run` — patches `_PlexSSEThread.run` to a no-op, preventing real DNS resolution attempts in tests that exercise `PlexLibrary`. Tests that need the real `run()` behaviour (i.e. `TestPlexEventListener`) opt out with `@pytest.mark.real_sse_run`.
+
+**Parallel execution:** `pytest.ini` configures `pytest-xdist` with `-n auto --dist loadfile`. Each file runs in one worker process; Qt singletons are per-process (correct). Suite runtime: ~16-18s.
 
 **Local video cache isolation is NOT covered by `conftest.py`** — `_MOVIES_CACHE_DIR` and
 `_TV_SHOWS_CACHE_DIR` are separate module-level constants in `local_video_library.py`. Any
@@ -314,7 +335,10 @@ Button hint conventions:
 - Emulator/browser/Moonlight launch via `QProcess` (async, non-blocking)
 - Steam game discovery is synchronous (small local ACF file reads)
 - Live TV: HDHomeRun `discover.json` sequential (fast, local), then `lineup.json` + guide API parallel (2 workers)
-- `PlexTimelineReporter`: dedicated daemon `threading.Thread` (not executor) — fires every 10s, reads MPV position via IPC
+- `PlexTimelineReporter`: `_TimelineWorker(QObject)` moved to a `QThread` via `moveToThread()` — heartbeat loop uses `_stop_event.wait(timeout)` so `exec()` can process `quit()`. `stop()` calls `thread.quit()` + `thread.wait()`.
+- `PlexEventListener` (`plex_client.py`): `_PlexSSEThread(QThread)` subclass overriding `run()` — blocking HTTP/SSE loop. Created fresh each time the Plex connection is established.
+- `LocalVideoLibrary` scrape: `_ScrapeThread(QThread)` subclass overriding `run()`. `shutdown()` calls `_scrape_thread.wait()`.
+- `mpv_launcher.py` fire-and-forget threads: `threading.Thread` intentionally retained — sub-second lifetime, use `QMetaObject.invokeMethod(QueuedConnection)` to marshal results back to main thread. No Qt event loop required.
 - **JSON write executors** — `config.py` and `recently_played.py` each own a module-level `_write_executor = ThreadPoolExecutor(max_workers=1)` for serialised fire-and-forget disk writes. `max_workers=1` prevents race conditions on rapid saves. Pattern matches `_cache_executor` in `plex_library.py`.
 - All internal signals that cross thread boundaries use explicit `Qt.ConnectionType.QueuedConnection` — required because `ThreadPoolExecutor` threads are not `QThread` subclasses, so PySide6 `AutoConnection` defaults to `DirectConnection` (not queued)
 

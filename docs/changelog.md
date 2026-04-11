@@ -4,6 +4,23 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP43 — Best practices hardening + bug fixes
+
+Task briefs: `misc/coding-team/best-practices-fixes/` (001–008)
+
+- **GamepadManager setup method** (001) — Bare public `window`/`keys` attributes on `GamepadManager` replaced with private `_window`/`_keys` and a `setup(window, keys)` method. `start()` warns if called before `setup()`. Eliminates accidental QML access to internal references.
+- **Explicit QML-facing signal types** (002) — 15 public signals across `plex_library.py`, `local_music_library.py`, `steam_library.py` changed from bare `Signal("QVariant")` to `Signal(str, "QVariantMap")` or `Signal("QVariantList")` matching actual payload types. Internal `_*Ready` thread-marshalling signals left unchanged.
+- **Async image loading** (003) — `asynchronous: true` and `cache: true` added to all 40 `Image` elements loading from runtime paths across 35 QML files. Images with `qrc:/` sources untouched.
+- **Loader for overlays** (004) — `QuitDialog`, `ControllerMappingDialog` (`qml/main.qml`), and the sort/filter overlay (`LocalVideoShowGrid.qml`) converted from always-instantiated `visible: false` to `Loader { active: false }`. Components not instantiated until first opened. Focus restored via `Loader.onLoaded`.
+- **QmlElement singleton migration** (005) — `keys`, `settings`, `networkMonitor` context properties replaced with `qmlRegisterSingletonType` registrations in the `HTPCBackend 1.0` QML module. `Keys` registered as `KeyHandler` (avoids shadowing the built-in QML `Keys` attached property). All 56 QML files updated with `import HTPCBackend 1.0`. `gamepadManager` kept as `setContextProperty` (assigned post-engine-load). **Caveat (PySide6 6.11):** `qmlRegisterSingletonType` must be called before `QQmlApplicationEngine` is constructed; a holder pattern is used so factory lambdas can reference instances built after engine creation.
+- **Worker thread pattern** (006) — `PlexEventListener` (`plex_client.py`) and local video scrape (`local_video_library.py`) migrated to `QThread` subclass overriding `run()`. `PlexTimelineReporter` (`plex_timeline.py`) migrated to `QObject + moveToThread(QThread)` (heartbeat loop is interruptible, so `exec()` can process `quit()`). `mpv_launcher.py` fire-and-forget threads intentionally left as `threading.Thread` (sub-second, use `QMetaObject.invokeMethod(QueuedConnection)` to marshal back to main thread). `LocalVideoLibrary.shutdown()` now calls `_scrape_thread.wait()` to prevent "QThread destroyed while still running" crash on quit.
+- **Sort applied to cached data on startup** (007) — `PlexLibrary.selectLibrary()` now applies the persisted sort (from `_section_sort[section_key]`) to movies and shows loaded from disk cache before displaying them. Previously the cached data was shown in default order until the server fetch completed. 6 new tests in `test_plex_section_sort_restore.py`.
+- **Test suite performance** (008) — Suite runtime reduced from ~100s to ~16-18s. Root cause: PlexLibrary tests were attempting real DNS resolution via `_PlexSSEThread`. Fix: autouse fixture `_mock_sse_thread_run` in `conftest.py` patches `_PlexSSEThread.run` to a no-op (opt-out via `@pytest.mark.real_sse_run` for the 3 `TestPlexEventListener` tests that need real run() behaviour). `time.sleep()` calls in `test_plex_timeline.py` replaced with event-based synchronisation. `pytest-xdist` added (`-n auto --dist loadfile`). `pytest.ini` created.
+- **Shutdown null guards** — `plex.showsLoading` / `plex.moviesLoading` bindings in `PlexShowList`, `PlexMovieList`, `PlexShowGrid`, `PlexMovieGrid` guarded with `plex && ...` to silence TypeError on app quit.
+- Test count: 2,461 (up from 2,410).
+
+---
+
 ## CP42 — UI consistency cleanup
 
 Task briefs: `misc/coding-team/ui-consistency-cleanup/` (001–012)

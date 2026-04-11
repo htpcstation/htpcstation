@@ -51,6 +51,9 @@ settings.themeDir + "homescreen/" + slug + "-button.png"
 - Background path: `settings.themeDir + "homescreen/home-background.png"`.
 - If an image fails to load it is hidden and a fallback rectangle with a text
   label is shown instead.
+- All `Image` elements loading from `Settings.themeDir` (and from runtime paths
+  across the whole app) have `asynchronous: true` and `cache: true` — decoding
+  happens off the main thread and decoded images are retained in Qt's image cache.
 
 ## Adding a new theme
 
