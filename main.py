@@ -289,8 +289,7 @@ def main() -> None:
     window.installEventFilter(kb_detector)
 
     # Gamepad manager — inject events into the root QML window and expose to QML
-    gamepad_manager.window = window
-    gamepad_manager.keys = keys
+    gamepad_manager.setup(window, keys)
     engine.rootContext().setContextProperty("gamepadManager", gamepad_manager)
     gamepad_manager.start()
 

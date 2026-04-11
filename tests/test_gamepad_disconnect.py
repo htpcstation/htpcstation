@@ -40,8 +40,8 @@ def _make_handler(device, ecodes_mock):
     manager = MagicMock()
     manager._raw_mode = False
     manager._external_active = False
-    manager.keys = None
-    manager.window = None
+    manager._keys = None
+    manager._window = None
 
     notifier = MagicMock()
 
@@ -95,8 +95,8 @@ class TestRemoveDevice:
         manager_obj = MagicMock()
         manager_obj._raw_mode = False
         manager_obj._external_active = False
-        manager_obj.keys = None
-        manager_obj.window = None
+        manager_obj._keys = None
+        manager_obj._window = None
 
         ecodes_mock, device = _make_evdev_mocks()
         notifier = MagicMock()
@@ -170,8 +170,8 @@ class TestReadyFlag:
         handler, manager, _ = _make_handler(device, ecodes_mock)
 
         keys_mock = MagicMock()
-        manager.keys = keys_mock
-        manager.window = MagicMock()
+        manager._keys = keys_mock
+        manager._window = MagicMock()
         handler._manager = manager
         handler._ready = False  # explicitly not ready
 
@@ -191,8 +191,8 @@ class TestReadyFlag:
         handler, manager, _ = _make_handler(device, ecodes_mock)
 
         keys_mock = MagicMock()
-        manager.keys = keys_mock
-        manager.window = MagicMock()
+        manager._keys = keys_mock
+        manager._window = MagicMock()
         handler._manager = manager
         handler._ready = True  # ready
 
@@ -204,3 +204,55 @@ class TestReadyFlag:
             handler._inject(QEvent.Type.KeyPress, MagicMock())
 
         keys_mock.setGamepadInput.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# setup() method and start()-without-setup() warning
+# ---------------------------------------------------------------------------
+
+class TestSetupMethod:
+    def test_setup_sets_private_window_and_keys(self):
+        """setup() stores window and keys as private attributes."""
+        import backend.gamepad as gp_module
+
+        with patch.object(gp_module, "_EVDEV_AVAILABLE", False):
+            gm = gp_module.GamepadManager()
+
+        mock_window = MagicMock()
+        mock_keys = MagicMock()
+        gm.setup(mock_window, mock_keys)
+
+        assert gm._window is mock_window
+        assert gm._keys is mock_keys
+
+    def test_start_without_setup_logs_warning(self, caplog):
+        """start() logs a warning when called before setup()."""
+        import logging
+        import backend.gamepad as gp_module
+
+        with patch.object(gp_module, "_EVDEV_AVAILABLE", True), \
+             patch.object(gp_module, "evdev", MagicMock(list_devices=MagicMock(return_value=[]))):
+            gm = gp_module.GamepadManager()
+
+        with caplog.at_level(logging.WARNING, logger="backend.gamepad"), \
+             patch.object(gm._poll_timer, "start"):
+            gm.start()
+
+        assert any("setup()" in record.message for record in caplog.records)
+
+    def test_start_after_setup_does_not_warn(self, caplog):
+        """start() does not log the missing-setup warning when setup() was called."""
+        import logging
+        import backend.gamepad as gp_module
+
+        with patch.object(gp_module, "_EVDEV_AVAILABLE", True), \
+             patch.object(gp_module, "evdev", MagicMock(list_devices=MagicMock(return_value=[]))):
+            gm = gp_module.GamepadManager()
+
+        gm.setup(MagicMock(), MagicMock())
+
+        with caplog.at_level(logging.WARNING, logger="backend.gamepad"), \
+             patch.object(gm._poll_timer, "start"):
+            gm.start()
+
+        assert not any("setup()" in record.message for record in caplog.records)

@@ -704,7 +704,7 @@ class TestGamepadManagerRawMode:
         manager.startRawMode()
 
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -798,7 +798,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -818,7 +818,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -845,7 +845,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -862,7 +862,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -895,7 +895,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
 
@@ -924,7 +924,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
         handler._axis_info[ecodes.ABS_Z] = (0, 255)
@@ -955,7 +955,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         handler = self._make_handler(manager)
         handler._axis_info[ecodes.ABS_X] = (-32768, 32767)
@@ -984,7 +984,7 @@ class TestDeviceHandlerUnifiedLookup:
 
         manager = GamepadManager()
         mock_window = MagicMock()
-        manager.window = mock_window
+        manager._window = mock_window
 
         device = _make_mock_device()
         from backend.gamepad import _DeviceHandler

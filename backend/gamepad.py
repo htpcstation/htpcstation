@@ -374,15 +374,15 @@ class _DeviceHandler(QObject):
             self._inject(QEvent.Type.KeyRelease, qt_key)
 
     def _inject(self, event_type: QEvent.Type, qt_key: Qt.Key) -> None:
-        window = self._manager.window
+        window = self._manager._window
         if window is None:
             return
         # Notify input source tracker that this is gamepad input.
         # Guard with _ready to skip buffered events from device open.
         if (event_type == QEvent.Type.KeyPress
-                and self._manager.keys is not None
+                and self._manager._keys is not None
                 and self._ready):
-            self._manager.keys.setGamepadInput()
+            self._manager._keys.setGamepadInput()
         event = QKeyEvent(event_type, qt_key, Qt.KeyboardModifier.NoModifier)
         QCoreApplication.sendEvent(window, event)
 
@@ -469,7 +469,7 @@ class GamepadManager(QObject):
     Usage::
 
         manager = GamepadManager(app)
-        manager.window = engine.rootObjects()[0]
+        manager.setup(engine.rootObjects()[0], keys)
         manager.start()
     """
 
@@ -483,8 +483,8 @@ class GamepadManager(QObject):
 
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
-        self.window: Optional[QObject] = None
-        self.keys: Optional[QObject] = None  # Keys instance for input source tracking
+        self._window: Optional[QObject] = None
+        self._keys: Optional[QObject] = None  # Keys instance for input source tracking
         self._handlers: dict[str, _DeviceHandler] = {}  # path → handler
         self._warned_no_gamepad = False  # emit the "no gamepads" warning only once
         self._raw_mode: bool = False
@@ -501,6 +501,16 @@ class GamepadManager(QObject):
     # Public
     # ------------------------------------------------------------------
 
+    def setup(self, window: QObject, keys: "Keys") -> None:
+        """Set the Qt window and Keys instance needed for key injection.
+
+        Must be called before start().  window is the root QML window that
+        receives synthetic QKeyEvents; keys is the Keys instance used to
+        track the input source (gamepad vs keyboard).
+        """
+        self._window = window
+        self._keys = keys
+
     def start(self) -> None:
         """Begin scanning for gamepads and start reading input."""
         if not _EVDEV_AVAILABLE:
@@ -509,6 +519,11 @@ class GamepadManager(QObject):
                 "Install it with: pip install evdev"
             )
             return
+        if self._window is None or self._keys is None:
+            log.warning(
+                "GamepadManager.start() called before setup() — "
+                "key injection will be silently skipped until setup() is called."
+            )
         self._scan_devices()
         self._poll_timer.start()
 
