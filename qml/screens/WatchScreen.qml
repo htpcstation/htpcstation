@@ -576,7 +576,6 @@ FocusScope {
                                 watchScreen.selectedLibraryTitle = currentItem.entryTitle
                                 watchScreen.selectedSectionKey = currentItem.entrySectionKey
                                 watchScreen.selectedLibraryType = currentItem.entryType
-                                plex.selectLibrary(currentItem.entrySectionKey)
                                 watchScreen.currentView = "content"
                             }
                         }
@@ -688,7 +687,6 @@ FocusScope {
                                 watchScreen.selectedLibraryTitle = modelData.title
                                 watchScreen.selectedSectionKey = modelData.sectionKey
                                 watchScreen.selectedLibraryType = modelData.type
-                                plex.selectLibrary(modelData.sectionKey)
                                 watchScreen.currentView = "content"
                             }
                         }
