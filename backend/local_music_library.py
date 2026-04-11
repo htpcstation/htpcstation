@@ -614,9 +614,6 @@ class LocalMusicLibrary(QObject):
                     for track in album_data.get("tracks", []):
                         file_path = track["file_path"]
                         codec = track.get("codec_info", "")
-                        if not codec:
-                            # Old cache without codec_info — derive from file on disk
-                            codec = _codec_info_from_file(Path(file_path))
                         tracks.append({
                             "title": track["title"],
                             "index": track["track_num"],
