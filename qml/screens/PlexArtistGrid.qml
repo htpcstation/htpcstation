@@ -51,80 +51,15 @@ FocusScope {
     readonly property int _cellH: 240
     readonly property int _cellSpacing: 12
 
-    // ── Header bar ───────────────────────────────────────────────────────────
-    Rectangle {
-        id: headerBar
-
-        anchors {
-            top: parent.top
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(56)
-        color: Theme.colorSecondary
-
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: "◀  Artists"
-            color: Theme.colorText
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-    }
-
-    // ── Sort status bar ───────────────────────────────────────────────────────
-    Rectangle {
-        id: statusBar
-
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(28)
-        color: Qt.darker(Theme.colorSecondary, 1.3)
-
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: plexArtistGrid._currentSort !== ""
-                ? "Sorted: " + plexArtistGrid._sortLabel
-                : "Default order"
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-
-        Row {
-            anchors {
-                right: parent.right
-                rightMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: root.vpx(16)
-
-            Text {
-                text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-        }
+    // ── Header bar + status bar ───────────────────────────────────────────────
+    LibraryHeader {
+        id: header
+        title: "Artists"
+        statusText: plexArtistGrid._currentSort !== ""
+            ? "Sorted: " + plexArtistGrid._sortLabel
+            : "Default order"
+        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
     }
 
     // ── Artist grid ───────────────────────────────────────────────────────────
@@ -132,7 +67,7 @@ FocusScope {
         id: artistGrid
 
         anchors {
-            top: statusBar.bottom
+            top: header.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
@@ -258,15 +193,8 @@ FocusScope {
                 }
 
                 // Subtle highlight when focused
-                Rectangle {
-                    anchors.fill: parent
-                    radius: parent.radius
-                    color: Theme.colorPrimary
-                    opacity: tileRoot.GridView.isCurrentItem && artistGrid.activeFocus ? 0.15 : 0.0
-
-                    Behavior on opacity {
-                        NumberAnimation { duration: Theme.animDurationFast }
-                    }
+                GridCellHighlight {
+                    active: tileRoot.GridView.isCurrentItem && artistGrid.activeFocus
                 }
 
                 // ── Poster image area ────────────────────────────────────────

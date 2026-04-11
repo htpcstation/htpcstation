@@ -102,92 +102,21 @@ FocusScope {
         return rating.toFixed(1) + "/10"
     }
 
-    // ── Header bar ───────────────────────────────────────────────────────────
-    Rectangle {
-        id: headerBar
-
-        anchors {
-            top: parent.top
-            left: parent.left
-            right: parent.right
+    // ── Header bar + status bar ───────────────────────────────────────────────
+    LibraryHeader {
+        id: header
+        title: movieListView.systemName
+        statusText: {
+            var parts = []
+            if (movieListView._currentSort !== "")
+                parts.push("Sort: " + movieListView._sortLabel)
+            if (movieListView._currentGenreTitle !== "")
+                parts.push("Genre: " + movieListView._currentGenreTitle)
+            return parts.length > 0 ? parts.join("  ·  ") : "Default order"
         }
-        height: root.vpx(56)
-        color: Theme.colorSecondary
-
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: "◀  " + movieListView.systemName
-            color: Theme.colorText
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeHeading)
-        }
-
-    }
-
-    // ── Sort/filter status bar ────────────────────────────────────────────────
-    Rectangle {
-        id: statusBar
-
-        anchors {
-            top: headerBar.bottom
-            left: parent.left
-            right: parent.right
-        }
-        height: root.vpx(28)
-        color: Qt.darker(Theme.colorSecondary, 1.3)
-
-        Text {
-            anchors {
-                left: parent.left
-                leftMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            text: {
-                var parts = []
-                if (movieListView._currentSort !== "")
-                    parts.push("Sort: " + movieListView._sortLabel)
-                if (movieListView._currentGenreTitle !== "")
-                    parts.push("Genre: " + movieListView._currentGenreTitle)
-                return parts.length > 0 ? parts.join("  ·  ") : "Default order"
-            }
-            color: Theme.colorTextDim
-            font.family: Theme.fontFamily
-            font.pixelSize: root.vpx(Theme.fontSizeSmall)
-        }
-
-        Row {
-            anchors {
-                right: parent.right
-                rightMargin: root.vpx(16)
-                verticalCenter: parent.verticalCenter
-            }
-            spacing: root.vpx(16)
-
-            Text {
-                text: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-
-            Text {
-                text: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
-        }
+        rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/" + keys.pageDownLabel + "  Scroll" : "PgUp/PgDn  Scroll"
+        rightText2: keys.useGamepadLabels ? keys.context1Label + "  My List" : "1  My List"
+        rightText3: keys.useGamepadLabels ? keys.context2Label + "  Sort / Filter" : "2  Sort / Filter"
     }
 
     // ── Loading indicator — shown while a sort/filter re-fetch is in progress ─
@@ -206,7 +135,7 @@ FocusScope {
         id: contentArea
 
         anchors {
-            top: statusBar.bottom
+            top: header.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
