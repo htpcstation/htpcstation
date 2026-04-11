@@ -239,8 +239,8 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: showGrid.count === 0 && !showGridView._loading
-            text: "Loading shows..."
+            visible: showGrid.count === 0 && !showGridView._loading && !plex.showsLoading
+            text: "No shows found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -877,6 +877,9 @@ FocusScope {
             }
         }
     }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    LoadingOverlay { loading: plex ? plex.showsLoading : false }
 
     Component.onCompleted: {
         if (settings) {

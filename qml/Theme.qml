@@ -83,6 +83,7 @@ QtObject {
     // ── Animation durations (ms) ──────────────────────────────────────────────
     readonly property int animDurationFast:   80
     readonly property int animDurationNormal: 250
+    readonly property int loadingOverlayDelay: 1000   // ms before spinner appears
 
     // ── Focus ring geometry (design-grid px, before vpx scaling) ─────────────
     readonly property int focusRingWidth:  3

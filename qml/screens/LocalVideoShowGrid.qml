@@ -131,6 +131,11 @@ FocusScope {
         clip: true
         focus: true
 
+        opacity: (localVideos && localVideos.categoryScanning) ? 0.3 : 1.0
+        Behavior on opacity {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
+
         readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(showGridView._targetCellW + showGridView._cellSpacing)))
         cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(showGridView._targetCellW + showGridView._cellSpacing)
         cellHeight: root.vpx(showGridView._cellH + showGridView._cellSpacing)
@@ -166,7 +171,7 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: showGrid.count === 0
+            visible: showGrid.count === 0 && (!localVideos || !localVideos.categoryScanning)
             text: "No shows found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

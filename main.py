@@ -144,6 +144,7 @@ def main() -> None:
     # Local video library — exposed to QML as `localVideos`
     local_videos = LocalVideoLibrary(config)
     engine.rootContext().setContextProperty("localVideos", local_videos)
+    app.aboutToQuit.connect(local_videos.shutdown)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary(recently_played=recently_played)

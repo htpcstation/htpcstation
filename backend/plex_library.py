@@ -506,6 +506,8 @@ class PlexLibrary(QObject):
     librariesModelChanged = Signal()
     moviesModelChanged = Signal()
     showsModelChanged = Signal()
+    moviesLoadingChanged = Signal()
+    showsLoadingChanged  = Signal()
     onDeckModelChanged = Signal()
     artistsModelChanged = Signal()
     currentLibraryChanged = Signal(str)
@@ -585,6 +587,8 @@ class PlexLibrary(QObject):
         self._shows_total: int = 0
         self._shows_loaded: int = 0
         self._shows_loading_more: bool = False
+        self._movies_loading = False
+        self._shows_loading  = False
         self._movies_force_replace: bool = False
         self._shows_force_replace: bool = False
         self._machine_identifier: str = ""
@@ -779,6 +783,16 @@ class PlexLibrary(QObject):
         fget=lambda self: self._shows_model,
         notify=showsModelChanged,
     )
+
+    def _get_movies_loading(self) -> bool:
+        return self._movies_loading
+
+    def _get_shows_loading(self) -> bool:
+        return self._shows_loading
+
+    moviesLoading = Property(bool, fget=_get_movies_loading, notify=moviesLoadingChanged)
+    showsLoading  = Property(bool, fget=_get_shows_loading,  notify=showsLoadingChanged)
+
     onDeckModel = Property(
         QObject,
         fget=lambda self: self._on_deck_model,
@@ -943,6 +957,12 @@ class PlexLibrary(QObject):
         client = self._client
         sort = self._section_sort.get(section_key, "")
         genre = self._section_genre.get(section_key, "")
+        if section_type == "movie":
+            self._movies_loading = True
+            self.moviesLoadingChanged.emit()
+        elif section_type == "show":
+            self._shows_loading = True
+            self.showsLoadingChanged.emit()
         self._executor.submit(self._worker_load_section, client, section_key, section_type, sort, genre)
 
     @Slot()
@@ -2124,12 +2144,24 @@ class PlexLibrary(QObject):
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("PlexLibrary: failed to load section %s: %s", section_key, exc)
+            if section_type == "movie":
+                self._movies_loading = False
+                self.moviesLoadingChanged.emit()
+            elif section_type == "show":
+                self._shows_loading = False
+                self.showsLoadingChanged.emit()
             self.sectionLoadFailed.emit()
             return
 
         # get_library_items returns ([], 0) on soft failure (e.g. network error
         # after retries exhausted). Don't overwrite cached data with nothing.
         if not items and total == 0:
+            if section_type == "movie":
+                self._movies_loading = False
+                self.moviesLoadingChanged.emit()
+            elif section_type == "show":
+                self._shows_loading = False
+                self.showsLoadingChanged.emit()
             self.sectionLoadFailed.emit()
             return
 
@@ -2322,6 +2354,8 @@ class PlexLibrary(QObject):
             self._save_libraries_cache(libraries)
 
     def _on_movies_ready(self, movies: list, total: int) -> None:
+        self._movies_loading = False
+        self.moviesLoadingChanged.emit()
         self._loading_more = False
         if self._movies_loaded == 0:
             # First page — only replace if the model doesn't already have more
@@ -2361,6 +2395,8 @@ class PlexLibrary(QObject):
                     )
 
     def _on_shows_ready(self, shows: list, total: int) -> None:
+        self._shows_loading = False
+        self.showsLoadingChanged.emit()
         self._shows_loading_more = False
         if self._shows_loaded == 0:
             # First page — only replace if the model doesn't already have more

@@ -12,6 +12,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -933,11 +934,15 @@ class LocalVideoLibrary(QObject):
     seasonsModelChanged = Signal()
     episodesModelChanged = Signal()
     currentCategoryIndexChanged = Signal()
+    categoryScanningChanged = Signal()
     playbackStarted = Signal()
     playbackFinished = Signal()
     scrapeProgressChanged = Signal(int, int)        # (done, total)
     scrapeFinished = Signal(str, int, int, int)     # (display_name, scraped, tombstoned, skipped)
     scrapeError = Signal(str)                       # error message
+
+    # Internal signal for worker→main thread marshalling
+    _workerScanFinished = Signal(object, str)       # (items, branch: "flat"|"tv_shows")
 
     def __init__(self, config: Config, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -974,6 +979,13 @@ class LocalVideoLibrary(QObject):
         self._episodes = EpisodeListModel(self)
 
         self._current_category_index = -1
+
+        # Async category scanning
+        self._category_scanning = False
+        self._executor = ThreadPoolExecutor(max_workers=1)
+        self._workerScanFinished.connect(
+            self._on_worker_scan_finished, Qt.ConnectionType.QueuedConnection
+        )
 
         # Sort/filter state (reset on each selectCategory call)
         self._video_sort: str = ""
@@ -1014,6 +1026,9 @@ class LocalVideoLibrary(QObject):
     def _get_current_category_index(self) -> int:
         return self._current_category_index
 
+    def _get_category_scanning(self) -> bool:
+        return self._category_scanning
+
     categoriesModel = Property(
         QObject,
         fget=_get_categories_model,
@@ -1044,6 +1059,11 @@ class LocalVideoLibrary(QObject):
         fget=_get_current_category_index,
         notify=currentCategoryIndexChanged,
     )
+    categoryScanning = Property(
+        bool,
+        fget=_get_category_scanning,
+        notify=categoryScanningChanged,
+    )
 
     # ------------------------------------------------------------------
     # Slots
@@ -1051,7 +1071,7 @@ class LocalVideoLibrary(QObject):
 
     @Slot(int)
     def selectCategory(self, index: int) -> None:
-        """Select a category by index, scan it, and populate the appropriate model."""
+        """Select a category by index; returns immediately and scans on a background thread."""
         cats = self._config.local_video_categories
         if index < 0 or index >= len(cats):
             return
@@ -1062,29 +1082,49 @@ class LocalVideoLibrary(QObject):
         self._show_sort = ""
         cat = cats[index]
         logger.debug("selectCategory: index=%d name=%r type=%r", index, cat.get("name"), cat.get("type"))
-        if cat["type"] == "flat":
-            items = _scan_flat(cat["paths"])
-            cache = _movies_cache() if index == 0 else _custom_category_cache(cat["name"])
+        branch = "flat" if cat["type"] == "flat" else "tv_shows"
+        self._category_scanning = True
+        self.categoryScanningChanged.emit()
+        self.currentCategoryIndexChanged.emit()
+        self._executor.submit(self._worker_scan_category, cat, branch)
+
+    def _worker_scan_category(self, cat: dict, branch: str) -> None:
+        """Scan a category asynchronously on an executor thread."""
+        try:
+            if branch == "flat":
+                items = _scan_flat(cat["paths"])
+                # Use name-based cache dir, not index-based
+                cache = _movies_cache() if cat.get("name") == "Movies" else _custom_category_cache(cat["name"])
+            else:
+                items = _scan_tv_shows(cat["paths"])
+                # Use name-based cache dir, not index-based
+                cache = _tv_shows_cache() if cat.get("name") == "TV Shows" else _custom_category_cache(cat["name"])
             _enrich_from_cache(items, cache)
+        except Exception:
+            logger.exception("_worker_scan_category: unexpected error")
+            items = []
+        self._workerScanFinished.emit(items, branch)
+
+    @Slot(object, str)
+    def _on_worker_scan_finished(self, items: list, branch: str) -> None:
+        """Receive scan results from worker thread and update models."""
+        if branch == "flat":
             self._reset_model(self._videos, items)
-            # Reset TV show models
             self._reset_model(self._shows, [])
             self._reset_model(self._seasons, [])
             self._reset_model(self._episodes, [])
             self.videosModelChanged.emit()
-            logger.debug("selectCategory: model reset with %d items", len(items))
+            logger.debug("_on_worker_scan_finished: flat model reset with %d items", len(items))
         else:
-            shows = _scan_tv_shows(cat["paths"])
-            cache = _tv_shows_cache() if index == 1 else _custom_category_cache(cat["name"])
-            _enrich_from_cache(shows, cache)
-            self._reset_model(self._shows, shows)
-            # Reset flat/season/episode models
+            self._reset_model(self._shows, items)
             self._reset_model(self._videos, [])
             self._reset_model(self._seasons, [])
             self._reset_model(self._episodes, [])
             self.showsModelChanged.emit()
-            logger.debug("selectCategory: model reset with %d items", len(shows))
-        self.currentCategoryIndexChanged.emit()
+            logger.debug("_on_worker_scan_finished: tv_shows model reset with %d items", len(items))
+
+        self._category_scanning = False
+        self.categoryScanningChanged.emit()
 
     @Slot(int)
     def selectShow(self, index: int) -> None:
@@ -1338,6 +1378,11 @@ class LocalVideoLibrary(QObject):
     @Slot(str)
     def _emit_scrape_error(self, message: str) -> None:
         self.scrapeError.emit(message)
+
+    @Slot()
+    def shutdown(self) -> None:
+        """Shutdown the executor. Called on app quit."""
+        self._executor.shutdown(wait=False)
 
     # ------------------------------------------------------------------
     # set_wid pass-through

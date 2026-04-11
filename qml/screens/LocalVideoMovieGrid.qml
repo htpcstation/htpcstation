@@ -135,6 +135,11 @@ FocusScope {
         clip: true
         focus: true
 
+        opacity: (localVideos && localVideos.categoryScanning) ? 0.3 : 1.0
+        Behavior on opacity {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
+
         readonly property int _columns: Math.max(1, Math.floor(width / root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)))
         cellWidth: _columns > 0 ? Math.floor(width / _columns) : root.vpx(movieGridView._targetCellW + movieGridView._cellSpacing)
         cellHeight: root.vpx(movieGridView._cellH + movieGridView._cellSpacing)
@@ -171,7 +176,7 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: movieGrid.count === 0
+            visible: movieGrid.count === 0 && (!localVideos || !localVideos.categoryScanning)
             text: "No videos found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

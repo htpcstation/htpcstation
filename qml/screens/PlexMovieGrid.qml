@@ -244,8 +244,8 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: movieGrid.count === 0 && !movieGridView._loading
-            text: "Loading movies..."
+            visible: movieGrid.count === 0 && !movieGridView._loading && !plex.moviesLoading
+            text: "No movies found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
@@ -862,6 +862,9 @@ FocusScope {
             }
         }
     }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    LoadingOverlay { loading: plex ? plex.moviesLoading : false }
 
     Component.onCompleted: {
         if (settings) {

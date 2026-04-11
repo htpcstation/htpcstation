@@ -125,6 +125,11 @@ FocusScope {
             bottom: parent.bottom
         }
 
+        opacity: (localVideos && localVideos.categoryScanning) ? 0.3 : 1.0
+        Behavior on opacity {
+            NumberAnimation { duration: 200; easing.type: Easing.InOutQuad }
+        }
+
         // ── Left panel: preview area (45% width) ──────────────────────────────
         Item {
             id: leftPanel
@@ -380,7 +385,7 @@ FocusScope {
         // ── Empty state (centered in full content area) ───────────────────────
         Text {
             anchors.centerIn: parent
-            visible: movieList.count === 0
+            visible: movieList.count === 0 && (!localVideos || !localVideos.categoryScanning)
             text: "No videos found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

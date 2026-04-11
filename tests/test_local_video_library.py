@@ -12,6 +12,7 @@ Covers:
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -65,6 +66,23 @@ def _make_library(tmp_path: Path, config: Config) -> LocalVideoLibrary:
         lib = LocalVideoLibrary(config)
         lib._mpv = mock_instance
     return lib
+
+
+def wait_for_scan(lib: LocalVideoLibrary, timeout_ms: int = 2000) -> None:
+    """Pump the Qt event loop until categoryScanning becomes False.
+
+    Allows async selectCategory worker to complete.
+
+    Raises AssertionError if timeout is exceeded.
+    """
+    deadline = time.monotonic() + timeout_ms / 1000
+    while lib.categoryScanning and time.monotonic() < deadline:
+        QCoreApplication.processEvents()
+        time.sleep(0.01)
+    assert not lib.categoryScanning, \
+        f"selectCategory did not complete within {timeout_ms}ms"
+    # One final processEvents to flush any remaining queued slot calls.
+    QCoreApplication.processEvents()
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +425,7 @@ class TestSelectCategoryFlat:
         lib = _make_library(tmp_path / "cfg", config)
 
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._videos.rowCount() == 1
         assert lib._shows.rowCount() == 0
 
@@ -422,6 +441,7 @@ class TestSelectCategoryFlat:
         lib._shows._display_items = [show]
 
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._shows.rowCount() == 0
 
     def test_out_of_range_index_noop(self, tmp_path: Path) -> None:
@@ -436,6 +456,7 @@ class TestSelectCategoryFlat:
         (tmp_path / "cfg").mkdir(exist_ok=True)
         lib = _make_library(tmp_path / "cfg", config)
         lib.selectCategory(0)
+        # Index is updated immediately (before worker finishes)
         assert lib._current_category_index == 0
 
 
@@ -451,6 +472,7 @@ class TestSelectCategoryTvShows:
         lib = _make_library(tmp_path / "cfg", config)
 
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._shows.rowCount() == 1
         assert lib._videos.rowCount() == 0
 
@@ -466,6 +488,7 @@ class TestSelectCategoryTvShows:
         lib._videos._display_items = [vf]
 
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._videos.rowCount() == 0
 
 
@@ -527,6 +550,7 @@ class TestRescanCategory:
 
         # First scan — empty
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._videos.rowCount() == 0
 
         # Add a file
@@ -534,6 +558,7 @@ class TestRescanCategory:
 
         # Rescan
         lib.rescanCategory(0)
+        wait_for_scan(lib)
         assert lib._videos.rowCount() == 1
 
 
@@ -687,6 +712,7 @@ class TestSelectCategoryEnrichment:
         )
 
         lib.selectCategory(0)
+        wait_for_scan(lib)
         assert lib._videos.rowCount() == 1
         idx = lib._videos.index(0, 0)
         assert lib._videos.data(idx, VideoListModel.PosterPathRole) == str(poster_path)
@@ -721,6 +747,7 @@ class TestSelectCategoryEnrichment:
         )
 
         lib.selectCategory(1)
+        wait_for_scan(lib)
         assert lib._shows.rowCount() == 1
         idx = lib._shows.index(0, 0)
         assert lib._shows.data(idx, ShowListModel.PosterPathRole) == str(poster_path)
@@ -751,6 +778,8 @@ class TestSelectCategoryEnrichment:
             mock_custom.return_value = mock_cache
 
             lib.selectCategory(2)
+            # Keep patches active while the worker thread runs
+            wait_for_scan(lib)
 
             mock_custom.assert_called_once_with("Docs")
             mock_movies.assert_not_called()

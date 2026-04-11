@@ -38,6 +38,7 @@ FocusScope {
     // Category name for the selected category
     property string _currentCategoryName: ""
     property int _selectedCategoryIndex: -1
+    property string _selectedCategoryType: ""  // "flat" or "tv_shows"
 
     // Guard: navTarget navigation fires only once (on first active focus).
     property bool _navTargetApplied: false
@@ -77,6 +78,20 @@ FocusScope {
 
     Component.onCompleted: {
         if (settings) _viewMode = settings.localVideoViewMode || "grid"
+    }
+
+    Connections {
+        target: localVideos
+        enabled: localVideos !== null
+
+        function onCategoryScanningChanged() {
+            if (localVideos.categoryScanning) {
+                if (localVideosScreen._selectedCategoryType === "flat")
+                    localVideosScreen.currentView = "videos"
+                else
+                    localVideosScreen.currentView = "shows"
+            }
+        }
     }
 
     // ── Focus routing ─────────────────────────────────────────────────────────
@@ -142,14 +157,10 @@ FocusScope {
             if (keys.isAccept(event)) {
                 event.accepted = true
                 if (localVideos && currentIndex >= 0 && currentItem) {
-                    localVideos.selectCategory(currentIndex)
                     localVideosScreen._selectedCategoryIndex = currentIndex
                     localVideosScreen._currentCategoryName = currentItem.categoryName
-                    if (currentItem.categoryType === "flat") {
-                        localVideosScreen.currentView = "videos"
-                    } else {
-                        localVideosScreen.currentView = "shows"
-                    }
+                    localVideosScreen._selectedCategoryType = currentItem.categoryType
+                    localVideos.selectCategory(currentIndex)
                 }
             } else if (keys.isCancel(event)) {
                 event.accepted = true
@@ -207,14 +218,10 @@ FocusScope {
                 onDoubleClicked: {
                     categoriesList.currentIndex = index
                     if (localVideos) {
-                        localVideos.selectCategory(index)
                         localVideosScreen._selectedCategoryIndex = index
                         localVideosScreen._currentCategoryName = model.name
-                        if (model.type === "flat") {
-                            localVideosScreen.currentView = "videos"
-                        } else {
-                            localVideosScreen.currentView = "shows"
-                        }
+                        localVideosScreen._selectedCategoryType = model.type
+                        localVideos.selectCategory(index)
                     }
                 }
             }
@@ -403,4 +410,5 @@ FocusScope {
             else localVideosScreen.currentView = "shows"
         }
     }
+
 }

@@ -177,7 +177,7 @@ FocusScope {
         // ── Empty state — prompt user to configure library path ─────────────
         Column {
             anchors.centerIn: parent
-            visible: artistGrid.count === 0
+            visible: artistGrid.count === 0 && (!localMusic || !localMusic.scanning)
             spacing: root.vpx(12)
 
             Text {

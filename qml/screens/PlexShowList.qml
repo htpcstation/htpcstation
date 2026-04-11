@@ -470,13 +470,16 @@ FocusScope {
         // Shown when the list has no items and not loading.
         Text {
             anchors.centerIn: parent
-            visible: showList.count === 0 && !showListView._loading
+            visible: !_loading && !plex.showsLoading && showList.count === 0
             text: "No shows found"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
     }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    LoadingOverlay { loading: plex ? plex.showsLoading : false }
 
     // ── Sort/Filter/View overlay ──────────────────────────────────────────────
     //

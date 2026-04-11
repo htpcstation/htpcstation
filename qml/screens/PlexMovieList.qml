@@ -485,13 +485,16 @@ FocusScope {
         // ── Empty state (centered in full content area) ───────────────────────
         Text {
             anchors.centerIn: parent
-            visible: movieList.count === 0 && !movieListView._loading
+            visible: !_loading && !plex.moviesLoading && movieList.count === 0
             text: "No movies found"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
             font.pixelSize: root.vpx(Theme.fontSizeHeading)
         }
     }
+
+    // ── Loading overlay ───────────────────────────────────────────────────────
+    LoadingOverlay { loading: plex ? plex.moviesLoading : false }
 
     // ── Sort/Filter/View overlay ──────────────────────────────────────────────
     //
