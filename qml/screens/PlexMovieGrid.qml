@@ -286,6 +286,7 @@ FocusScope {
                         source: model.posterLocal || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        cache: true
                         // Limit decoded resolution to the display size for performance
                         sourceSize.width: root.vpx(movieGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(movieGridView._cellH) * 0.80)

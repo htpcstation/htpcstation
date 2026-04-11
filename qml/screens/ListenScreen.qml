@@ -749,6 +749,7 @@ FocusScope {
                                 source: listenScreen._albumData.posterLocal || ""
                                 fillMode: Image.PreserveAspectFit
                                 asynchronous: true
+                                cache: true
                                 visible: status === Image.Ready
                                          && !!listenScreen._albumData.posterLocal
                             }
@@ -1231,6 +1232,7 @@ FocusScope {
                             source: modelData.posterLocal || ""
                             fillMode: Image.PreserveAspectCrop
                             asynchronous: true
+                            cache: true
                             sourceSize.width: root.vpx(80)
                             sourceSize.height: root.vpx(80)
                             visible: status === Image.Ready && modelData.posterLocal
@@ -2088,6 +2090,7 @@ FocusScope {
                                 source: modelData.posterLocal || ""
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
+                                cache: true
                                 sourceSize.width: root.vpx(80)
                                 sourceSize.height: root.vpx(80)
                                 visible: status === Image.Ready && modelData.posterLocal

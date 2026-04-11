@@ -285,6 +285,7 @@ FocusScope {
                         source: model.thumb || ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        cache: true
                         visible: status === Image.Ready && model.thumb !== ""
                     }
                 }

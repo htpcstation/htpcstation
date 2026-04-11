@@ -196,6 +196,7 @@ FocusScope {
                             : ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        cache: true
                         // Limit decoded resolution to the display size for performance
                         sourceSize.width: root.vpx(steamGameGrid._targetCellW)
                         sourceSize.height: root.vpx(steamGameGrid._cellH)

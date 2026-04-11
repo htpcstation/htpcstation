@@ -147,6 +147,7 @@ FocusScope {
                             : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    cache: true
                     sourceSize.width: Math.round(leftPanel.width)
                     sourceSize.height: Math.round(leftPanel.height * 0.70)
                     visible: status === Image.Ready && !!recentlyPlayedList._previewData.imagePath

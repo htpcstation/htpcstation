@@ -208,6 +208,7 @@ FocusScope {
                         source: model.imageLocal || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        cache: true
                         // Limit decoded resolution to the display size for performance
                         sourceSize.width: root.vpx(localArtistGrid._targetCellW)
                         sourceSize.height: Math.round(root.vpx(localArtistGrid._cellH) * 0.80)

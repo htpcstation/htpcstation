@@ -573,6 +573,7 @@ FocusScope {
                                 source: modelData.posterLocal || ""
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
+                                cache: true
                                 sourceSize.width: root.vpx(80)
                                 sourceSize.height: root.vpx(80)
                                 visible: status === Image.Ready && modelData.posterLocal
@@ -809,6 +810,7 @@ FocusScope {
                                 source: localMusicScreen._albumData.posterLocal || ""
                                 fillMode: Image.PreserveAspectFit
                                 asynchronous: true
+                                cache: true
                                 visible: status === Image.Ready
                                          && !!localMusicScreen._albumData.posterLocal
                             }

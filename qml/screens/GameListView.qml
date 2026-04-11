@@ -199,6 +199,7 @@ FocusScope {
                     source: gameListView._previewData.imagePath || ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    cache: true
                     sourceSize.width: Math.round(leftPanel.width)
                     sourceSize.height: Math.round(leftPanel.height * 0.65)
                     visible: mediaPlayer.playbackState !== MediaPlayer.PlayingState

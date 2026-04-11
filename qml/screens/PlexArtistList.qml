@@ -161,6 +161,7 @@ FocusScope {
                     source: plexArtistList._previewData.posterLocal || ""
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
+                    cache: true
                     sourceSize.width: Math.round(leftPanel.width)
                     sourceSize.height: Math.round(leftPanel.height * 0.60)
                     visible: status === Image.Ready && !!plexArtistList._previewData.posterLocal

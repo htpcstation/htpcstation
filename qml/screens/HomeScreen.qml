@@ -335,6 +335,8 @@ FocusScope {
         anchors.fill: parent
         source: (settings && settings.themeAvailable) ? settings.themeDir + "homescreen/home-background.png" : ""
         fillMode: Image.PreserveAspectCrop
+        asynchronous: true
+        cache: true
         visible: homeScreen._launcherVisible
         opacity: homeScreen._launcherOpacity
         Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
@@ -416,6 +418,8 @@ FocusScope {
                         ? settings.themeDir + "homescreen/" + homeScreen.tabSlugs[index] + "-button.png"
                         : ""
                     fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                    cache: true
                     visible: buttonImage.status === Image.Ready
                 }
 
@@ -655,6 +659,7 @@ FocusScope {
                         source: homeScreen._playbackAlbumData.posterLocal || ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        cache: true
                         visible: status === Image.Ready
                                  && !!homeScreen._playbackAlbumData.posterLocal
                     }

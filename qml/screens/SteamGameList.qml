@@ -191,6 +191,7 @@ FocusScope {
                             : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    cache: true
                     sourceSize.width: Math.round(leftPanel.width)
                     sourceSize.height: Math.round(leftPanel.height * 0.60)
                     visible: status === Image.Ready && !!steamGameList._previewData.imagePath

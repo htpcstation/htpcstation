@@ -245,6 +245,7 @@ FocusScope {
                 source: gameDetailView.gameData.imagePath || ""
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
+                cache: true
                 visible: mediaPlayer.playbackState !== MediaPlayer.PlayingState
                          && status === Image.Ready && !!gameDetailView.gameData.imagePath
             }

@@ -216,6 +216,7 @@ FocusScope {
                 source: movieDetailView.movieData.posterLocal || ""
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
+                cache: true
                 visible: status === Image.Ready && !!movieDetailView.movieData.posterLocal
             }
         }

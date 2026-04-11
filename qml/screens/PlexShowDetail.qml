@@ -265,6 +265,7 @@ FocusScope {
                         source: showDetailView.showData.posterLocal || ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        cache: true
                         visible: status === Image.Ready
                                  && !!showDetailView.showData.posterLocal
                     }

@@ -187,6 +187,7 @@ FocusScope {
                             : ""
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
+                        cache: true
                         // Limit decoded resolution to the display size for performance
                         sourceSize.width: root.vpx(recentlyPlayedGrid._targetCellW)
                         sourceSize.height: root.vpx(recentlyPlayedGrid._cellH)

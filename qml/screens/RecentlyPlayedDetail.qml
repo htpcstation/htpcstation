@@ -206,6 +206,7 @@ FocusScope {
                         : ""
                 fillMode: Image.PreserveAspectFit
                 asynchronous: true
+                cache: true
                 visible: status === Image.Ready && !!recentlyPlayedDetail.gameData.imagePath
             }
         }

@@ -281,6 +281,7 @@ FocusScope {
                         source: model.posterLocal || ""
                         fillMode: Image.PreserveAspectCrop
                         asynchronous: true
+                        cache: true
                         sourceSize.width: root.vpx(showGridView._targetCellW)
                         sourceSize.height: Math.round(root.vpx(showGridView._cellH) * 0.75)
                         visible: status === Image.Ready && model.posterLocal !== ""

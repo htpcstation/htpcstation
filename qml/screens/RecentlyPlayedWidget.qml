@@ -119,6 +119,7 @@ FocusScope {
                                 source: cardItem.itemData.artwork || ""
                                 fillMode: Image.PreserveAspectFit
                                 asynchronous: true
+                                cache: true
                                 visible: status === Image.Ready && !!cardItem.itemData.artwork
                             }
 

@@ -153,6 +153,7 @@ FocusScope {
                     source: showDetailView.showPosterPath || ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    cache: true
                     visible: status === Image.Ready && !!showDetailView.showPosterPath
                 }
             }

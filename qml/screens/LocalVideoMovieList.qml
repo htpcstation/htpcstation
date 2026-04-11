@@ -125,6 +125,7 @@ FocusScope {
                     source: movieList.currentItem ? (movieList.currentItem.posterPathValue || "") : ""
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    cache: true
                     sourceSize.width: Math.round(leftPanel.width)
                     sourceSize.height: Math.round(leftPanel.height * 0.55)
                     visible: status === Image.Ready
