@@ -617,25 +617,11 @@ FocusScope {
                         }
                     }
 
-                    // Indentation indicator
-                    Text {
-                        anchors {
-                            left: parent.left
-                            leftMargin: root.vpx(16)
-                            verticalCenter: parent.verticalCenter
-                        }
-                        text: "▸"
-                        color: Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        opacity: modelData.type === "refresh" ? 0.0 : 0.5
-                    }
-
                     // Library / section title
                     Text {
                         anchors {
                             left: parent.left
-                            leftMargin: root.vpx(40)
+                            leftMargin: root.vpx(16)
                             verticalCenter: parent.verticalCenter
                         }
                         text: modelData.title

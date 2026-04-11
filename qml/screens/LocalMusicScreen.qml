@@ -262,22 +262,16 @@ FocusScope {
             id: menuDelegate
 
             width: localMusicMenu.width
-            height: root.vpx(56)
+            height: root.vpx(64)
 
             readonly property string menuAction: modelData.action
 
-            // Subtle highlight for current item
+            // Highlight background for the focused item
             Rectangle {
                 anchors.fill: parent
-                color: Theme.colorPrimary
-                opacity: menuDelegate.ListView.isCurrentItem && localMusicMenu.activeFocus ? 0.12 : 0.0
+                color: Theme.colorSecondary
+                opacity: menuDelegate.ListView.isCurrentItem ? 1.0 : 0.0
                 radius: root.vpx(Theme.focusRingRadius)
-
-                scale: menuDelegate.ListView.isCurrentItem && localMusicMenu.activeFocus
-                    ? Theme.focusScale : 1.0
-                Behavior on scale {
-                    NumberAnimation { duration: Theme.focusScaleDuration; easing.type: Easing.OutCubic }
-                }
 
                 Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
             }

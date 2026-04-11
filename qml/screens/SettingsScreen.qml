@@ -1234,7 +1234,7 @@ FocusScope {
                 Rectangle {
                     anchors.fill: parent
                     color: Theme.colorSecondary
-                    opacity: vcDelegate._isFocused ? 0.6 : 0.0
+                    opacity: vcDelegate._isFocused ? Theme.opacityOverlay : 0.0
                     radius: root.vpx(Theme.focusRingRadius)
                     Behavior on opacity { NumberAnimation { duration: Theme.animDurationFast } }
                 }

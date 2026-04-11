@@ -670,7 +670,7 @@ FocusScope {
                     color: Theme.colorTextDim
                     font.family: Theme.fontFamily
                     font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                    opacity: 0.8
+                    opacity: Theme.opacityButton
                 }
             }
 

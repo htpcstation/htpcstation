@@ -156,7 +156,7 @@ FocusScope {
             topMargin: root.vpx(16)
             leftMargin: root.vpx(32)
             rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+            bottomMargin: root.vpx(16)
         }
 
         model: steam ? steam.sourcesModel : null

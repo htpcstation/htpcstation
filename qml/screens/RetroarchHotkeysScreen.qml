@@ -325,7 +325,7 @@ FocusScope {
             Rectangle {
                 anchors.fill: parent
                 color: Theme.colorSecondary
-                opacity: delegateItem._isFocused ? 0.6 : 0.0
+                opacity: delegateItem._isFocused ? Theme.opacityOverlay : 0.0
                 radius: root.vpx(Theme.focusRingRadius)
 
                 Behavior on opacity {

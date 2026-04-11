@@ -119,7 +119,7 @@ FocusScope {
             bottom: parent.bottom
             leftMargin: root.vpx(32)
             rightMargin: root.vpx(32)
-            bottomMargin: root.vpx(32)
+            bottomMargin: root.vpx(16)
         }
 
         model: library ? library.systemsModel : null

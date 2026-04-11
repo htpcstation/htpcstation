@@ -92,4 +92,8 @@ QtObject {
     // ── Scale animation tokens ────────────────────────────────────────────────
     readonly property real focusScale:         1.05
     readonly property int  focusScaleDuration: 120
+
+    // ── Opacity tokens ────────────────────────────────────────────────────────
+    readonly property real opacityOverlay: 0.6   // unfocused row/overlay highlight
+    readonly property real opacityButton:  0.8   // semi-transparent button/text
 }

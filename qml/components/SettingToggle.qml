@@ -54,7 +54,7 @@ FocusScope {
         }
         width: root.vpx(64)
         height: root.vpx(32)
-        radius: root.vpx(16)
+        radius: root.vpx(Theme.focusRingRadius)
         color: toggleRoot.checked ? Theme.colorPrimary : Theme.colorSecondary
         border.color: toggleRoot.checked ? Theme.colorPrimary : Theme.colorTextDim
         border.width: root.vpx(2)
