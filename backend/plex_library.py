@@ -936,20 +936,31 @@ class PlexLibrary(QObject):
         # Skip if the model already has content (e.g. returning from a detail
         # view) — re-loading cache triggers set_movies/set_shows which resets
         # the GridView's contentY, causing scroll position jumps.
+        cached_sort = self._section_sort.get(section_key, "")
         if section_type == "movie" and len(self._movies_model._movies) == 0:
             cached = self._load_movies_cache(section_key)
             if cached:
                 self._resolve_cached_posters(cached)
                 self._on_movies_cache_ready(cached, section_key)
+                if cached_sort:
+                    self._movies_model.sort_movies(cached_sort)
+                    self.moviesModelChanged.emit()
         elif section_type == "show" and len(self._shows_model._shows) == 0:
             cached = self._load_shows_cache(section_key)
             if cached:
                 self._resolve_cached_posters(cached)
                 self._on_shows_cache_ready(cached, section_key)
+                if cached_sort:
+                    self._shows_model.sort_shows(cached_sort)
+                    self.showsModelChanged.emit()
         elif section_type == "artist" and len(self._artists_model._artists) == 0:
             cached = self._load_artists_cache()
             if cached:
                 self._resolve_cached_posters(cached)
+                # No in-memory sort applied here: PlexArtistListModel has no
+                # sort_artists() method.  Sorting artists requires a server
+                # re-fetch, so the persisted sort order is applied when the
+                # server fetch completes below.
                 self._on_artists_ready(cached, len(cached))
 
         if self._client is None:
