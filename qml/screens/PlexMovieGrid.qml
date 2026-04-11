@@ -185,7 +185,7 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: movieGrid.count === 0 && !movieGridView._loading && !plex.moviesLoading
+            visible: movieGrid.count === 0 && !movieGridView._loading && !(plex && plex.moviesLoading)
             text: "No movies found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

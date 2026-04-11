@@ -180,7 +180,7 @@ FocusScope {
         // ── Empty state ──────────────────────────────────────────────────────
         Text {
             anchors.centerIn: parent
-            visible: showGrid.count === 0 && !showGridView._loading && !plex.showsLoading
+            visible: showGrid.count === 0 && !showGridView._loading && !(plex && plex.showsLoading)
             text: "No shows found."
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

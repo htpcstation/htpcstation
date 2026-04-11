@@ -427,7 +427,7 @@ FocusScope {
         // ── Empty state (centered in full content area) ───────────────────────
         Text {
             anchors.centerIn: parent
-            visible: !_loading && !plex.moviesLoading && movieList.count === 0
+            visible: !_loading && !(plex && plex.moviesLoading) && movieList.count === 0
             text: "No movies found"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily

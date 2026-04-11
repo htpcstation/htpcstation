@@ -412,7 +412,7 @@ FocusScope {
         // Shown when the list has no items and not loading.
         Text {
             anchors.centerIn: parent
-            visible: !_loading && !plex.showsLoading && showList.count === 0
+            visible: !_loading && !(plex && plex.showsLoading) && showList.count === 0
             text: "No shows found"
             color: Theme.colorTextDim
             font.family: Theme.fontFamily
