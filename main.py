@@ -104,6 +104,21 @@ def main() -> None:
     if emoji_font.exists():
         QFontDatabase.addApplicationFont(str(emoji_font))
 
+    # In PySide6 6.11, qmlRegisterSingletonType must be called BEFORE the
+    # QQmlApplicationEngine is created, or importing the resulting module in QML
+    # corrupts the Qt type system (QQuickText stops being a QObject, etc.).
+    # We use list holders so the lambda callbacks can capture instances that
+    # are created after the engine is constructed.
+    _keys_holder: list = [None]
+    _settings_holder: list = [None]
+    _network_holder: list = [None]
+    qmlRegisterSingletonType(Keys, "HTPCBackend", 1, 0, "KeyHandler",
+                             lambda _e: _keys_holder[0])
+    qmlRegisterSingletonType(SettingsManager, "HTPCBackend", 1, 0, "Settings",
+                             lambda _e: _settings_holder[0])
+    qmlRegisterSingletonType(NetworkMonitor, "HTPCBackend", 1, 0, "NetworkMonitor",
+                             lambda _e: _network_holder[0])
+
     engine = QQmlApplicationEngine()
 
     # Semantic key abstraction — registered as HTPCBackend.KeyHandler QML singleton.
@@ -112,7 +127,7 @@ def main() -> None:
     # The instance is created Python-side so it can be passed to SettingsManager
     # and GamepadManager; qmlRegisterSingletonType ensures QML gets the same object.
     keys = Keys()
-    qmlRegisterSingletonType(Keys, "HTPCBackend", 1, 0, "KeyHandler", lambda _e: keys)
+    _keys_holder[0] = keys
 
     # Recently-played history — exposed to QML as `recentlyPlayed`
     recently_played = RecentlyPlayedManager(config)
@@ -168,25 +183,19 @@ def main() -> None:
 
     # Settings manager — registered as HTPCBackend.Settings QML singleton.
     # Constructor requires several already-constructed objects, so we create it
-    # Python-side and register via qmlRegisterSingletonType (same pattern as Keys).
+    # Python-side and store it in the holder so the lambda above can return it.
     settings_manager = SettingsManager(
         config, library, plex_library, browser_launcher,
         moonlight_library=moonlight, gamepad_manager=gamepad_manager,
         keys=keys, app_dir=APP_DIR,
     )
+    _settings_holder[0] = settings_manager
     # Initialize button layout from config
     keys.setButtonLayout(config.button_layout)
-    qmlRegisterSingletonType(
-        SettingsManager, "HTPCBackend", 1, 0, "Settings",
-        lambda _e: settings_manager,
-    )
 
     # Network monitor — registered as HTPCBackend.NetworkMonitor QML singleton.
     network_monitor = NetworkMonitor()
-    qmlRegisterSingletonType(
-        NetworkMonitor, "HTPCBackend", 1, 0, "NetworkMonitor",
-        lambda _e: network_monitor,
-    )
+    _network_holder[0] = network_monitor
 
     # Allow QML files to import siblings and the Theme singleton via `import "."`
     engine.addImportPath(str(QML_DIR))

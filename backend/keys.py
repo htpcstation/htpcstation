@@ -30,7 +30,7 @@ def _key_code(event: QJSValue) -> int:
 
 
 class Keys(QObject):
-    """Semantic key helper exposed to QML as the ``keys`` context property.
+    """Semantic key helper exposed to QML as the ``KeyHandler`` singleton.
 
     Also tracks whether the last input came from a gamepad or keyboard,
     exposed as the ``useGamepadLabels`` property. QML hint bars bind to
