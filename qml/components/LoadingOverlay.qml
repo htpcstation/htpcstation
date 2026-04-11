@@ -7,6 +7,7 @@
 //   LoadingOverlay { loading: _myLoadingFlag; delay: 500 }
 
 import QtQuick
+import ".."
 
 Item {
     id: loadingOverlay
