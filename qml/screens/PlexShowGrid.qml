@@ -881,6 +881,25 @@ FocusScope {
     // ── Loading overlay ───────────────────────────────────────────────────────
     LoadingOverlay { loading: plex ? plex.showsLoading : false }
 
+    // ── Fade-in on re-show ────────────────────────────────────────────────────
+    // Masks the one-frame GPU texture-upload flash that occurs on subsequent
+    // visits (textures may be evicted while the component is invisible).
+    onVisibleChanged: {
+        if (visible) {
+            showGridView.opacity = 0
+            _fadeIn.restart()
+        }
+    }
+
+    NumberAnimation {
+        id: _fadeIn
+        target: showGridView
+        property: "opacity"
+        to: 1.0
+        duration: Theme.animDurationFast
+        easing.type: Easing.OutQuad
+    }
+
     Component.onCompleted: {
         if (settings) {
             var savedSort = settings.sortPlexShows
