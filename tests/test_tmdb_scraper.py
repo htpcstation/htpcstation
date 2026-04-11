@@ -57,6 +57,7 @@ def _make_scraper() -> TmdbScraper:
     """Return a TmdbScraper with a mocked requests.Session."""
     scraper = TmdbScraper.__new__(TmdbScraper)
     scraper._api_key = "testkey"
+    scraper._rate_limit_s = 0.26
     scraper._session = MagicMock()
     return scraper
 

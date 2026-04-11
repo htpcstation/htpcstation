@@ -1324,6 +1324,7 @@ class TestScrapeMoviesCounts:
 
         scraper = TmdbScraper.__new__(TmdbScraper)
         scraper._api_key = "fake"
+        scraper._rate_limit_s = 0.26
 
         def fake_search_movie(title, year):
             if title == "Good Movie":
@@ -1347,6 +1348,7 @@ class TestScrapeMoviesCounts:
 
         scraper = TmdbScraper.__new__(TmdbScraper)
         scraper._api_key = "fake"
+        scraper._rate_limit_s = 0.26
         scraper.search_movie = MagicMock()
 
         result = scraper.scrape_movies([item], cache)
@@ -1365,6 +1367,7 @@ class TestScrapeTvShowsCounts:
 
         scraper = TmdbScraper.__new__(TmdbScraper)
         scraper._api_key = "fake"
+        scraper._rate_limit_s = 0.26
 
         def fake_search_tv_show(name):
             if name == "Good Show":
@@ -1388,6 +1391,7 @@ class TestScrapeTvShowsCounts:
 
         scraper = TmdbScraper.__new__(TmdbScraper)
         scraper._api_key = "fake"
+        scraper._rate_limit_s = 0.26
         scraper.search_tv_show = MagicMock()
 
         result = scraper.scrape_tv_shows([show], cache)
@@ -1403,6 +1407,7 @@ class TestScrapeTvShowsCounts:
 
         scraper = TmdbScraper.__new__(TmdbScraper)
         scraper._api_key = "fake"
+        scraper._rate_limit_s = 0.26
         search_calls: list[str] = []
 
         def fake_search_tv_show(name):
@@ -1419,3 +1424,84 @@ class TestScrapeTvShowsCounts:
         assert search_calls == ["Breaking Bad"]
         # Cache key is the raw folder name
         assert "Breaking Bad - x264 1080p" in cache._data
+
+
+# ---------------------------------------------------------------------------
+# In-memory category cache
+# ---------------------------------------------------------------------------
+
+
+class TestInMemoryCategoryCache:
+    """Validate the _category_cache fast-path in LocalVideoLibrary."""
+
+    def _make_flat_library(self, tmp_path: Path) -> "LocalVideoLibrary":
+        cat_path = tmp_path / "movies"
+        cat_path.mkdir()
+        (cat_path / "film.mkv").write_bytes(b"")
+        cats = [{"name": "Movies", "type": "flat", "paths": [str(cat_path)]}]
+        config = _make_config(tmp_path / "cfg", categories=cats)
+        return _make_library(tmp_path / "cfg", config)
+
+    def test_second_select_hits_cache_not_worker(self, tmp_path: Path) -> None:
+        """After first scan, second selectCategory() must not submit a new worker."""
+        lib = self._make_flat_library(tmp_path)
+        # First call — triggers worker, populates cache
+        lib.selectCategory(0)
+        wait_for_scan(lib)
+        assert "Movies" in lib._category_cache
+
+        # Second call — must use cache (no new executor submission)
+        with patch.object(lib._executor, "submit") as mock_submit:
+            lib.selectCategory(0)
+            mock_submit.assert_not_called()
+
+    def test_cache_populated_after_scan(self, tmp_path: Path) -> None:
+        """Cache entry for 'Movies' must exist and match items/branch after scan."""
+        lib = self._make_flat_library(tmp_path)
+        lib.selectCategory(0)
+        wait_for_scan(lib)
+
+        assert "Movies" in lib._category_cache
+        items, branch = lib._category_cache["Movies"]
+        assert branch == "flat"
+        assert len(items) == 1  # film.mkv
+
+    def test_rescan_invalidates_cache(self, tmp_path: Path) -> None:
+        """rescanCategory must clear the cache entry and trigger a fresh worker scan."""
+        lib = self._make_flat_library(tmp_path)
+        lib.selectCategory(0)
+        wait_for_scan(lib)
+        assert "Movies" in lib._category_cache
+
+        # Track whether the cache was empty at the start of selectCategory
+        cache_was_cleared: list[bool] = []
+        original_select = lib.selectCategory.__func__  # type: ignore[attr-defined]
+
+        def spy_select(self_inner: "LocalVideoLibrary", index: int) -> None:  # type: ignore[override]
+            cache_was_cleared.append("Movies" not in self_inner._category_cache)
+            original_select(self_inner, index)
+
+        with patch.object(lib, "selectCategory", lambda idx: spy_select(lib, idx)):
+            lib.rescanCategory(0)
+
+        assert cache_was_cleared == [True], "cache must be cleared before selectCategory is called"
+
+    def test_cache_miss_on_first_call_sets_scanning_true(self, tmp_path: Path) -> None:
+        """First selectCategory (cache miss) must set categoryScanning=True while running."""
+        lib = self._make_flat_library(tmp_path)
+        assert not lib.categoryScanning
+        # Intercept before worker completes
+        lib.selectCategory(0)
+        assert lib.categoryScanning
+        wait_for_scan(lib)
+        assert not lib.categoryScanning
+
+    def test_cache_hit_does_not_set_scanning_true(self, tmp_path: Path) -> None:
+        """Cache hit must not set categoryScanning=True."""
+        lib = self._make_flat_library(tmp_path)
+        lib.selectCategory(0)
+        wait_for_scan(lib)
+
+        # Second call hits cache — scanning must stay False throughout
+        lib.selectCategory(0)
+        assert not lib.categoryScanning

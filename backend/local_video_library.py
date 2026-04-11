@@ -82,6 +82,7 @@ class LocalVideoCache:
         self._scraped_art_dir = cache_dir / "artwork_scraped" if has_scraped_art else None
         self._library_file = cache_dir / "library.json"
         self._data: dict[str, dict] = {}  # key → raw JSON entry
+        self._lock = threading.RLock()
 
     def ensure_dirs(self) -> None:
         """Create cache_dir, artwork_custom/, and artwork_scraped/ (if applicable)."""
@@ -92,47 +93,51 @@ class LocalVideoCache:
 
     def load(self) -> None:
         """Read library.json into self._data. No-op if file absent."""
-        if not self._library_file.exists():
-            return
-        try:
-            text = self._library_file.read_text(encoding="utf-8")
-            parsed = json.loads(text)
-        except (json.JSONDecodeError, OSError) as exc:
-            logger.error("LocalVideoCache: failed to load %s: %s", self._library_file, exc)
-            self._data = {}
-            return
-        if not isinstance(parsed, dict):
-            logger.warning(
-                "LocalVideoCache: %s contains %s instead of a JSON object; ignoring",
-                self._library_file,
-                type(parsed).__name__,
-            )
-            self._data = {}
-            return
-        self._data = parsed
+        with self._lock:
+            if not self._library_file.exists():
+                return
+            try:
+                text = self._library_file.read_text(encoding="utf-8")
+                parsed = json.loads(text)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.error("LocalVideoCache: failed to load %s: %s", self._library_file, exc)
+                self._data = {}
+                return
+            if not isinstance(parsed, dict):
+                logger.warning(
+                    "LocalVideoCache: %s contains %s instead of a JSON object; ignoring",
+                    self._library_file,
+                    type(parsed).__name__,
+                )
+                self._data = {}
+                return
+            self._data = parsed
 
     def save(self) -> None:
         """Write self._data to library.json as indented JSON."""
-        self.ensure_dirs()
-        try:
-            self._library_file.write_text(
-                json.dumps(self._data, indent=2),
-                encoding="utf-8",
-            )
-        except OSError as exc:
-            logger.error("LocalVideoCache: failed to save %s: %s", self._library_file, exc)
+        with self._lock:
+            self.ensure_dirs()
+            try:
+                self._library_file.write_text(
+                    json.dumps(self._data, indent=2),
+                    encoding="utf-8",
+                )
+            except OSError as exc:
+                logger.error("LocalVideoCache: failed to save %s: %s", self._library_file, exc)
 
     def get_entry(self, key: str) -> dict | None:
         """Return a shallow copy of the entry for key, or None if absent."""
-        entry = self._data.get(key)
-        return dict(entry) if entry is not None else None
+        with self._lock:
+            entry = self._data.get(key)
+            return dict(entry) if entry is not None else None
 
     def set_entry(self, key: str, data: dict) -> None:
         """Merge data into the existing entry, preserving the custom sub-dict."""
-        existing = self._data.get(key, {})
-        custom = existing.get("custom", {})
-        self._data[key] = {**existing, **data, "custom": custom}
-        self.save()
+        with self._lock:
+            existing = self._data.get(key, {})
+            custom = existing.get("custom", {})
+            self._data[key] = {**existing, **data, "custom": custom}
+            self.save()
 
     def resolve_poster(self, key: str) -> str:
         """Return the best available poster path for key.
@@ -144,8 +149,9 @@ class LocalVideoCache:
             if candidate.exists():
                 return str(candidate)
 
-        entry = self._data.get(key, {})
-        scraped = entry.get("poster_scraped", "")
+        with self._lock:
+            entry = self._data.get(key, {})
+            scraped = entry.get("poster_scraped", "")
         if scraped and Path(scraped).exists():
             return scraped
 
@@ -153,43 +159,47 @@ class LocalVideoCache:
 
     def resolve_metadata(self, key: str) -> dict:
         """Return effective metadata for key: base fields merged with custom overrides."""
-        entry = self._data.get(key, {})
-        custom = entry.get("custom", {})
-        base = {
-            "title":       entry.get("title", ""),
-            "year":        entry.get("year", 0),
-            "description": entry.get("description", ""),
-            "genres":      entry.get("genres", []),
-            "rating":      entry.get("rating", ""),
-            "tmdb_id":     entry.get("tmdb_id"),
-        }
-        return {**base, **custom}
+        with self._lock:
+            entry = self._data.get(key, {})
+            custom = entry.get("custom", {})
+            base = {
+                "title":       entry.get("title", ""),
+                "year":        entry.get("year", 0),
+                "description": entry.get("description", ""),
+                "genres":      entry.get("genres", []),
+                "rating":      entry.get("rating", ""),
+                "tmdb_id":     entry.get("tmdb_id"),
+            }
+            return {**base, **custom}
 
     def is_tombstoned(self, key: str) -> bool:
         """Return True if the entry has tmdb_id explicitly set to None (lookup miss)."""
-        entry = self._data.get(key)
-        return entry is not None and entry.get("tmdb_id") is None and "tmdb_id" in entry
+        with self._lock:
+            entry = self._data.get(key)
+            return entry is not None and entry.get("tmdb_id") is None and "tmdb_id" in entry
 
     def write_tombstone(self, key: str) -> None:
         """Write {"tmdb_id": null} for key, preserving any existing custom data."""
-        existing = self._data.get(key, {})
-        self._data[key] = {**existing, "tmdb_id": None}
-        self.save()
+        with self._lock:
+            existing = self._data.get(key, {})
+            self._data[key] = {**existing, "tmdb_id": None}
+            self.save()
 
     def clear_tombstones(self) -> None:
         """Remove all tombstone entries (tmdb_id=null) so items can be re-scraped."""
-        tombstone_keys = [
-            k for k, v in self._data.items()
-            if isinstance(v, dict) and "tmdb_id" in v and v["tmdb_id"] is None
-        ]
-        if tombstone_keys:
-            for k in tombstone_keys:
-                del self._data[k]
-            self.save()
-            logger.info(
-                "LocalVideoCache.clear_tombstones: cleared %d tombstone(s) from %s",
-                len(tombstone_keys), self._cache_dir,
-            )
+        with self._lock:
+            tombstone_keys = [
+                k for k, v in self._data.items()
+                if isinstance(v, dict) and "tmdb_id" in v and v["tmdb_id"] is None
+            ]
+            if tombstone_keys:
+                for k in tombstone_keys:
+                    del self._data[k]
+                self.save()
+                logger.info(
+                    "LocalVideoCache.clear_tombstones: cleared %d tombstone(s) from %s",
+                    len(tombstone_keys), self._cache_dir,
+                )
 
 
 def _movies_cache() -> LocalVideoCache:
@@ -250,8 +260,9 @@ class TmdbScraper:
     SEARCH_BASE = "https://api.themoviedb.org/3"
     IMAGE_BASE  = "https://image.tmdb.org/t/p/w500"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, rate_limit_s: float = 0.26) -> None:
         self._api_key = api_key
+        self._rate_limit_s = rate_limit_s
         self._session = requests.Session()
         self._session.headers.update({"User-Agent": "htpcstation/1.0"})
 
@@ -378,7 +389,7 @@ class TmdbScraper:
                 tombstoned += 1
                 if on_progress is not None:
                     on_progress(done, total)
-                time.sleep(0.26)
+                time.sleep(self._rate_limit_s)
                 continue
 
             entry: dict = {
@@ -403,7 +414,7 @@ class TmdbScraper:
             if on_progress is not None:
                 on_progress(done, total)
 
-            time.sleep(0.26)
+            time.sleep(self._rate_limit_s)
 
         logger.info("scrape_movies: done — scraped=%d tombstoned=%d skipped=%d", scraped, tombstoned, skipped)
         return scraped, tombstoned, skipped
@@ -450,7 +461,7 @@ class TmdbScraper:
                 tombstoned += 1
                 if on_progress is not None:
                     on_progress(done, total)
-                time.sleep(0.26)
+                time.sleep(self._rate_limit_s)
                 continue
 
             first_air = result.get("first_air_date", "")
@@ -476,7 +487,7 @@ class TmdbScraper:
             if on_progress is not None:
                 on_progress(done, total)
 
-            time.sleep(0.26)
+            time.sleep(self._rate_limit_s)
 
         logger.info("scrape_tv_shows: done — scraped=%d tombstoned=%d skipped=%d", scraped, tombstoned, skipped)
         return scraped, tombstoned, skipped
@@ -942,7 +953,7 @@ class LocalVideoLibrary(QObject):
     scrapeError = Signal(str)                       # error message
 
     # Internal signal for worker→main thread marshalling
-    _workerScanFinished = Signal(object, str)       # (items, branch: "flat"|"tv_shows")
+    _workerScanFinished = Signal(object, str, str)  # (items, branch: "flat"|"tv_shows", category_name)
 
     def __init__(self, config: Config, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -979,6 +990,9 @@ class LocalVideoLibrary(QObject):
         self._episodes = EpisodeListModel(self)
 
         self._current_category_index = -1
+
+        # In-memory cache: keyed by category name, value is (items, branch)
+        self._category_cache: dict[str, tuple[list, str]] = {}
 
         # Async category scanning
         self._category_scanning = False
@@ -1083,12 +1097,18 @@ class LocalVideoLibrary(QObject):
         cat = cats[index]
         logger.debug("selectCategory: index=%d name=%r type=%r", index, cat.get("name"), cat.get("type"))
         branch = "flat" if cat["type"] == "flat" else "tv_shows"
+        cache_key = cat.get("name", "")
+        self.currentCategoryIndexChanged.emit()
+        if cache_key in self._category_cache:
+            logger.debug("selectCategory: cache hit for %r", cache_key)
+            items, cached_branch = self._category_cache[cache_key]
+            self._on_worker_scan_finished(items, cached_branch, cache_key)
+            return
         self._category_scanning = True
         self.categoryScanningChanged.emit()
-        self.currentCategoryIndexChanged.emit()
-        self._executor.submit(self._worker_scan_category, cat, branch)
+        self._executor.submit(self._worker_scan_category, cat, branch, cache_key)
 
-    def _worker_scan_category(self, cat: dict, branch: str) -> None:
+    def _worker_scan_category(self, cat: dict, branch: str, category_name: str) -> None:
         """Scan a category asynchronously on an executor thread."""
         try:
             if branch == "flat":
@@ -1103,10 +1123,10 @@ class LocalVideoLibrary(QObject):
         except Exception:
             logger.exception("_worker_scan_category: unexpected error")
             items = []
-        self._workerScanFinished.emit(items, branch)
+        self._workerScanFinished.emit(items, branch, category_name)
 
-    @Slot(object, str)
-    def _on_worker_scan_finished(self, items: list, branch: str) -> None:
+    @Slot(object, str, str)
+    def _on_worker_scan_finished(self, items: list, branch: str, category_name: str) -> None:
         """Receive scan results from worker thread and update models."""
         if branch == "flat":
             self._reset_model(self._videos, items)
@@ -1122,6 +1142,12 @@ class LocalVideoLibrary(QObject):
             self._reset_model(self._episodes, [])
             self.showsModelChanged.emit()
             logger.debug("_on_worker_scan_finished: tv_shows model reset with %d items", len(items))
+
+        # Store results in in-memory cache keyed by category name.
+        # category_name is captured at submission time, not read from shared state,
+        # so rapid category switches cannot store results under the wrong key.
+        if category_name:
+            self._category_cache[category_name] = (items, branch)
 
         self._category_scanning = False
         self.categoryScanningChanged.emit()
@@ -1173,6 +1199,10 @@ class LocalVideoLibrary(QObject):
     @Slot(int)
     def rescanCategory(self, index: int) -> None:
         """Re-run the scan for the given category index."""
+        cats = self._config.local_video_categories
+        if 0 <= index < len(cats):
+            cat = cats[index]
+            self._category_cache.pop(cat.get("name", ""), None)
         self.selectCategory(index)
 
     # ------------------------------------------------------------------
@@ -1370,6 +1400,8 @@ class LocalVideoLibrary(QObject):
         for i, cat in enumerate(cats):
             if cat.get("type") == target_type:
                 logger.info("_emit_scrape_finished: reloading category index=%d name=%r", i, cat.get("name"))
+                # Invalidate cache so the reload picks up fresh scraped data
+                self._category_cache.pop(cat.get("name", ""), None)
                 self.selectCategory(i)
                 break
         else:
