@@ -463,18 +463,59 @@ class TestLocalMusicLibrarySlots:
 
         config = _make_config(tmp_path, music_dir=music_dir)
         lib = _make_library(tmp_path, config)
-        result = lib.playFolder(str(music_dir))
+        results = []
+        lib.folderReady.connect(lambda data: results.append(data))
+        lib.playFolder(str(music_dir))
+
+        import time
+        for _ in range(50):
+            _process_events()
+            time.sleep(0.05)
+            if results:
+                break
+
+        assert len(results) == 1
+        result = results[0]
         assert len(result["tracks"]) == 1
         assert result["tracks"][0]["streamUrl"].startswith("file://")
         assert result["tracks"][0]["ratingKey"] == ""
+
+    def test_play_folder_folder_scanning_state(self, tmp_path: Path) -> None:
+        """folderScanning goes True when playFolder is called, then False after completion."""
+        music_dir = tmp_path / "music"
+        music_dir.mkdir()
+        _create_minimal_mp3(music_dir / "song.mp3", title="State Song")
+
+        config = _make_config(tmp_path, music_dir=music_dir)
+        lib = _make_library(tmp_path, config)
+        results = []
+        lib.folderReady.connect(lambda data: results.append(data))
+        lib.playFolder(str(music_dir))
+        # Immediately after call, folder_scanning should be True
+        assert lib._folder_scanning is True
+
+        import time
+        for _ in range(50):
+            _process_events()
+            time.sleep(0.05)
+            if results:
+                break
+
+        assert len(results) == 1
+        assert lib._folder_scanning is False
 
     def test_play_folder_traversal_blocked(self, tmp_path: Path) -> None:
         music_dir = tmp_path / "music"
         music_dir.mkdir()
         config = _make_config(tmp_path, music_dir=music_dir)
         lib = _make_library(tmp_path, config)
-        result = lib.playFolder("/etc")
-        assert result == {"tracks": []}
+        results = []
+        lib.folderReady.connect(lambda data: results.append(data))
+        lib.playFolder("/etc")
+        # Traversal rejection is synchronous — folderReady emitted immediately with empty tracks
+        _process_events()
+        assert len(results) == 1
+        assert results[0] == {"tracks": []}
 
 
 class TestAlbumArtExtraction:

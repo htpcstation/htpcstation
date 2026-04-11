@@ -190,18 +190,22 @@ class LocalMusicLibrary(QObject):
     artistDetailReady = Signal(str, "QVariant")
     albumDetailReady = Signal(str, "QVariant")
     folderContentsReady = Signal(str, "QVariant")
+    folderReady = Signal(object)       # folder_data dict emitted when playFolder scan completes
+    folderScanningChanged = Signal()
 
     # Internal signals for worker→main thread marshalling
     _scanFinished = Signal(object)     # library_data dict
     _artistDetailResult = Signal(str, object)
     _albumDetailResult = Signal(str, object)
     _folderContentsResult = Signal(str, object)
+    _workerFolderReady = Signal(object)   # folder_data dict from _worker_scan_folder
 
     def __init__(self, config: Config, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
 
         self._config = config
         self._scanning = False
+        self._folder_scanning = False
         self._library_data: dict = {}  # {artist_name: {albums: {album_title: {...}}}}
         self._executor = ThreadPoolExecutor(max_workers=2)
 
@@ -222,6 +226,10 @@ class LocalMusicLibrary(QObject):
             lambda path, data: self.folderContentsReady.emit(path, data),
             Qt.ConnectionType.QueuedConnection,
         )
+        self._workerFolderReady.connect(
+            self._on_worker_folder_ready,
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # Load cached data if available
         self._load_cache()
@@ -236,6 +244,9 @@ class LocalMusicLibrary(QObject):
     def _get_scanning(self) -> bool:
         return self._scanning
 
+    def _get_folder_scanning(self) -> bool:
+        return self._folder_scanning
+
     artistsModel = Property(
         QObject,
         fget=_get_artists_model,
@@ -245,6 +256,11 @@ class LocalMusicLibrary(QObject):
         bool,
         fget=_get_scanning,
         notify=scanningChanged,
+    )
+    folderScanning = Property(
+        bool,
+        fget=_get_folder_scanning,
+        notify=folderScanningChanged,
     )
 
     # ------------------------------------------------------------------
@@ -315,12 +331,18 @@ class LocalMusicLibrary(QObject):
             return
         self._executor.submit(self._worker_browse_folder, str(target))
 
-    @Slot(str, result="QVariant")
-    def playFolder(self, folder_path: str) -> object:
-        """Return album-like data for a folder (track dicts for all audio files in it)."""
+    @Slot(str)
+    def playFolder(self, folder_path: str) -> None:
+        """Async: scan a folder for audio files and emit folderReady when done.
+
+        The directory traversal security check runs on the main thread before
+        submitting work to the executor so that invalid paths are rejected
+        immediately without spinning up a worker.
+        """
         music_dir = self._config.local_music_directory
         if music_dir is None:
-            return {"tracks": []}
+            self.folderReady.emit({"tracks": []})
+            return
         music_dir_resolved = Path(music_dir).resolve()
         target = Path(folder_path).resolve()
         # Security: prevent directory traversal
@@ -328,19 +350,49 @@ class LocalMusicLibrary(QObject):
             target.relative_to(music_dir_resolved)
         except ValueError:
             logger.warning("playFolder: path '%s' is outside music directory", folder_path)
-            return {"tracks": []}
+            self.folderReady.emit({"tracks": []})
+            return
         if not target.is_dir():
-            return {"tracks": []}
-        tracks = []
-        for child in sorted(target.iterdir()):
-            if child.is_file() and child.suffix.lower() in AUDIO_EXTENSIONS:
-                tags = _read_tags(child)
-                tracks.append(_make_track_dict(child, tags))
-        return {"tracks": tracks}
+            self.folderReady.emit({"tracks": []})
+            return
+        self._folder_scanning = True
+        self.folderScanningChanged.emit()
+        self._executor.submit(self._worker_scan_folder, str(target))
+
+    @Slot()
+    def shutdown(self) -> None:
+        """Shutdown the executor. Called on app quit."""
+        self._executor.shutdown(wait=False)
+
+    # ------------------------------------------------------------------
+    # Internal: worker thread functions (folder scan)
+    # ------------------------------------------------------------------
+
+    def _worker_scan_folder(self, folder_path: str) -> None:
+        """Scan a music folder asynchronously on an executor thread."""
+        try:
+            target = Path(folder_path)
+            tracks = []
+            for child in sorted(target.iterdir()):
+                if child.is_file() and child.suffix.lower() in AUDIO_EXTENSIONS:
+                    tags = _read_tags(child)
+                    tracks.append(_make_track_dict(child, tags))
+            folder_data: dict = {"tracks": tracks}
+        except Exception:
+            logger.exception("_worker_scan_folder: unexpected error")
+            folder_data = {"tracks": []}
+        self._workerFolderReady.emit(folder_data)
 
     # ------------------------------------------------------------------
     # Internal: main-thread handlers
     # ------------------------------------------------------------------
+
+    @Slot(object)
+    def _on_worker_folder_ready(self, folder_data: dict) -> None:
+        """Receive folder data from worker thread and emit for QML."""
+        self.folderReady.emit(folder_data)
+        self._folder_scanning = False
+        self.folderScanningChanged.emit()
 
     def _on_scan_finished(self, library_data: object) -> None:
         """Handle scan completion on the main thread."""

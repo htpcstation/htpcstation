@@ -140,6 +140,7 @@ def main() -> None:
     # Local music library — exposed to QML as `localMusic`
     local_music = LocalMusicLibrary(config)
     engine.rootContext().setContextProperty("localMusic", local_music)
+    app.aboutToQuit.connect(local_music.shutdown)
 
     # Local video library — exposed to QML as `localVideos`
     local_videos = LocalVideoLibrary(config)
