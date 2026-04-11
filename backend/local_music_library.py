@@ -188,9 +188,9 @@ class LocalMusicLibrary(QObject):
     artistsModelChanged = Signal()
     scanningChanged = Signal()
     scanComplete = Signal()
-    artistDetailReady = Signal(str, "QVariant")
-    albumDetailReady = Signal(str, "QVariant")
-    folderContentsReady = Signal(str, "QVariant")
+    artistDetailReady = Signal(str, "QVariantMap")
+    albumDetailReady = Signal(str, "QVariantMap")
+    folderContentsReady = Signal(str, "QVariantMap")
     folderReady = Signal(object)       # folder_data dict emitted when playFolder scan completes
     folderScanningChanged = Signal()
 

@@ -196,8 +196,8 @@ class SteamLibrary(QObject):
 
     # Public signal: emitted when metadata is available for a game.
     # QML connects to this to update the detail view.
-    # Signature: (appId: str, metadata: QVariant dict)
-    metadataChanged = Signal(str, "QVariant")
+    # Signature: (appId: str, metadata: QVariantMap dict)
+    metadataChanged = Signal(str, "QVariantMap")
 
     # Internal signal: marshals metadata fetch results from worker thread to main thread.
     # Signature: (appId: str, metadata: object — GameMetadata dict or None)

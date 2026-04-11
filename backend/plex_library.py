@@ -530,18 +530,18 @@ class PlexLibrary(QObject):
     watchHistoryReady = Signal(list)
     lyricsReady = Signal(str, list)       # (rating_key, lines) — lines is list of {ms, text} dicts
     lyricsUnavailable = Signal(str)       # (rating_key) — no lyrics found or error
-    movieReady    = Signal(str, "QVariant")   # (rating_key, movie_dict)
-    showReady     = Signal(str, "QVariant")   # (rating_key, show_dict)
-    seasonsReady  = Signal(str, "QVariant")   # (rating_key, seasons_list)
-    episodesReady = Signal(str, "QVariant")   # (season_rating_key, episodes_list)
-    artistPreviewReady = Signal(str, "QVariant")   # (rating_key, artist_preview_dict)
-    artistDetailReady  = Signal(str, "QVariant")   # (artist_rating_key, {artist, albums})
-    albumDetailReady   = Signal(str, "QVariant")   # (album_rating_key, {album, tracks})
-    recentAlbumsReady  = Signal("QVariant")        # list of album dicts
-    playlistsReady     = Signal("QVariant")        # list of playlist dicts
-    playlistTracksReady = Signal(str, "QVariant")  # (rating_key, list of track dicts)
-    posterUpdated      = Signal(str, str)           # (ratingKey, posterUrl) — lightweight poster update
-    genresReady        = Signal(str, "QVariant")    # (section_key, genre_list) — async genre fetch result
+    movieReady    = Signal(str, "QVariantMap")   # (rating_key, movie_dict)
+    showReady     = Signal(str, "QVariantMap")   # (rating_key, show_dict)
+    seasonsReady  = Signal(str, "QVariantList")  # (rating_key, seasons_list)
+    episodesReady = Signal(str, "QVariantList")  # (season_rating_key, episodes_list)
+    artistPreviewReady = Signal(str, "QVariantMap")   # (rating_key, artist_preview_dict)
+    artistDetailReady  = Signal(str, "QVariantMap")   # (artist_rating_key, {artist, albums})
+    albumDetailReady   = Signal(str, "QVariantMap")   # (album_rating_key, {album, tracks})
+    recentAlbumsReady  = Signal("QVariantList")        # list of album dicts
+    playlistsReady     = Signal("QVariantList")        # list of playlist dicts
+    playlistTracksReady = Signal(str, "QVariantList")  # (rating_key, list of track dicts)
+    posterUpdated      = Signal(str, str)              # (ratingKey, posterUrl) — lightweight poster update
+    genresReady        = Signal(str, "QVariantList")   # (section_key, genre_list) — async genre fetch result
 
     # Internal signals used to marshal results from worker threads to main thread
     _setupReady = Signal("QVariant")  # dict with setup results from worker thread
