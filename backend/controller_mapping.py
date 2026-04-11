@@ -17,6 +17,8 @@ from typing import Optional
 
 from PySide6.QtCore import Qt
 
+from .config import CONFIG_DIR
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ DEFAULT_MAPPING: dict[str, dict] = {
 
 def get_mapping_path() -> Path:
     """Return the path to the controller mapping config file."""
-    return Path.home() / ".config" / "htpcstation" / "controller_mapping.json"
+    return CONFIG_DIR / "controller_mapping.json"
 
 
 def get_default_mapping() -> dict[str, dict]:

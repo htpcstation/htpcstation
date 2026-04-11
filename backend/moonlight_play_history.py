@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.moonlight_config import get_moonlight_dir
+from backend.utils import load_json
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,8 @@ def _now_utc() -> str:
 def _load_history() -> dict[str, str]:
     """Load the play history from disk.  Returns an empty dict on any error."""
     path = _get_history_path()
-    if not path.exists():
-        return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return load_json(path)
     except (json.JSONDecodeError, OSError) as exc:
         logger.warning("moonlight_play_history: failed to load history: %s", exc)
         return {}

@@ -29,6 +29,7 @@ from PySide6.QtCore import (
 )
 
 from backend.browser_launcher import BrowserLauncher
+from backend.utils import load_json, save_json
 from backend.hw_detect import detect_vaapi_codecs
 from backend.lrc_parser import parse_lrc, parse_plain
 from backend.config import Config, CONFIG_DIR
@@ -2597,29 +2598,27 @@ class PlexLibrary(QObject):
         """Update one key in state.json (worker thread safe — atomic read-modify-write)."""
         path = self._state_cache_path()
         try:
-            state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            state = load_json(path)
         except Exception:
             state = {}
         state[key] = value
-        path.write_text(json.dumps(state), encoding="utf-8")
+        save_json(path, state, indent=None)
 
     def _save_sort_state(self) -> None:
         """Persist _section_sort and _section_genre to state.json."""
         path = self._state_cache_path()
         try:
-            state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+            state = load_json(path)
         except Exception:
             state = {}
         state["section_sort"] = self._section_sort
         state["section_genre"] = self._section_genre
-        path.write_text(json.dumps(state), encoding="utf-8")
+        save_json(path, state, indent=None)
 
     def _load_state_cache(self) -> dict:
         path = self._state_cache_path()
-        if not path.exists():
-            return {}
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return load_json(path)
         except Exception:
             return {}
 
@@ -2725,7 +2724,7 @@ class PlexLibrary(QObject):
             existing = {}
             if path.exists():
                 try:
-                    for item in json.loads(path.read_text(encoding="utf-8")):
+                    for item in load_json(path):
                         rk = item.get("rating_key", "")
                         if rk:
                             existing[rk] = item
@@ -2737,7 +2736,7 @@ class PlexLibrary(QObject):
                 if rk:
                     existing[rk] = d
 
-            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
+            save_json(path, list(existing.values()), indent=None)
         except Exception:
             logger.warning("Failed to save artists cache", exc_info=True)
 
@@ -2750,7 +2749,7 @@ class PlexLibrary(QObject):
         if not path.exists():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_json(path)
             artists = []
             for item in data:
                 artists.append(PlexArtist(
@@ -2779,7 +2778,7 @@ class PlexLibrary(QObject):
         """Serialize the library list to a JSON cache file (called from worker thread)."""
         try:
             path = self._libraries_cache_path()
-            path.write_text(json.dumps(libraries), encoding="utf-8")
+            save_json(path, libraries, indent=None)
         except Exception:
             logger.warning("Failed to save libraries cache", exc_info=True)
 
@@ -2792,7 +2791,7 @@ class PlexLibrary(QObject):
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return load_json(path)
         except Exception:
             logger.warning("Failed to load libraries cache", exc_info=True)
             return None
@@ -2814,7 +2813,7 @@ class PlexLibrary(QObject):
         """
         try:
             path = self._ondeck_cache_path()
-            path.write_text(json.dumps(items), encoding="utf-8")
+            save_json(path, items, indent=None)
         except Exception:
             logger.warning("Failed to save on-deck cache", exc_info=True)
 
@@ -2827,7 +2826,7 @@ class PlexLibrary(QObject):
         if not path.exists():
             return None
         try:
-            return json.loads(path.read_text(encoding="utf-8"))
+            return load_json(path)
         except Exception:
             logger.warning("Failed to load on-deck cache", exc_info=True)
             return None
@@ -2870,7 +2869,7 @@ class PlexLibrary(QObject):
             existing = {}
             if path.exists():
                 try:
-                    for item in json.loads(path.read_text(encoding="utf-8")):
+                    for item in load_json(path):
                         rk = item.get("rating_key", "")
                         if rk:
                             existing[rk] = item
@@ -2882,7 +2881,7 @@ class PlexLibrary(QObject):
                 if rk:
                     existing[rk] = d
 
-            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
+            save_json(path, list(existing.values()), indent=None)
         except Exception:
             logger.warning("Failed to save movies cache", exc_info=True)
 
@@ -2895,7 +2894,7 @@ class PlexLibrary(QObject):
         if not path.exists():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_json(path)
             movies = []
             for item in data:
                 movies.append(PlexMovie(
@@ -2957,7 +2956,7 @@ class PlexLibrary(QObject):
             existing = {}
             if path.exists():
                 try:
-                    for item in json.loads(path.read_text(encoding="utf-8")):
+                    for item in load_json(path):
                         rk = item.get("rating_key", "")
                         if rk:
                             existing[rk] = item
@@ -2969,7 +2968,7 @@ class PlexLibrary(QObject):
                 if rk:
                     existing[rk] = d
 
-            path.write_text(json.dumps(list(existing.values())), encoding="utf-8")
+            save_json(path, list(existing.values()), indent=None)
         except Exception:
             logger.warning("Failed to save shows cache", exc_info=True)
 
@@ -2982,7 +2981,7 @@ class PlexLibrary(QObject):
         if not path.exists():
             return None
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_json(path)
             shows = []
             for item in data:
                 shows.append(PlexShow(

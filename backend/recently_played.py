@@ -34,6 +34,7 @@ from typing import Optional
 from PySide6.QtCore import QObject, Signal, Slot
 
 from backend.config import CONFIG_DIR
+from backend.utils import load_json
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ class RecentlyPlayedManager(QObject):
         if not path.exists():
             return []
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_json(path)
             if isinstance(data, list):
                 return data
             logger.warning("recently_played: unexpected data type in JSON, resetting")

@@ -31,6 +31,7 @@ from PySide6.QtCore import (
 )
 
 from backend.config import Config
+from backend.utils import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -440,7 +441,7 @@ class LocalMusicLibrary(QObject):
         if not _CACHE_FILE.exists():
             return
         try:
-            raw = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+            raw = load_json(_CACHE_FILE)
             if isinstance(raw, dict):
                 self._library_data = raw
                 self._rebuild_artists_model()
@@ -451,8 +452,7 @@ class LocalMusicLibrary(QObject):
     def _save_cache(self, library_data: dict) -> None:
         """Write library data to disk cache. Called from worker thread."""
         try:
-            _CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            _CACHE_FILE.write_text(json.dumps(library_data, indent=2), encoding="utf-8")
+            save_json(_CACHE_FILE, library_data)
         except OSError as exc:
             logger.warning("LocalMusicLibrary: failed to save cache: %s", exc)
 

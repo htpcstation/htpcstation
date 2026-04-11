@@ -31,6 +31,7 @@ from PySide6.QtCore import (
 )
 
 from backend.config import CONFIG_DIR
+from backend.utils import load_json, save_json
 from backend.live_tv_models import LiveTvChannel
 from backend.mpv_launcher import LibMpvPlayer
 
@@ -558,7 +559,7 @@ class LiveTvLibrary(QObject):
             for ch in channels
         ]
         path = _CACHE_DIR / "guide_cache.json"
-        path.write_text(json.dumps(data), encoding="utf-8")
+        save_json(path, data, indent=None)
 
     def _load_guide_cache(self, hdhomerun_host: str) -> list[LiveTvChannel]:
         """Load channels from guide_cache.json. Returns [] if missing or corrupt."""
@@ -566,7 +567,7 @@ class LiveTvLibrary(QObject):
         if not path.exists():
             return []
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = load_json(path)
             if not isinstance(data, list):
                 return []
             channels = []

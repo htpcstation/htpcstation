@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 from backend.retroarch_config import DEFAULT_RETROARCH_CFG
+from backend.utils import load_json, save_json
 
 logger = logging.getLogger(__name__)
 
@@ -1140,7 +1141,7 @@ class Config:
         # Safety guard: never overwrite a config that has credentials with a blank one.
         if CONFIG_FILE.exists() and not self._plex_token and not self._plex_server_id:
             try:
-                existing = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+                existing = load_json(CONFIG_FILE)
                 if existing.get("plex", {}).get("token") or existing.get("plex", {}).get("server_id"):
                     logger.error(
                         "Config.save: refusing to overwrite config with credentials "
@@ -1150,7 +1151,7 @@ class Config:
             except (OSError, json.JSONDecodeError):
                 pass  # can't read existing file — proceed with save
         try:
-            CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            save_json(CONFIG_FILE, data)
         except OSError as exc:
             logger.warning("Config.save: could not write %s: %s", CONFIG_FILE, exc)
 
@@ -1161,7 +1162,7 @@ class Config:
     def _load(self) -> None:
         """Load config from disk, merging with built-in defaults."""
         try:
-            raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            raw = load_json(CONFIG_FILE)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to load config file %s: %s — using defaults", CONFIG_FILE, exc)
             return
