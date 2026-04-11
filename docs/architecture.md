@@ -18,10 +18,11 @@ htpcstation/
   backend/
     browser_launcher.py                # Brave kiosk launcher, dedicated user-data-dir, extension deploy
     config.py                          # JSON config, ~130 system defaults (all Knulli/Batocera folders),
-                                       # all setters auto-save
+                                       # all setters auto-save. _write_executor = ThreadPoolExecutor(max_workers=1)
+                                       # — Config.save() submits write fire-and-forget (data captured as default arg).
     controller_mapping.py              # Controller mapping config: load/save, dual-record format,
                                        # build_evdev_lookup(), build_web_gamepad_mapping(),
-                                       # generate_mapping_js()
+                                       # generate_mapping_js(). Path derived from CONFIG_DIR (imported from config.py).
     gamepad.py                         # evdev → QKeyEvent injection, auto-repeat, hotplug, raw mode,
                                        # startRawMode/stopRawMode (opens/closes SdlResolver),
                                        # getDeviceCapabilities(), setExternalAppActive()
@@ -61,6 +62,8 @@ htpcstation/
                                        # Max 50 entries. De-dups by (source, nav_params). record() slot,
                                        # getRecent() slot (top 5), changed signal. Exposed as
                                        # recentlyPlayed context property. Always called on main thread.
+                                       # _write_executor = ThreadPoolExecutor(max_workers=1) — record()
+                                       # submits self._save before emitting changed (write is fire-and-forget).
     mpv_launcher.py                    # LibMpvPlayer: python-mpv in-process player, VA-API hwdec,
                                        # Wayland/Xorg auto-detect, programmatic keybinds, property
                                        # observers (time-pos, pause), live TV variant with reconnect options
@@ -78,6 +81,9 @@ htpcstation/
                                        # plex_cache/ and loaded at startup via _worker_load_all_caches
                                        # (_cache_executor, dedicated thread). Sort/genre state persisted
                                        # per section key in plex_cache/state.json.
+                                       # Incremental model early-exit: PlexLibraryListModel.set_items(),
+                                       # PlexOnDeckModel.set_items(), PlexArtistListModel.set_artists()
+                                       # skip beginResetModel/endResetModel when incoming data == current.
     plex_models.py                     # PlexMovie, PlexShow, PlexSeason, PlexEpisode, PlexArtist,
                                        # PlexAlbum, PlexTrack dataclasses
     poster_cache.py                    # Thread-safe poster downloader, SHA256 hash filenames.
@@ -94,6 +100,12 @@ htpcstation/
     steam_metadata.py                  # Steam Store API metadata fetcher (appdetails endpoint)
     steam_models.py                    # SteamGame dataclass
     steam_parser.py                    # ACF/VDF parser, game discovery, artwork resolution + caching
+    utils.py                           # Shared utilities: load_json(path) / save_json(path, data, indent) —
+                                       # UTF-8 read/write helpers (load returns {} when file absent).
+                                       # safe_request(call, context) — catches ConnectionError/Timeout/
+                                       # HTTPError, logs warning, returns None. Only for plain network calls
+                                       # with no content parsing; plex_account.py needs broader except
+                                       # Exception coverage for XML/JSON parse errors and is NOT a target.
   extension/                           # Chromium browser extension (Manifest V3)
     manifest.json
     content.js                         # Gamepad API polling, edge detection, auto-repeat, Start+Select
@@ -119,6 +131,14 @@ htpcstation/
     components/
       ClockDisplay.qml
       FocusRing.qml
+      GridCellHighlight.qml              # Focus-tint rectangle for grid delegates. `active` bool property;
+                                         # colorPrimary at opacity 0.15 (active) / 0.0 (inactive) with
+                                         # animDurationFast Behavior. Use `import ".."` — same convention as FocusRing.
+      LibraryHeader.qml                  # Two-Rectangle header shared by all 22 grid/list screen files.
+                                         # 56px primary bar (◀ + title) + 28px status bar (statusText, rightText1/2/3).
+                                         # Screens anchor content to `header.bottom` directly — do NOT define
+                                         # a property alias named `bottom` inside this component; `bottom` is a
+                                         # FINAL property of QML's Item and cannot be overridden or aliased.
       LoadingOverlay.qml                 # Full-screen dark overlay (colorBackground) shown only after a
                                          # configurable delay (default: Theme.loadingOverlayDelay = 1000ms).
                                          # MUST import ".." — Theme is registered in qml/qmldir and is only
@@ -295,6 +315,7 @@ Button hint conventions:
 - Steam game discovery is synchronous (small local ACF file reads)
 - Live TV: HDHomeRun `discover.json` sequential (fast, local), then `lineup.json` + guide API parallel (2 workers)
 - `PlexTimelineReporter`: dedicated daemon `threading.Thread` (not executor) — fires every 10s, reads MPV position via IPC
+- **JSON write executors** — `config.py` and `recently_played.py` each own a module-level `_write_executor = ThreadPoolExecutor(max_workers=1)` for serialised fire-and-forget disk writes. `max_workers=1` prevents race conditions on rapid saves. Pattern matches `_cache_executor` in `plex_library.py`.
 - All internal signals that cross thread boundaries use explicit `Qt.ConnectionType.QueuedConnection` — required because `ThreadPoolExecutor` threads are not `QThread` subclasses, so PySide6 `AutoConnection` defaults to `DirectConnection` (not queued)
 
 ### Process Lifecycle
@@ -541,6 +562,7 @@ To use a custom poster image: drop any `.jpg`/`.jpeg`/`.png`/`.webp` file named 
 - **Stderr filter hides QML errors** — Disable `_start_stderr_filter()` in `main.py` when debugging QML.
 - **Focus scale must target inner content, not delegate root** — Applying `scale` to a `FocusScope` delegate root inside a `clip: true` ListView/GridView clips the scaled item at its original bounds. Apply scale to the inner card `Rectangle` instead. Grid delegates need `z: activeFocus ? 1 : 0` so focused items render above neighbours. Use `Theme.focusScale` and `Theme.focusScaleDuration` tokens.
 - **ListView/GridView highlight centering** — All list/grid views use `highlightRangeMode: ApplyRange` with `preferredHighlightBegin: height * 0.35` and `preferredHighlightEnd: height * 0.65`. Use `ApplyRange` (not `StrictlyEnforceRange`) so short lists still allow focus at edges. Add these three properties to any new ListView/GridView.
+- **`LibraryHeader.qml` — do not alias `bottom`** — `bottom` is a FINAL property of QML's `Item` (it belongs to the anchors group). Defining `readonly property alias bottom: statusBar.bottom` inside a component raises "Cannot override FINAL property" at startup and freezes the app. Screens anchor content using `header.bottom` directly — reading the built-in property of a sibling is valid; only redefining/aliasing it inside the component is illegal. Also: anchoring to `header.contentBottom` (or any child-of-sibling property) raises "Cannot anchor to an item that isn't a parent or sibling" and produces empty screens. Always anchor content to `header.bottom`.
 - **`LoadingOverlay.qml` must import `".."`** — `Theme` is a `pragma Singleton` registered in `qml/qmldir`. Components in `qml/components/` cannot access it unless they explicitly `import ".."`. Without this import, `delay: Theme.loadingOverlayDelay` coerces to `0` on binding failure (fires immediately) and `color: Theme.colorBackground` stays at Qt Quick's Rectangle default (white). Result: a white flash every time `loading` toggles true. Any new component in `qml/components/` that references Theme must include `import ".."`.
 - **Do not restore sort/genre from global settings in `Component.onCompleted`** — The backend stores sort per-section key in `_section_sort` (state.json) and genre in `_section_genre`. The settings keys (`sortPlexMovies` etc.) are global and can diverge from the per-section backend state. Instead, add a `property string sectionKey: ""` to the view, bind it to `watchScreen.selectedSectionKey` (or the equivalent), and sync `_currentSort`/`_currentGenreKey` in `onSectionKeyChanged` by calling `plex.getSectionSort(sectionKey)` / `plex.getSectionGenre(sectionKey)`. `_currentGenreTitle` cannot be restored without the genres list — leave it `""` and set it in `onGenresReady` when the matching key is found.
 - **`HomeScreen` tab content is loaded on demand** — `Loader.source` starts as `""`. Set it imperatively on A-press; clear it in `returnFocusToTabBar()` to destroy the screen and stop network calls. Do not bind `Loader.source` to any property.

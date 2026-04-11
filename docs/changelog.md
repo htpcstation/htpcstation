@@ -4,6 +4,28 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP42 — UI consistency cleanup
+
+Task briefs: `misc/coding-team/ui-consistency-cleanup/` (001–012)
+
+- **Delegate style unification** — Second-level menu delegates standardised to height vpx(64), highlight using `colorSecondary` at opacity 1.0; scale animation removed from list delegates. Affects ListenScreen, LocalMusicScreen, WatchScreen, LocalVideosScreen, RetroGamesScreen, PcGamesScreen.
+- **Removed indentation indicator** — WatchScreen `▸` glyph (Text at leftMargin vpx(16), opacity 0.5) removed. Title leftMargin changed vpx(40) → vpx(16) to match all other screens.
+- **Track number / now-playing column in Playlist** — ListenScreen Playlist track delegate gained a leading column showing the track number, or `▶` when the track is currently playing.
+- **Restored album art in Recently Added Albums** — ListenScreen Recently Added Albums delegate: 80×80 thumbnail restored in a Row layout. Height vpx(96), leftMargin vpx(8). (Task 003 removal reversed per user request.)
+- **Theme constants cleanup** — `SettingToggle.qml` radius changed from hardcoded `vpx(16)` to `vpx(Theme.focusRingRadius)`. `Theme.qml`: added `opacityOverlay: 0.6` and `opacityButton: 0.8` constants.
+- **GridCellHighlight component** — New `qml/components/GridCellHighlight.qml` encapsulates focus-tint rectangle for grid delegates: `active` bool, colorPrimary at opacity 0.15/0.0 with animDurationFast Behavior.
+- **LibraryHeader component** — New `qml/components/LibraryHeader.qml` extracts the 56px+28px two-Rectangle header pattern from 22 grid/list screens. Properties: `title`, `statusText`, `rightText1/2/3`. Screens anchor content to `header.bottom` directly. Note: do NOT define a property alias named `bottom` inside the component — it is a FINAL property of `Item` and cannot be overridden (causes startup freeze). Anchoring to a child-of-sibling (e.g. `header.contentBottom`) also fails — always use the sibling's built-in `header.bottom`.
+- **JSON I/O utility** — New `backend/utils.py` with `load_json(path)` and `save_json(path, data, indent)`. Replaces scattered inline read/write patterns in config.py, recently_played.py, and plex_library.py.
+- **Config path consolidation** — `controller_mapping.py` now derives its file path from `CONFIG_DIR` (imported from `config.py`) instead of a hardcoded path.
+- **Network error utility** — `safe_request(call, context)` added to `utils.py`: catches `ConnectionError`, `Timeout`, `HTTPError`; logs and returns `None`. Used in `poster_cache.py`. NOT applied to `plex_account.py` — that file's callsites parse XML/JSON inside the callable and need broader `except Exception` coverage.
+- **Async JSON writes** — `config.py` and `recently_played.py` each gain a module-level `_write_executor = ThreadPoolExecutor(max_workers=1)`. Config.save() submits the write fire-and-forget (data captured as default arg). RecentlyPlayedManager.record() submits `self._save` before emitting `changed`.
+- **Incremental model updates** — `PlexLibraryListModel.set_items()`, `PlexOnDeckModel.set_items()`, and `PlexArtistListModel.set_artists()` skip `beginResetModel/endResetModel` when incoming data equals current data. Prevents scroll-position reset and delegate flicker on identical refreshes.
+- **Navigation list padding fix** — ListenScreen and LocalMusicScreen navigation ListView containers corrected from leftMargin/rightMargin vpx(16) to vpx(32), matching all other tab screens.
+- **Regression fix: plex_account.py reverted** — Task 010's `safe_request` replacement dropped `except Exception` coverage needed for `ET.ParseError`, `json.JSONDecodeError`, and `KeyError`. Reverted to original per-function try/except structure. `safe_request` stays in `utils.py` for simpler callsites only.
+- Test count unchanged: 2,410.
+
+---
+
 ## CP41 — Plex UI bug fixes: white flash + sort/genre label mismatch
 
 Task briefs: `misc/coding-team/plex-loading-flash/` (001–003), `misc/coding-team/plex-sort-restore/` (001)
@@ -184,3 +206,5 @@ Task briefs: `misc/coding-team/homescreen-themes/`
 | 38 | Local Videos tab | `local-videos/` (001–004) |
 | 39 | Local Videos TMDb scraping | `local-videos-scraping/` (001–006) |
 | 40 | Recently Played: Local Videos integration + cold-start nav fixes | `recently-played-widget/` (007) |
+| 41 | Plex UI bug fixes: white flash + sort/genre label mismatch | `plex-loading-flash/` (001–003), `plex-sort-restore/` (001) |
+| 42 | UI consistency cleanup: delegate style, LibraryHeader, GridCellHighlight, utils.py, async writes, incremental models | `ui-consistency-cleanup/` (001–012) |
