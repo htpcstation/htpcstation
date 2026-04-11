@@ -11,7 +11,7 @@ import ".."
 //       rightText1: keys.useGamepadLabels ? keys.pageUpLabel + "/..." : "PgUp/PgDn  Scroll"
 //       rightText2: keys.useGamepadLabels ? keys.context2Label + "  Sort" : "2  Sort"
 //   }
-//   SomeContent { anchors.top: header.bottom ... }
+//   SomeContent { anchors.top: header.contentBottom ... }
 Item {
     id: libraryHeader
 
@@ -23,7 +23,7 @@ Item {
     property string rightText3: ""
 
     // Expose the bottom of the status bar so screens can anchor content below.
-    readonly property alias bottom: statusBar.bottom
+    readonly property alias contentBottom: statusBar.bottom
 
     anchors { top: parent.top; left: parent.left; right: parent.right }
     height: root.vpx(56) + root.vpx(28)
