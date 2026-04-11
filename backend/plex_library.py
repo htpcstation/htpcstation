@@ -2354,8 +2354,6 @@ class PlexLibrary(QObject):
             self._save_libraries_cache(libraries)
 
     def _on_movies_ready(self, movies: list, total: int) -> None:
-        self._movies_loading = False
-        self.moviesLoadingChanged.emit()
         self._loading_more = False
         if self._movies_loaded == 0:
             # First page — only replace if the model doesn't already have more
@@ -2394,9 +2392,12 @@ class PlexLibrary(QObject):
                         self._worker_fetch_poster, client, movie.thumb_path, "movie", row
                     )
 
+        # Clear the loading flag after the model is fully populated so QML's
+        # empty-state guard never evaluates true while the model count is 0.
+        self._movies_loading = False
+        self.moviesLoadingChanged.emit()
+
     def _on_shows_ready(self, shows: list, total: int) -> None:
-        self._shows_loading = False
-        self.showsLoadingChanged.emit()
         self._shows_loading_more = False
         if self._shows_loaded == 0:
             # First page — only replace if the model doesn't already have more
@@ -2432,6 +2433,11 @@ class PlexLibrary(QObject):
                     self._poster_executor.submit(
                         self._worker_fetch_poster, client, show.thumb_path, "show", row
                     )
+
+        # Clear the loading flag after the model is fully populated so QML's
+        # empty-state guard never evaluates true while the model count is 0.
+        self._shows_loading = False
+        self.showsLoadingChanged.emit()
 
     def _on_artist_preview_ready(self, rating_key: str, data: object) -> None:
         self.artistPreviewReady.emit(rating_key, data)
