@@ -4,6 +4,16 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP41 — Plex UI bug fixes: white flash + sort/genre label mismatch
+
+Task briefs: `misc/coding-team/plex-loading-flash/` (001–003), `misc/coding-team/plex-sort-restore/` (001)
+
+- **Fix: LoadingOverlay white flash on every Plex library visit** — `LoadingOverlay.qml` (in `qml/components/`) only imported `QtQuick`, missing `import ".."`. The Theme singleton (registered in `qml/qmldir`) was therefore inaccessible at component creation time. Binding failures caused `delay` to coerce to `0` (int default) and `color` to stay at Qt Quick's Rectangle default (white). With `delay=0` the timer fired immediately whenever `loading=true`, producing an instant white overlay on every Plex Movies/Shows visit. Fix: add `import ".."` to `LoadingOverlay.qml`. Also reverted an incorrect opacity-fade-in workaround added to `PlexMovieGrid`/`PlexShowGrid` based on a wrong GPU-texture-eviction hypothesis.
+- **Fix: sort label and genre label mismatch after app restart** — All six Plex grid/list views (`PlexMovieGrid`, `PlexShowGrid`, `PlexMovieList`, `PlexShowList`, `PlexArtistGrid`, `PlexArtistList`) restored `_currentSort` and `_currentGenreKey` from global settings keys in `Component.onCompleted`. The backend stores sort/genre per-section key in `_section_sort`/`_section_genre` (persisted to `state.json`). These two stores could diverge, producing a status-bar label that disagreed with the actual content sort. Fix: each view now exposes a `sectionKey` property (bound to `watchScreen.selectedSectionKey` or `listenScreen._musicSectionKey`). `onSectionKeyChanged` calls `plex.getSectionSort(sectionKey)` / `plex.getSectionGenre(sectionKey)` to read the authoritative backend state. Also fixed `_currentGenreTitle` never being restored (always blank after restart): `onGenresReady` now sets it when the matching genre key is found. New backend slots: `getSectionSort(section_key)` and `getSectionGenre(section_key)` with `_SORT_MAP_REVERSE` for API-string → QML-key reverse lookup.
+- 13 new tests (`test_plex_section_sort_restore.py`). Test count unchanged from CP40 (2,410).
+
+---
+
 ## CP40 — Recently Played widget: Local Videos integration + cold-start nav fixes
 
 Task briefs: `misc/coding-team/recently-played-widget/` (007)
