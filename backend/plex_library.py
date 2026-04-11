@@ -87,6 +87,8 @@ class PlexLibraryListModel(QAbstractListModel):
 
     def set_items(self, items: list[dict]) -> None:
         """Replace the model contents. Must be called on the main thread."""
+        if items == self._items:
+            return
         self.beginResetModel()
         self._items = items
         self.endResetModel()
@@ -364,6 +366,8 @@ class PlexOnDeckModel(QAbstractListModel):
 
     def set_items(self, items: list[dict]) -> None:
         """Replace the model contents. Must be called on the main thread."""
+        if items == self._items:
+            return
         self.beginResetModel()
         self._items = items
         self.endResetModel()
@@ -442,6 +446,8 @@ class PlexArtistListModel(QAbstractListModel):
 
     def set_artists(self, artists: list[PlexArtist]) -> None:
         """Replace the model contents. Must be called on the main thread."""
+        if artists == self._artists:
+            return
         self.beginResetModel()
         self._artists = artists
         self.endResetModel()

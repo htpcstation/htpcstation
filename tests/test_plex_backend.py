@@ -979,6 +979,31 @@ class TestPlexLibraryListModel:
         model = PlexLibraryListModel()
         assert model.data(QModelIndex(), PlexLibraryListModel.TitleRole) is None
 
+    def test_set_items_noop_on_identical_data(self) -> None:
+        from backend.plex_library import PlexLibraryListModel
+
+        model = PlexLibraryListModel()
+        items = [{"title": "Movies", "type": "movie", "key": "4"}]
+        model.set_items(items)
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        model.set_items(items)
+        assert resets == [], "modelReset should not fire when data is identical"
+
+    def test_set_items_resets_on_changed_data(self) -> None:
+        from backend.plex_library import PlexLibraryListModel
+
+        model = PlexLibraryListModel()
+        model.set_items([{"title": "Movies", "type": "movie", "key": "4"}])
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        model.set_items([{"title": "TV Shows", "type": "show", "key": "3"}])
+        assert len(resets) == 1, "modelReset should fire when data changes"
+
 
 # ---------------------------------------------------------------------------
 # PlexMovieListModel
@@ -1139,6 +1164,33 @@ class TestPlexOnDeckModel:
 
         assert len(received) == 1
         assert PlexOnDeckModel.PosterLocalRole in received[0]
+
+    def test_set_items_noop_on_identical_data(self) -> None:
+        from backend.plex_library import PlexOnDeckModel
+
+        model = PlexOnDeckModel()
+        item = self._make_item()
+        model.set_items([item])
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        model.set_items([item])
+        assert resets == [], "modelReset should not fire when data is identical"
+
+    def test_set_items_resets_on_changed_data(self) -> None:
+        from backend.plex_library import PlexOnDeckModel
+
+        model = PlexOnDeckModel()
+        model.set_items([self._make_item()])
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        changed = self._make_item()
+        changed["view_offset"] = 999999
+        model.set_items([changed])
+        assert len(resets) == 1, "modelReset should fire when data changes"
 
 
 # ---------------------------------------------------------------------------

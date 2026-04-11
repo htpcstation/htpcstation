@@ -7,6 +7,7 @@ Ships built-in defaults for ~190 retro systems using Knulli/Batocera folder nami
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,8 @@ _DEFAULT_RETROARCH_COMMAND = "flatpak run org.libretro.RetroArch"
 _DEFAULT_CORES_DIRECTORY = "~/.var/app/org.libretro.RetroArch/config/retroarch/cores"
 _DEFAULT_BROWSER_COMMAND = "flatpak run com.brave.Browser"
 _DEFAULT_MOONLIGHT_COMMAND = "flatpak run com.moonlight_stream.Moonlight"
+
+_write_executor = ThreadPoolExecutor(max_workers=1)
 
 SYSTEM_DEFAULTS: dict[str, dict] = {
     # ── Already present (do not change) ──────────────────────────────────────
@@ -1150,10 +1153,14 @@ class Config:
                     return
             except (OSError, json.JSONDecodeError):
                 pass  # can't read existing file — proceed with save
-        try:
-            save_json(CONFIG_FILE, data)
-        except OSError as exc:
-            logger.warning("Config.save: could not write %s: %s", CONFIG_FILE, exc)
+
+        def _do_write(d=data):
+            try:
+                save_json(CONFIG_FILE, d)
+            except OSError as exc:
+                logger.warning("Config.save: could not write %s: %s", CONFIG_FILE, exc)
+
+        _write_executor.submit(_do_write)
 
     # ------------------------------------------------------------------
     # Internal helpers

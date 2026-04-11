@@ -668,6 +668,31 @@ class TestPlexArtistListModel:
         idx = model.index(0, 0)
         assert model.data(idx, PlexArtistListModel.TitleRole) == "Second"
 
+    def test_set_artists_noop_on_identical_data(self) -> None:
+        from backend.plex_library import PlexArtistListModel
+
+        model = PlexArtistListModel()
+        artists = [self._make_artist("1", "First"), self._make_artist("2", "Second")]
+        model.set_artists(artists)
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        model.set_artists(artists)
+        assert resets == [], "modelReset should not fire when artists are identical"
+
+    def test_set_artists_resets_on_changed_data(self) -> None:
+        from backend.plex_library import PlexArtistListModel
+
+        model = PlexArtistListModel()
+        model.set_artists([self._make_artist("1", "First")])
+
+        resets: list[None] = []
+        model.modelReset.connect(lambda: resets.append(None))
+
+        model.set_artists([self._make_artist("2", "Changed")])
+        assert len(resets) == 1, "modelReset should fire when artists change"
+
 
 # ---------------------------------------------------------------------------
 # PlexLibrary.artistsModel property

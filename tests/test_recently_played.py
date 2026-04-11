@@ -36,6 +36,20 @@ def redirect_history_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pa
     return history_path
 
 
+class _SyncExecutor:
+    """Synchronous stand-in for ThreadPoolExecutor used in tests."""
+
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def sync_write_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the background write executor with a synchronous shim so that
+    disk-persistence tests are deterministic and do not race."""
+    monkeypatch.setattr(rp_module, "_write_executor", _SyncExecutor())
+
+
 @pytest.fixture()
 def manager() -> RecentlyPlayedManager:
     return RecentlyPlayedManager()

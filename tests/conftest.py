@@ -16,9 +16,31 @@ from PySide6.QtCore import QCoreApplication
 # Import once at module level to avoid repeated import lookups in the autouse fixture.
 from unittest.mock import MagicMock, patch
 
+import backend.config as _config_module
 import backend.plex_library as _plex_lib_module
 import backend.live_tv_library as _live_tv_lib_module
 from backend.plex_library import PlexLibrary as _PlexLibrary
+
+
+class _SyncExecutor:
+    """Synchronous stand-in for ThreadPoolExecutor used in tests.
+
+    Calling .submit(fn, *args, **kwargs) runs fn immediately on the calling
+    thread, making disk-persistence tests deterministic.
+    """
+
+    def submit(self, fn, *args, **kwargs):
+        fn(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def sync_config_write_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace Config's background write executor with a synchronous shim.
+
+    Ensures that Config.save() completes before the test continues, so
+    save/reload round-trip tests remain deterministic.
+    """
+    monkeypatch.setattr(_config_module, "_write_executor", _SyncExecutor())
 
 
 @pytest.fixture(scope="session", autouse=True)

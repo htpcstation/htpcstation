@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -43,6 +44,8 @@ _RECENT_COUNT = 5
 
 # Module-level path so tests can monkeypatch it.
 _HISTORY_PATH = CONFIG_DIR / "recently_played.json"
+
+_write_executor = ThreadPoolExecutor(max_workers=1)
 
 
 def _now_utc() -> str:
@@ -97,7 +100,7 @@ class RecentlyPlayedManager(QObject):
         self._entries.insert(0, entry)
         self._entries = self._entries[:_MAX_ENTRIES]
 
-        self._save()
+        _write_executor.submit(self._save)
         self.changed.emit()
 
     @Slot(result="QVariantList")
