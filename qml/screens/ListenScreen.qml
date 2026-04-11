@@ -1169,7 +1169,7 @@ FocusScope {
                 id: recentAlbumDelegate
 
                 width: recentAlbumsList.width
-                height: root.vpx(64)
+                height: root.vpx(96)
 
                 // Highlight background for focused item
                 Rectangle {
@@ -1189,48 +1189,93 @@ FocusScope {
                     }
                 }
 
-                // ── Album title, artist, and year ────────────────────────
-                Column {
+                // ── Album art thumbnail + title, artist, and year ────────
+                Row {
                     anchors {
                         left: parent.left
                         right: parent.right
-                        leftMargin: root.vpx(16)
-                        rightMargin: root.vpx(16)
+                        leftMargin: root.vpx(8)
+                        rightMargin: root.vpx(8)
                         verticalCenter: parent.verticalCenter
                     }
-                    spacing: root.vpx(4)
+                    spacing: root.vpx(12)
 
-                    Text {
-                        width: parent.width
-                        text: modelData.title || ""
-                        color: recentAlbumDelegate.ListView.isCurrentItem
-                            ? Theme.colorText
-                            : Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeBody)
-                        elide: Text.ElideRight
-                        wrapMode: Text.NoWrap
+                    // Album art thumbnail
+                    Item {
+                        width: root.vpx(80)
+                        height: root.vpx(80)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            color: Qt.darker(Theme.colorSecondary, 1.4)
+                            radius: root.vpx(Theme.focusRingRadius)
+                            visible: recentAlbumArt.status !== Image.Ready || !modelData.posterLocal
+
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - root.vpx(8)
+                                text: modelData.title || ""
+                                color: Theme.colorTextDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                wrapMode: Text.Wrap
+                                horizontalAlignment: Text.AlignHCenter
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        Image {
+                            id: recentAlbumArt
+                            anchors.fill: parent
+                            source: modelData.posterLocal || ""
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            sourceSize.width: root.vpx(80)
+                            sourceSize.height: root.vpx(80)
+                            visible: status === Image.Ready && modelData.posterLocal
+                            clip: true
+                        }
                     }
 
-                    Text {
-                        width: parent.width
-                        text: modelData.parentTitle || ""
-                        color: Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                        elide: Text.ElideRight
-                        wrapMode: Text.NoWrap
-                    }
+                    // Album title, artist, and year
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: root.vpx(4)
+                        width: parent.width - root.vpx(80) - root.vpx(12)
 
-                    Text {
-                        width: parent.width
-                        text: modelData.year > 0 ? "" + modelData.year : ""
-                        color: Theme.colorTextDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
-                        elide: Text.ElideRight
-                        wrapMode: Text.NoWrap
-                        visible: modelData.year > 0
+                        Text {
+                            width: parent.width
+                            text: modelData.title || ""
+                            color: recentAlbumDelegate.ListView.isCurrentItem
+                                ? Theme.colorText
+                                : Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: modelData.parentTitle || ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: modelData.year > 0 ? "" + modelData.year : ""
+                            color: Theme.colorTextDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                            elide: Text.ElideRight
+                            wrapMode: Text.NoWrap
+                            visible: modelData.year > 0
+                        }
                     }
                 }
 
