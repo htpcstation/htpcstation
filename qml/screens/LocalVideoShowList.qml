@@ -55,7 +55,7 @@ FocusScope {
         id: contentArea
 
         anchors {
-            top: header.contentBottom
+            top: header.bottom
             left: parent.left
             right: parent.right
             bottom: parent.bottom
