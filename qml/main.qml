@@ -33,9 +33,9 @@ ApplicationWindow {
     // Show the controller mapping dialog (called by SettingsScreen).
     function showControllerMapping() {
         if (_mappingDialogCooldown) return
-        controllerMappingDialog.visible = true
-        controllerMappingDialog.forceActiveFocus()
-        controllerMappingDialog.start()
+        controllerMappingLoader.active = true
+        // forceActiveFocus() and start() are called in Loader.onLoaded
+        // (item may not be ready synchronously after setting active).
     }
 
     // When the window regains focus after Alt+Tab, re-deliver focus to the
@@ -56,35 +56,49 @@ ApplicationWindow {
 
         onRequestQuit: {
             _savedFocusItem = root.activeFocusItem
-            quitDialog.visible = true
-            quitDialog.forceActiveFocus()
+            quitDialogLoader.active = true
+            // forceActiveFocus() is called in quitDialogLoader.onLoaded
         }
 
         onShowControllerMapping: root.showControllerMapping()
     }
 
-    QuitDialog {
-        id: quitDialog
+    Loader {
+        id: quitDialogLoader
         anchors.fill: parent
-        visible: false
+        active: false
+        sourceComponent: QuitDialog {
+            anchors.fill: parent
 
-        onQuit: Qt.quit()
+            onQuit: Qt.quit()
 
-        onCancel: {
-            quitDialog.visible = false
-            if (_savedFocusItem) _savedFocusItem.forceActiveFocus()
-            else homeScreen.forceActiveFocus()
+            onCancel: {
+                quitDialogLoader.active = false
+                if (_savedFocusItem) _savedFocusItem.forceActiveFocus()
+                else homeScreen.forceActiveFocus()
+            }
         }
+
+        onLoaded: item.forceActiveFocus()
     }
 
-    ControllerMappingDialog {
-        id: controllerMappingDialog
+    Loader {
+        id: controllerMappingLoader
         anchors.fill: parent
-        visible: false
+        active: false
+        sourceComponent: ControllerMappingDialog {
+            anchors.fill: parent
 
-        onClosed: {
-            root._mappingDialogCooldown = true
-            mappingCloseTimer.restart()
+            onClosed: {
+                root._mappingDialogCooldown = true
+                mappingCloseTimer.restart()
+                controllerMappingLoader.active = false
+            }
+        }
+
+        onLoaded: {
+            item.forceActiveFocus()
+            item.start()
         }
     }
 

@@ -273,294 +273,323 @@ FocusScope {
     // ── Sort/Filter overlay ───────────────────────────────────────────────────
     //
     // Sections: 0 = sort, 1 = view (no genre section for shows)
-    FocusScope {
+    //
+    // Loaded lazily: the FocusScope is not instantiated until the first time
+    // the user opens the overlay. The Loader exposes open() and close()
+    // so call sites in this file are unchanged.
+    Loader {
         id: sortFilterOverlay
-
         anchors.fill: parent
-        visible: false
-        enabled: visible
+        active: false
 
-        // 0 = sort row focused, 1 = view row focused
-        property int _section: 0
-        property int _sortIndex: 0
-        property int _viewIndex: 0
-
-        readonly property var _sortOptions: [
-            { key: "az",        label: "A-Z" },
-            { key: "za",        label: "Z-A" },
-            { key: "year_desc", label: "Year ↓" },
-            { key: "year_asc",  label: "Year ↑" }
-        ]
-
+        // Open: initialise overlay state then activate the Loader.
+        // forceActiveFocus() is called in onLoaded once the item exists.
         function open() {
-            var sortKeys = ["az", "za", "year_desc", "year_asc"]
-            var si = sortKeys.indexOf(showGridView._currentSort)
-            _sortIndex = si >= 0 ? si : 0
-
-            var viewKeys = ["grid", "list"]
-            var vi = viewKeys.indexOf(showGridView._viewMode)
-            _viewIndex = vi >= 0 ? vi : 0
-
-            _section = 0
-            visible = true
-            forceActiveFocus()
+            // Capture current state into properties that the Component reads
+            // via the Loader's item after it is created.
+            sortFilterOverlay._pendingSort = showGridView._currentSort
+            sortFilterOverlay._pendingView = showGridView._viewMode
+            active = true
         }
 
+        // Close: deactivate (destroys the FocusScope) and restore grid focus.
         function close() {
-            visible = false
+            active = false
             showGrid.forceActiveFocus()
         }
 
-        // ── Backdrop ─────────────────────────────────────────────────────────
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.colorImagePlaceholder
-            opacity: 0.55
-        }
+        // Transient properties used to pass initial state into the component.
+        property string _pendingSort: ""
+        property string _pendingView: ""
 
-        // ── Panel ─────────────────────────────────────────────────────────────
-        Rectangle {
-            id: overlayPanel
+        onLoaded: item.forceActiveFocus()
 
-            anchors {
-                top: parent.top
-                left: parent.left
-                right: parent.right
-            }
-            height: viewOptionsRow.y + viewOptionsRow.height + root.vpx(16)
-            color: Theme.colorSecondary
-            opacity: 0.97
+        sourceComponent: Component {
+            FocusScope {
+                id: overlay
 
-            // ── Panel title ──────────────────────────────────────────────────
-            Text {
-                id: panelTitle
-                anchors {
-                    top: parent.top
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    topMargin: root.vpx(10)
+                anchors.fill: parent
+                // enabled mirrors existence: the item only exists while active,
+                // so we do not need a separate enabled: visible guard.
+
+                // 0 = sort row focused, 1 = view row focused
+                property int _section: 0
+                property int _sortIndex: 0
+                property int _viewIndex: 0
+
+                readonly property var _sortOptions: [
+                    { key: "az",        label: "A-Z" },
+                    { key: "za",        label: "Z-A" },
+                    { key: "year_desc", label: "Year ↓" },
+                    { key: "year_asc",  label: "Year ↑" }
+                ]
+
+                Component.onCompleted: {
+                    // Initialise selection state from the pending values
+                    // stored on the Loader before activation.
+                    var sortKeys = ["az", "za", "year_desc", "year_asc"]
+                    var si = sortKeys.indexOf(sortFilterOverlay._pendingSort)
+                    _sortIndex = si >= 0 ? si : 0
+
+                    var viewKeys = ["grid", "list"]
+                    var vi = viewKeys.indexOf(sortFilterOverlay._pendingView)
+                    _viewIndex = vi >= 0 ? vi : 0
+
+                    _section = 0
                 }
-                text: "Sort / Filter"
-                color: Theme.colorText
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeHeading)
-            }
 
-            Text {
-                anchors {
-                    top: parent.top
-                    right: parent.right
-                    rightMargin: root.vpx(16)
-                    topMargin: root.vpx(14)
+                // ── Backdrop ─────────────────────────────────────────────────
+                Rectangle {
+                    anchors.fill: parent
+                    color: Theme.colorImagePlaceholder
+                    opacity: 0.55
                 }
-                text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
-                color: Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
 
-            // ── Divider ──────────────────────────────────────────────────────
-            Rectangle {
-                id: divider
-                anchors {
-                    top: panelTitle.bottom
-                    left: parent.left
-                    right: parent.right
-                    topMargin: root.vpx(8)
-                }
-                height: root.vpx(1)
-                color: Theme.colorTextDim
-                opacity: 0.3
-            }
+                // ── Panel ─────────────────────────────────────────────────────
+                Rectangle {
+                    id: overlayPanel
 
-            // ── Sort section label ────────────────────────────────────────────
-            Text {
-                id: sortLabel
-                anchors {
-                    top: divider.bottom
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    topMargin: root.vpx(8)
-                }
-                text: "Sort"
-                color: sortFilterOverlay._section === 0 ? Theme.colorText : Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
+                    anchors {
+                        top: parent.top
+                        left: parent.left
+                        right: parent.right
+                    }
+                    height: viewOptionsRow.y + viewOptionsRow.height + root.vpx(16)
+                    color: Theme.colorSecondary
+                    opacity: 0.97
 
-            // ── Sort options row ──────────────────────────────────────────────
-            Row {
-                id: sortOptionsRow
-                anchors {
-                    top: sortLabel.bottom
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    topMargin: root.vpx(4)
-                }
-                spacing: root.vpx(6)
-
-                Repeater {
-                    model: sortFilterOverlay._sortOptions
-
-                    delegate: Rectangle {
-                        width: root.vpx(72)
-                        height: root.vpx(32)
-                        color: {
-                            var isFocused = sortFilterOverlay._section === 0
-                                         && sortFilterOverlay._sortIndex === index
-                            return isFocused ? Theme.colorPrimary : "transparent"
+                    // ── Panel title ──────────────────────────────────────────
+                    Text {
+                        id: panelTitle
+                        anchors {
+                            top: parent.top
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            topMargin: root.vpx(10)
                         }
-                        radius: root.vpx(Theme.focusRingRadius)
+                        text: "Sort / Filter"
+                        color: Theme.colorText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                    }
 
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.animDurationFast }
+                    Text {
+                        anchors {
+                            top: parent.top
+                            right: parent.right
+                            rightMargin: root.vpx(16)
+                            topMargin: root.vpx(14)
                         }
+                        text: keys.useGamepadLabels ? keys.cancelLabel + " / " + keys.context2Label + "  Close" : "Esc / 2  Close"
+                        color: Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    }
 
-                        Text {
-                            anchors {
-                                left: parent.left
-                                leftMargin: root.vpx(6)
-                                verticalCenter: parent.verticalCenter
+                    // ── Divider ──────────────────────────────────────────────
+                    Rectangle {
+                        id: divider
+                        anchors {
+                            top: panelTitle.bottom
+                            left: parent.left
+                            right: parent.right
+                            topMargin: root.vpx(8)
+                        }
+                        height: root.vpx(1)
+                        color: Theme.colorTextDim
+                        opacity: 0.3
+                    }
+
+                    // ── Sort section label ────────────────────────────────────
+                    Text {
+                        id: sortLabel
+                        anchors {
+                            top: divider.bottom
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            topMargin: root.vpx(8)
+                        }
+                        text: "Sort"
+                        color: overlay._section === 0 ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    }
+
+                    // ── Sort options row ──────────────────────────────────────
+                    Row {
+                        id: sortOptionsRow
+                        anchors {
+                            top: sortLabel.bottom
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            topMargin: root.vpx(4)
+                        }
+                        spacing: root.vpx(6)
+
+                        Repeater {
+                            model: overlay._sortOptions
+
+                            delegate: Rectangle {
+                                width: root.vpx(72)
+                                height: root.vpx(32)
+                                color: {
+                                    var isFocused = overlay._section === 0
+                                                 && overlay._sortIndex === index
+                                    return isFocused ? Theme.colorPrimary : "transparent"
+                                }
+                                radius: root.vpx(Theme.focusRingRadius)
+
+                                Behavior on color {
+                                    ColorAnimation { duration: Theme.animDurationFast }
+                                }
+
+                                Text {
+                                    anchors {
+                                        left: parent.left
+                                        leftMargin: root.vpx(6)
+                                        verticalCenter: parent.verticalCenter
+                                    }
+                                    text: {
+                                        var isActive = modelData.key === showGridView._currentSort
+                                        return (isActive ? "✓ " : "") + modelData.label
+                                    }
+                                    color: {
+                                        var isFocused = overlay._section === 0
+                                                     && overlay._sortIndex === index
+                                        return isFocused ? Theme.colorOverlayText : Theme.colorText
+                                    }
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                }
                             }
-                            text: {
-                                var isActive = modelData.key === showGridView._currentSort
-                                return (isActive ? "✓ " : "") + modelData.label
+                        }
+                    }
+
+                    // ── View section label ────────────────────────────────────
+                    Text {
+                        id: viewLabel
+                        anchors {
+                            top: sortOptionsRow.bottom
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            topMargin: root.vpx(10)
+                        }
+                        text: "View"
+                        color: overlay._section === 1 ? Theme.colorText : Theme.colorTextDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    }
+
+                    // ── View options row ──────────────────────────────────────
+                    Row {
+                        id: viewOptionsRow
+                        anchors {
+                            top: viewLabel.bottom
+                            left: parent.left
+                            leftMargin: root.vpx(16)
+                            topMargin: root.vpx(4)
+                        }
+                        spacing: root.vpx(8)
+
+                        Repeater {
+                            model: [
+                                { key: "grid", label: "Grid" },
+                                { key: "list", label: "List" }
+                            ]
+
+                            delegate: Rectangle {
+                                width: root.vpx(80)
+                                height: root.vpx(32)
+                                color: overlay._section === 1
+                                       && overlay._viewIndex === index
+                                       ? Theme.colorPrimary
+                                       : "transparent"
+                                radius: root.vpx(Theme.focusRingRadius)
+
+                                Behavior on color {
+                                    ColorAnimation { duration: Theme.animDurationFast }
+                                }
+
+                                Text {
+                                    anchors {
+                                        left: parent.left
+                                        leftMargin: root.vpx(6)
+                                        verticalCenter: parent.verticalCenter
+                                    }
+                                    text: {
+                                        var isActive = modelData.key === showGridView._viewMode
+                                        return (isActive ? "✓ " : "") + modelData.label
+                                    }
+                                    color: overlay._section === 1
+                                           && overlay._viewIndex === index
+                                           ? Theme.colorOverlayText
+                                           : Theme.colorText
+                                    font.family: Theme.fontFamily
+                                    font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                                }
                             }
-                            color: {
-                                var isFocused = sortFilterOverlay._section === 0
-                                             && sortFilterOverlay._sortIndex === index
-                                return isFocused ? Theme.colorOverlayText : Theme.colorText
-                            }
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
                         }
                     }
                 }
-            }
 
-            // ── View section label ────────────────────────────────────────────
-            Text {
-                id: viewLabel
-                anchors {
-                    top: sortOptionsRow.bottom
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    topMargin: root.vpx(10)
-                }
-                text: "View"
-                color: sortFilterOverlay._section === 1 ? Theme.colorText : Theme.colorTextDim
-                font.family: Theme.fontFamily
-                font.pixelSize: root.vpx(Theme.fontSizeSmall)
-            }
+                // ── Key handling ─────────────────────────────────────────────
+                Keys.onPressed: (event) => {
+                    var sortCount = overlay._sortOptions.length
+                    var viewCount = 2
 
-            // ── View options row ──────────────────────────────────────────────
-            Row {
-                id: viewOptionsRow
-                anchors {
-                    top: viewLabel.bottom
-                    left: parent.left
-                    leftMargin: root.vpx(16)
-                    topMargin: root.vpx(4)
-                }
-                spacing: root.vpx(8)
+                    if (keys.isCancel(event) || keys.isContext2(event)) {
+                        event.accepted = true
+                        sortFilterOverlay.close()
 
-                Repeater {
-                    model: [
-                        { key: "grid", label: "Grid" },
-                        { key: "list", label: "List" }
-                    ]
+                    } else if (event.key === Qt.Key_Up) {
+                        event.accepted = true
+                        if (overlay._section > 0)
+                            overlay._section -= 1
 
-                    delegate: Rectangle {
-                        width: root.vpx(80)
-                        height: root.vpx(32)
-                        color: sortFilterOverlay._section === 1
-                               && sortFilterOverlay._viewIndex === index
-                               ? Theme.colorPrimary
-                               : "transparent"
-                        radius: root.vpx(Theme.focusRingRadius)
+                    } else if (event.key === Qt.Key_Down) {
+                        event.accepted = true
+                        if (overlay._section < 1)
+                            overlay._section += 1
 
-                        Behavior on color {
-                            ColorAnimation { duration: Theme.animDurationFast }
+                    } else if (event.key === Qt.Key_Left) {
+                        event.accepted = true
+                        if (overlay._section === 0) {
+                            if (overlay._sortIndex > 0)
+                                overlay._sortIndex -= 1
+                        } else {
+                            if (overlay._viewIndex > 0)
+                                overlay._viewIndex -= 1
                         }
 
-                        Text {
-                            anchors {
-                                left: parent.left
-                                leftMargin: root.vpx(6)
-                                verticalCenter: parent.verticalCenter
-                            }
-                            text: {
-                                var isActive = modelData.key === showGridView._viewMode
-                                return (isActive ? "✓ " : "") + modelData.label
-                            }
-                            color: sortFilterOverlay._section === 1
-                                   && sortFilterOverlay._viewIndex === index
-                                   ? Theme.colorOverlayText
-                                   : Theme.colorText
-                            font.family: Theme.fontFamily
-                            font.pixelSize: root.vpx(Theme.fontSizeSmall)
+                    } else if (event.key === Qt.Key_Right) {
+                        event.accepted = true
+                        if (overlay._section === 0) {
+                            if (overlay._sortIndex < sortCount - 1)
+                                overlay._sortIndex += 1
+                        } else {
+                            if (overlay._viewIndex < viewCount - 1)
+                                overlay._viewIndex += 1
+                        }
+
+                    } else if (keys.isAccept(event)) {
+                        event.accepted = true
+
+                        // Apply sort
+                        var newSort = overlay._sortOptions[overlay._sortIndex].key
+                        showGridView._currentSort = newSort
+                        if (localVideos) localVideos.sortShows(newSort)
+
+                        // Apply view mode
+                        var viewKeys = ["grid", "list"]
+                        var newView = viewKeys[overlay._viewIndex]
+                        if (newView !== showGridView._viewMode) {
+                            sortFilterOverlay.close()  // close() is fine here — viewModeChanged replaces the screen, superseding any focus restore
+                            if (settings) settings.setLocalVideoViewMode(newView)
+                            showGridView.viewModeChanged(newView)
+                        } else {
+                            sortFilterOverlay.close()
                         }
                     }
-                }
-            }
-        }
-
-        // ── Key handling ─────────────────────────────────────────────────────
-        Keys.onPressed: (event) => {
-            var sortCount = sortFilterOverlay._sortOptions.length
-            var viewCount = 2
-
-            if (keys.isCancel(event) || keys.isContext2(event)) {
-                event.accepted = true
-                sortFilterOverlay.close()
-
-            } else if (event.key === Qt.Key_Up) {
-                event.accepted = true
-                if (sortFilterOverlay._section > 0)
-                    sortFilterOverlay._section -= 1
-
-            } else if (event.key === Qt.Key_Down) {
-                event.accepted = true
-                if (sortFilterOverlay._section < 1)
-                    sortFilterOverlay._section += 1
-
-            } else if (event.key === Qt.Key_Left) {
-                event.accepted = true
-                if (sortFilterOverlay._section === 0) {
-                    if (sortFilterOverlay._sortIndex > 0)
-                        sortFilterOverlay._sortIndex -= 1
-                } else {
-                    if (sortFilterOverlay._viewIndex > 0)
-                        sortFilterOverlay._viewIndex -= 1
-                }
-
-            } else if (event.key === Qt.Key_Right) {
-                event.accepted = true
-                if (sortFilterOverlay._section === 0) {
-                    if (sortFilterOverlay._sortIndex < sortCount - 1)
-                        sortFilterOverlay._sortIndex += 1
-                } else {
-                    if (sortFilterOverlay._viewIndex < viewCount - 1)
-                        sortFilterOverlay._viewIndex += 1
-                }
-
-            } else if (keys.isAccept(event)) {
-                event.accepted = true
-
-                // Apply sort
-                var newSort = sortFilterOverlay._sortOptions[sortFilterOverlay._sortIndex].key
-                showGridView._currentSort = newSort
-                if (localVideos) localVideos.sortShows(newSort)
-
-                // Apply view mode
-                var viewKeys = ["grid", "list"]
-                var newView = viewKeys[sortFilterOverlay._viewIndex]
-                if (newView !== showGridView._viewMode) {
-                    sortFilterOverlay.visible = false
-                    if (settings) settings.setLocalVideoViewMode(newView)
-                    showGridView.viewModeChanged(newView)
-                } else {
-                    sortFilterOverlay.close()
                 }
             }
         }
