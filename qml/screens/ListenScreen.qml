@@ -548,6 +548,7 @@ FocusScope {
         loading: listenScreen._loading
         noLibrary: listenScreen._noLibrary
         _viewMode: listenScreen._viewMode
+        sectionKey: listenScreen._musicSectionKey
         onBack: listenScreen.currentView = "menu"
         onArtistSelected: (ratingKey) => {
             listenScreen._selectedArtistKey = ratingKey
@@ -565,6 +566,7 @@ FocusScope {
         loading: listenScreen._loading
         noLibrary: listenScreen._noLibrary
         _viewMode: listenScreen._viewMode
+        sectionKey: listenScreen._musicSectionKey
         onBack: listenScreen.currentView = "menu"
         onArtistSelected: (ratingKey) => {
             listenScreen._selectedArtistKey = ratingKey

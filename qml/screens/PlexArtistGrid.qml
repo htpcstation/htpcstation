@@ -27,6 +27,14 @@ FocusScope {
     property string _currentSort: ""
     property string _viewMode: "grid"
 
+    // Section key for per-section sort restore (set by ListenScreen).
+    property string sectionKey: ""
+
+    onSectionKeyChanged: {
+        if (!plex || !sectionKey) return
+        _currentSort = plex.getSectionSort(sectionKey)
+    }
+
     // Loading / library state (bound from ListenScreen)
     property bool loading: false
     property bool noLibrary: false
@@ -652,14 +660,4 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: {
-        if (settings) {
-            var savedSort = settings.sortPlexArtists
-            if (savedSort) {
-                _currentSort = savedSort
-                if (plex) plex.sortArtists(savedSort)
-            }
-            // _viewMode is bound from ListenScreen; do not overwrite here.
-        }
-    }
 }

@@ -994,6 +994,19 @@ class PlexLibrary(QObject):
         "rating":    "audienceRating:desc",
     }
 
+    _SORT_MAP_REVERSE: dict[str, str] = {v: k for k, v in _SORT_MAP.items()}
+
+    @Slot(str, result=str)
+    def getSectionSort(self, section_key: str) -> str:
+        """Return the QML sort key for the given section ('' = default order)."""
+        api_sort = self._section_sort.get(section_key, "")
+        return self._SORT_MAP_REVERSE.get(api_sort, "")
+
+    @Slot(str, result=str)
+    def getSectionGenre(self, section_key: str) -> str:
+        """Return the stored genre key for the given section ('' = no filter)."""
+        return self._section_genre.get(section_key, "")
+
     @Slot(str)
     def sortMovies(self, sort_key: str) -> None:
         """Re-fetch movies with the given sort.

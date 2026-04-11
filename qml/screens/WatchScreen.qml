@@ -708,6 +708,7 @@ FocusScope {
 
         systemName: watchScreen.selectedLibraryTitle
         _viewMode: watchScreen._viewMode
+        sectionKey: watchScreen.selectedSectionKey
 
         onMovieSelected: (ratingKey, index) => {
             var mem = watchScreen._focusMemory
@@ -796,6 +797,7 @@ FocusScope {
 
         systemName: watchScreen.selectedLibraryTitle
         _viewMode: watchScreen._viewMode
+        sectionKey: watchScreen.selectedSectionKey
 
         onShowSelected: (ratingKey) => {
             var mem = watchScreen._focusMemory
@@ -890,6 +892,7 @@ FocusScope {
 
         systemName: watchScreen.selectedLibraryTitle
         _viewMode: watchScreen._viewMode
+        sectionKey: watchScreen.selectedSectionKey
 
         onMovieSelected: (ratingKey, index) => {
             var mem = watchScreen._focusMemory
@@ -919,6 +922,7 @@ FocusScope {
 
         systemName: watchScreen.selectedLibraryTitle
         _viewMode: watchScreen._viewMode
+        sectionKey: watchScreen.selectedSectionKey
 
         onShowSelected: (ratingKey) => {
             var mem = watchScreen._focusMemory

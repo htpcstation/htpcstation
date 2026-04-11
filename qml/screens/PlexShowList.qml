@@ -28,10 +28,20 @@ FocusScope {
     // Display name of the currently selected library (set by WatchScreen).
     property string systemName: ""
 
+    // Section key for per-section sort/genre restore (set by WatchScreen).
+    property string sectionKey: ""
+
     // ── Sort/filter state (mirrors backend state for display) ──────────────────
     property string _currentSort: ""
     property string _currentGenreKey: ""
     property string _currentGenreTitle: ""
+
+    onSectionKeyChanged: {
+        if (!plex || !sectionKey) return
+        _currentSort = plex.getSectionSort(sectionKey)
+        _currentGenreKey = plex.getSectionGenre(sectionKey)
+        _currentGenreTitle = ""   // title resolved later in onGenresReady
+    }
 
     // True while a sort/filter re-fetch is in progress
     property bool _loading: false
@@ -55,6 +65,7 @@ FocusScope {
                 for (var i = 0; i < genres.length; i++) {
                     if (genres[i].key === showListView._currentGenreKey) {
                         sortFilterOverlay._genreIndex = i + 1
+                        showListView._currentGenreTitle = genres[i].title
                         break
                     }
                 }
@@ -935,13 +946,4 @@ FocusScope {
         }
     }
 
-    Component.onCompleted: {
-        if (settings) {
-            var savedSort = settings.sortPlexShows
-            var savedGenre = settings.filterPlexShowGenre
-            if (savedSort) _currentSort = savedSort
-            if (savedGenre) _currentGenreKey = savedGenre
-            // Do NOT overwrite _viewMode — it is set by WatchScreen.
-        }
-    }
 }

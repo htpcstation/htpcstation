@@ -31,6 +31,9 @@ FocusScope {
     // Display name of the currently selected library (set by WatchScreen).
     property string systemName: ""
 
+    // Section key for per-section sort/genre restore (set by WatchScreen).
+    property string sectionKey: ""
+
     // View mode ("grid" or "list") — set by WatchScreen; do not overwrite in onCompleted
     property string _viewMode: "grid"
 
@@ -38,6 +41,13 @@ FocusScope {
     property string _currentSort: ""
     property string _currentGenreKey: ""
     property string _currentGenreTitle: ""
+
+    onSectionKeyChanged: {
+        if (!plex || !sectionKey) return
+        _currentSort = plex.getSectionSort(sectionKey)
+        _currentGenreKey = plex.getSectionGenre(sectionKey)
+        _currentGenreTitle = ""   // title resolved later in onGenresReady
+    }
 
     // True while a sort/filter re-fetch is in progress
     property bool _loading: false
@@ -59,6 +69,7 @@ FocusScope {
                 for (var i = 0; i < genres.length; i++) {
                     if (genres[i].key === movieGridView._currentGenreKey) {
                         sortFilterOverlay._genreIndex = i + 1
+                        movieGridView._currentGenreTitle = genres[i].title
                         break
                     }
                 }
@@ -865,13 +876,4 @@ FocusScope {
 
     // ── Loading overlay ───────────────────────────────────────────────────────
     LoadingOverlay { loading: plex ? plex.moviesLoading : false }
-
-    Component.onCompleted: {
-        if (settings) {
-            var savedSort = settings.sortPlexMovies
-            var savedGenre = settings.filterPlexMovieGenre
-            if (savedSort) _currentSort = savedSort
-            if (savedGenre) _currentGenreKey = savedGenre
-        }
-    }
 }
