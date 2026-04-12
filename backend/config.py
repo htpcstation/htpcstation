@@ -422,6 +422,21 @@ class Config:
         # TMDB configuration
         self._tmdb_api_key: str = ""
 
+        # Scraper configuration
+        self._scraper_overwrite: bool = False
+        self._scraper_enabled_sources: list[str] = [
+            "screenscraper", "emumovies", "thegamesdb", "mobygames", "igdb", "retroachievements"
+        ]
+        # Credentials dict: source_name → {field: value}
+        self._scraper_credentials: dict[str, dict] = {
+            "screenscraper":       {"devid": "", "devpassword": "", "username": "", "password": ""},
+            "emumovies":           {"username": "", "password": ""},
+            "thegamesdb":          {"api_key": ""},
+            "mobygames":           {"api_key": ""},
+            "igdb":                {"client_id": "", "client_secret": ""},
+            "retroachievements":   {"username": "", "api_key": ""},
+        }
+
         # Sort preferences
         self._retro_favorites_on_top: bool = True
         self._retro_sort_per_system: dict[str, str] = {}
@@ -713,6 +728,44 @@ class Config:
     def set_tmdb_api_key(self, key: str) -> None:
         """Set the TMDB API key and persist the config."""
         self._tmdb_api_key = key.strip()
+        self.save()
+
+    # ------------------------------------------------------------------
+    # Scraper properties
+    # ------------------------------------------------------------------
+
+    @property
+    def scraper_overwrite(self) -> bool:
+        """Whether the scraper overwrites existing metadata. Defaults to False."""
+        return self._scraper_overwrite
+
+    def set_scraper_overwrite(self, val: bool) -> None:
+        """Set the scraper overwrite flag and persist the config."""
+        self._scraper_overwrite = val
+        self.save()
+
+    @property
+    def scraper_enabled_sources(self) -> list[str]:
+        """Ordered list of enabled scraper source names."""
+        return list(self._scraper_enabled_sources)
+
+    def set_scraper_enabled_sources(self, sources: list[str]) -> None:
+        """Set the enabled scraper sources list and persist the config."""
+        self._scraper_enabled_sources = list(sources)
+        self.save()
+
+    @property
+    def scraper_credentials(self) -> dict:
+        """Credentials dict: source_name → {field: value}. Returns a deep copy."""
+        return {k: dict(v) for k, v in self._scraper_credentials.items()}
+
+    def set_scraper_credential(self, source: str, key: str, value: str) -> None:
+        """Set one credential field and save.  No-op if source or key is unknown."""
+        if source not in self._scraper_credentials:
+            return
+        if key not in self._scraper_credentials[source]:
+            return
+        self._scraper_credentials[source][key] = value
         self.save()
 
     def set_rom_directory(self, path: "str | Path") -> None:
@@ -1073,10 +1126,16 @@ class Config:
 
     def save(self) -> None:
         """Write the current configuration to ``config.json``."""
+        # Snapshot module-level paths so the write executor closure uses the value
+        # that was active when save() was called (important for test isolation: tests
+        # patch these at the module level, but the executor may run after the patch exits).
+        _config_file = CONFIG_FILE
+        _config_dir  = CONFIG_DIR
+
         try:
             ensure_config_dir()
         except OSError as exc:
-            logger.warning("Config.save: could not create config dir %s: %s", CONFIG_DIR, exc)
+            logger.warning("Config.save: could not create config dir %s: %s", _config_dir, exc)
             return
         data: dict = {
             "rom_directory": str(self.rom_directory) if self.rom_directory else "",
@@ -1165,11 +1224,16 @@ class Config:
             "tmdb": {
                 "api_key": self._tmdb_api_key,
             },
+            "scraper": {
+                "overwrite": self._scraper_overwrite,
+                "enabled_sources": list(self._scraper_enabled_sources),
+                **{src: dict(creds) for src, creds in self._scraper_credentials.items()},
+            },
         }
         # Safety guard: never overwrite a config that has credentials with a blank one.
-        if CONFIG_FILE.exists() and not self._plex_token and not self._plex_server_id:
+        if _config_file.exists() and not self._plex_token and not self._plex_server_id:
             try:
-                existing = load_json(CONFIG_FILE)
+                existing = load_json(_config_file)
                 if existing.get("plex", {}).get("token") or existing.get("plex", {}).get("server_id"):
                     logger.error(
                         "Config.save: refusing to overwrite config with credentials "
@@ -1179,11 +1243,11 @@ class Config:
             except (OSError, json.JSONDecodeError):
                 pass  # can't read existing file — proceed with save
 
-        def _do_write(d=data):
+        def _do_write(d=data, cf=_config_file):
             try:
-                save_json(CONFIG_FILE, d)
+                save_json(cf, d)
             except OSError as exc:
-                logger.warning("Config.save: could not write %s: %s", CONFIG_FILE, exc)
+                logger.warning("Config.save: could not write %s: %s", cf, exc)
 
         _write_executor.submit(_do_write)
 
@@ -1415,6 +1479,24 @@ class Config:
         if isinstance(tmdb, dict):
             if "api_key" in tmdb:
                 self._tmdb_api_key = str(tmdb["api_key"]).strip()
+
+        # scraper section
+        scraper = raw.get("scraper", {})
+        if isinstance(scraper, dict):
+            if "overwrite" in scraper:
+                self._scraper_overwrite = bool(scraper["overwrite"])
+            if "enabled_sources" in scraper and isinstance(scraper["enabled_sources"], list):
+                self._scraper_enabled_sources = [
+                    str(s) for s in scraper["enabled_sources"]
+                ]
+            # Credentials: iterate only known sources and update only known keys
+            for src, defaults in self._scraper_credentials.items():
+                src_data = scraper.get(src)
+                if not isinstance(src_data, dict):
+                    continue
+                for key in defaults:
+                    if key in src_data:
+                        self._scraper_credentials[src][key] = str(src_data[key])
 
 
 def ensure_config_dir() -> None:

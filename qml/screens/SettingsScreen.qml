@@ -34,6 +34,9 @@ FocusScope {
     // ── Tab / sub-category indices ───────────────────────────────────────────
     property int _activeTabIndex: 0
 
+    // ── Scraper: session-only system selection (not persisted) ───────────────
+    property string _scraperSelectedSystem: ""
+
     // ── Tabs data model ──────────────────────────────────────────────────────
     readonly property var _tabs: [
         {
@@ -66,6 +69,64 @@ FocusScope {
                         { type: "text",    label: "Moonlight Command", settingKey: "moonlightCommand" },
                         { type: "select",  label: "Host",              settingKey: "moonlightHost" },
                         { type: "button",  label: "Open Moonlight",    action: "openMoonlight" },
+                    ]
+                },
+                {
+                    name: "Global",
+                    settings: [
+                        { type: "toggle", label: "Overwrite Existing Data", settingKey: "scraperOverwrite" },
+                        { type: "select", label: "System",                  settingKey: "scraperSelectedSystem" },
+                        { type: "button", label: "Scrape Selected System",  action: "scrapeSelectedSystem" },
+                        { type: "button", label: "Scrape All Systems",      action: "scrapeAll" },
+                        { type: "button", label: "Cancel Scrape",           action: "cancelScrape" },
+                    ]
+                },
+                {
+                    name: "ScreenScraper",
+                    settings: [
+                        { type: "toggle", label: "Enabled",            settingKey: "scraperEnabled_screenscraper" },
+                        { type: "text",   label: "Developer ID",       settingKey: "scraperCred_screenscraper_devid" },
+                        { type: "text",   label: "Developer Password", settingKey: "scraperCred_screenscraper_devpassword", masked: true },
+                        { type: "text",   label: "Username",           settingKey: "scraperCred_screenscraper_username" },
+                        { type: "text",   label: "Password",           settingKey: "scraperCred_screenscraper_password", masked: true },
+                    ]
+                },
+                {
+                    name: "EmuMovies",
+                    settings: [
+                        { type: "toggle", label: "Enabled",  settingKey: "scraperEnabled_emumovies" },
+                        { type: "text",   label: "Username", settingKey: "scraperCred_emumovies_username" },
+                        { type: "text",   label: "Password", settingKey: "scraperCred_emumovies_password", masked: true },
+                    ]
+                },
+                {
+                    name: "TheGamesDB",
+                    settings: [
+                        { type: "toggle", label: "Enabled", settingKey: "scraperEnabled_thegamesdb" },
+                        { type: "text",   label: "API Key", settingKey: "scraperCred_thegamesdb_api_key", masked: true },
+                    ]
+                },
+                {
+                    name: "MobyGames",
+                    settings: [
+                        { type: "toggle", label: "Enabled", settingKey: "scraperEnabled_mobygames" },
+                        { type: "text",   label: "API Key", settingKey: "scraperCred_mobygames_api_key", masked: true },
+                    ]
+                },
+                {
+                    name: "IGDB",
+                    settings: [
+                        { type: "toggle", label: "Enabled",       settingKey: "scraperEnabled_igdb" },
+                        { type: "text",   label: "Client ID",     settingKey: "scraperCred_igdb_client_id" },
+                        { type: "text",   label: "Client Secret", settingKey: "scraperCred_igdb_client_secret", masked: true },
+                    ]
+                },
+                {
+                    name: "RetroAchievements",
+                    settings: [
+                        { type: "toggle", label: "Enabled",  settingKey: "scraperEnabled_retroachievements" },
+                        { type: "text",   label: "Username", settingKey: "scraperCred_retroachievements_username" },
+                        { type: "text",   label: "API Key",  settingKey: "scraperCred_retroachievements_api_key", masked: true },
                     ]
                 }
             ]
@@ -255,6 +316,24 @@ FocusScope {
             var modeMap = { "direct": "Direct Play", "auto": "Auto", "480p": "480p", "720p": "720p", "1080p": "1080p" }
             return modeMap[Settings.transcodeMode] || "Auto"
         }
+        if (key === "scraperOverwrite")      return Settings ? Settings.scraperOverwrite : false
+        if (key === "scraperSelectedSystem") return settingsScreen._scraperSelectedSystem
+        if (key.startsWith("scraperEnabled_")) {
+            var source = key.substring("scraperEnabled_".length)
+            return Settings ? Settings.scraperSourceEnabled(source) : false
+        }
+        if (key.startsWith("scraperCred_")) {
+            var knownSources = ["screenscraper","emumovies","thegamesdb","mobygames","igdb","retroachievements"]
+            var inner = key.substring("scraperCred_".length)
+            for (var si = 0; si < knownSources.length; si++) {
+                var sname = knownSources[si]
+                if (inner.startsWith(sname + "_")) {
+                    var credKey = inner.substring(sname.length + 1)
+                    return Settings ? Settings.getScraperCredential(sname, credKey) : ""
+                }
+            }
+            return ""
+        }
 
         return ""
     }
@@ -334,6 +413,23 @@ FocusScope {
         }
         else if (key === "transcodeMode") {
             Settings.setTranscodeMode(value)
+        }
+        else if (key === "scraperOverwrite")      Settings.setScraperOverwrite(value)
+        else if (key === "scraperSelectedSystem") settingsScreen._scraperSelectedSystem = value
+        else if (key.startsWith("scraperEnabled_")) {
+            var src = key.substring("scraperEnabled_".length)
+            Settings.setScraperSourceEnabled(src, value)
+        }
+        else if (key.startsWith("scraperCred_")) {
+            var knownSrcs = ["screenscraper","emumovies","thegamesdb","mobygames","igdb","retroachievements"]
+            var innerKey = key.substring("scraperCred_".length)
+            for (var si2 = 0; si2 < knownSrcs.length; si2++) {
+                var sn = knownSrcs[si2]
+                if (innerKey.startsWith(sn + "_")) {
+                    Settings.setScraperCredential(sn, innerKey.substring(sn.length + 1), value)
+                    break
+                }
+            }
         }
 
     }
@@ -637,6 +733,24 @@ FocusScope {
                         localVideos.scrapeTvShows()
                         if (settingsScreen._showToast) settingsScreen._showToast("Scraping TV shows...")
                     }
+                } else if (action === "scrapeAll") {
+                    if (retroScraper) {
+                        retroScraper.scrapeAll()
+                        settingsScreen._showToast("Scraping all systems...")
+                    }
+                } else if (action === "scrapeSelectedSystem") {
+                    var sys = settingsScreen._scraperSelectedSystem
+                    if (!sys || sys.length === 0) {
+                        settingsScreen._showToast("Select a system first")
+                        return
+                    }
+                    if (retroScraper) {
+                        retroScraper.scrapeSystem(sys)
+                        settingsScreen._showToast("Scraping " + sys + "...")
+                    }
+                } else if (action === "cancelScrape") {
+                    if (retroScraper) retroScraper.cancelScrape()
+                    settingsScreen._showToast("Cancelling...")
                 }
             }
         }
@@ -693,6 +807,10 @@ FocusScope {
                 if (rowData.settingKey === "moonlightHost") {
                     if (!Settings) return []
                     return Settings.getHostsList()
+                }
+                if (rowData.settingKey === "scraperSelectedSystem") {
+                    if (!Settings) return []
+                    return Settings.getRetroSystemsList()
                 }
                 if (rowData.settingKey === "musicLibrary") {
                     if (!plex) return []
@@ -1688,6 +1806,40 @@ FocusScope {
                 plexLoginOverlay.visible = false
                 settingsScreen._routeFocus()
             }
+        }
+    }
+
+    // ── retroScraper signals ─────────────────────────────────────────────────
+    Connections {
+        target: retroScraper
+
+        function onScrapeProgress(done, total, gameName) {
+            var text = done + " / " + total + " — " + gameName
+            for (var i = 0; i < settingsList.count; i++) {
+                var item = settingsList.itemAtIndex(i)
+                if (!item) continue
+                var comp = item.children[0] && item.children[0].item
+                if (!comp || !comp.rowData) continue
+                var act = comp.rowData.action
+                if (act === "scrapeAll" || act === "scrapeSelectedSystem") {
+                    comp.statusText = text
+                }
+            }
+        }
+
+        function onScrapeFinished(scraped, skipped, failed) {
+            settingsScreen._showToast(
+                "Done: " + scraped + " scraped, " + skipped + " skipped, " + failed + " failed"
+            )
+            if (Settings) Settings.rescanLibrary()
+        }
+
+        function onScrapeError(message) {
+            settingsScreen._showToast(message)
+        }
+
+        function onScrapeCancelled() {
+            settingsScreen._showToast("Scrape cancelled")
         }
     }
 

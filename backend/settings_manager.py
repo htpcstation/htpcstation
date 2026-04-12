@@ -791,6 +791,53 @@ class SettingsManager(QObject):
         self._config.set_tmdb_api_key(key)
         self.tmdbApiKeyChanged.emit()
 
+    # -- Retro scraper settings -------------------------------------------
+
+    scraperOverwriteChanged = Signal()
+
+    @Property(bool, notify=scraperOverwriteChanged)
+    def scraperOverwrite(self) -> bool:
+        return self._config.scraper_overwrite
+
+    @Slot(bool)
+    def setScraperOverwrite(self, val: bool) -> None:
+        self._config.set_scraper_overwrite(val)
+        self.scraperOverwriteChanged.emit()
+
+    @Slot(str, result=bool)
+    def scraperSourceEnabled(self, source: str) -> bool:
+        return source in self._config.scraper_enabled_sources
+
+    @Slot(str, bool)
+    def setScraperSourceEnabled(self, source: str, enabled: bool) -> None:
+        sources = list(self._config.scraper_enabled_sources)
+        if enabled and source not in sources:
+            sources.append(source)
+        elif not enabled and source in sources:
+            sources.remove(source)
+        self._config.set_scraper_enabled_sources(sources)
+
+    @Slot(str, str, result=str)
+    def getScraperCredential(self, source: str, key: str) -> str:
+        return self._config.scraper_credentials.get(source, {}).get(key, "")
+
+    @Slot(str, str, str)
+    def setScraperCredential(self, source: str, key: str, value: str) -> None:
+        self._config.set_scraper_credential(source, key, value)
+
+    @Slot(result=list)
+    def getRetroSystemsList(self) -> list:
+        """Return [{id, label}] for each non-virtual subdir of rom_directory."""
+        from pathlib import Path
+        rom_dir = Path(self._config.rom_directory)
+        if not rom_dir.exists():
+            return []
+        return [
+            {"id": d.name, "label": d.name}
+            for d in sorted(rom_dir.iterdir())
+            if d.is_dir() and not d.name.startswith("_")
+        ]
+
     # -- Button layout ----------------------------------------------------
 
     buttonLayoutChanged = Signal()

@@ -71,6 +71,7 @@ from backend.moonlight_library import MoonlightLibrary
 from backend.network_monitor import NetworkMonitor
 from backend.plex_library import PlexLibrary
 from backend.recently_played import RecentlyPlayedManager
+from backend.retro_scraper import RetroScraper
 from backend.settings_manager import SettingsManager
 from backend.steam_library import SteamLibrary
 
@@ -165,6 +166,10 @@ def main() -> None:
     local_videos = LocalVideoLibrary(config)
     engine.rootContext().setContextProperty("localVideos", local_videos)
     app.aboutToQuit.connect(local_videos.shutdown)
+
+    # Retro scraper — exposed to QML as `retroScraper`
+    retro_scraper = RetroScraper(config)
+    engine.rootContext().setContextProperty("retroScraper", retro_scraper)
 
     # Steam library — exposed to QML as `steam`
     steam = SteamLibrary(recently_played=recently_played)
