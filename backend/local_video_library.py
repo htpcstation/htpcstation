@@ -1183,6 +1183,8 @@ class LocalVideoLibrary(QObject):
         if cache_key in self._category_cache:
             logger.debug("selectCategory: cache hit for %r", cache_key)
             items, cached_branch = self._category_cache[cache_key]
+            self._category_scanning = True
+            self.categoryScanningChanged.emit()
             self._on_worker_scan_finished(items, cached_branch, cache_key)
             return
         self._category_scanning = True

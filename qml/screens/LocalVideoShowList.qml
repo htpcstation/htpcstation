@@ -242,6 +242,7 @@ FocusScope {
                     if (item) {
                         showListView.showSelected(showList.currentIndex, {
                             name:        item.nameValue,
+                            path:        item.pathValue,
                             posterPath:  item.posterPathValue,
                             year:        item.yearValue,
                             description: item.descriptionValue,
@@ -263,6 +264,7 @@ FocusScope {
 
                 // Expose model data so the left panel and key handler can read them.
                 readonly property string nameValue:        model.name        || ""
+                readonly property string pathValue:        model.path        || ""
                 readonly property int    yearValue:        model.year        || 0
                 readonly property int    seasonCountValue: model.seasonCount || 0
                 readonly property string descriptionValue: model.description || ""

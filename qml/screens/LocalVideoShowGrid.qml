@@ -97,6 +97,7 @@ FocusScope {
                 if (item) {
                     showGridView.showSelected(showGrid.currentIndex, {
                         name:        item.itemName,
+                        path:        item.itemPath,
                         posterPath:  item.itemPosterPath,
                         year:        item.itemYear,
                         description: item.itemDescription,
@@ -125,6 +126,7 @@ FocusScope {
 
             // Expose fields so the key handler can read them.
             readonly property string itemName:        model.name        || ""
+            readonly property string itemPath:        model.path        || ""
             readonly property string itemPosterPath:  model.posterPath  || ""
             readonly property int    itemYear:        model.year        || 0
             readonly property string itemDescription: model.description || ""
