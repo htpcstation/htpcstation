@@ -292,6 +292,8 @@ class GameLibrary(QObject):
     gamesModelChanged = Signal()
     currentSystemChanged = Signal(str)
     favoriteToggled = Signal(bool)  # emitted after toggleFavorite; arg is new favorite state
+    favoriteSorted = Signal(int)    # emitted after toggleFavorite re-sort; arg is new index of the game
+    favoritesOnTopChanged = Signal()
 
     def __init__(
         self,
@@ -318,6 +320,7 @@ class GameLibrary(QObject):
         # Sort state — reset when selectSystem is called
         self._current_games_unfiltered: list[Game] = []
         self._current_sort: str = "az"
+        self._favorites_on_top: bool = True
 
         # Build empty models first so properties are always valid
         self._systems_model = SystemListModel(self._systems, self)
@@ -360,6 +363,11 @@ class GameLibrary(QObject):
         fget=lambda self: self._current_system,
         notify=currentSystemChanged,
     )
+    favoritesOnTop = Property(
+        bool,
+        fget=lambda self: self._favorites_on_top,
+        notify=favoritesOnTopChanged,
+    )
 
     # ------------------------------------------------------------------
     # Slots
@@ -401,6 +409,19 @@ class GameLibrary(QObject):
         """
         self._current_sort = sort_key
         self._apply_sort_filter()
+
+    @Slot(bool)
+    def setFavoritesOnTop(self, val: bool) -> None:
+        """Set whether favorites are pinned to the top of the games list.
+
+        Re-applies sort/filter immediately.  This is a sticky preference and is
+        NOT reset by selectSystem.
+        """
+        if val == self._favorites_on_top:
+            return
+        self._favorites_on_top = val
+        self._apply_sort_filter()
+        self.favoritesOnTopChanged.emit()
 
     @Slot(int, result="QVariant")
     def getGame(self, index: int) -> dict:
@@ -525,6 +546,17 @@ class GameLibrary(QObject):
         # Emit signal so QML can show a toast notification
         self.favoriteToggled.emit(game.favorite)
 
+        # Re-sort the current model so the game immediately moves to/from the
+        # top of the list when _favorites_on_top is enabled.
+        self._apply_sort_filter()
+
+        # Tell QML where the game landed after the re-sort so focus can be restored.
+        new_index = next(
+            (i for i, g in enumerate(self._games_model._games) if g is game), -1
+        )
+        if new_index >= 0:
+            self.favoriteSorted.emit(new_index)
+
         # Persist to gamelist.xml
         system = self._systems_by_folder.get(game.system_folder)
         if system is not None:
@@ -561,6 +593,12 @@ class GameLibrary(QObject):
         else:
             logger.warning("_apply_sort_filter: unknown sort_key '%s'", sort_key)
             games.sort(key=lambda g: g.name.lower())
+
+        # Partition favorites to the top (unless already in the _favorites collection)
+        if self._favorites_on_top and self._current_system != "_favorites":
+            favs = [g for g in games if g.favorite]
+            non_favs = [g for g in games if not g.favorite]
+            games = favs + non_favs
 
         self._games_model = GameListModel(games, self)
         self.gamesModelChanged.emit()

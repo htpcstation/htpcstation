@@ -423,6 +423,7 @@ class Config:
         self._tmdb_api_key: str = ""
 
         # Sort preferences
+        self._retro_favorites_on_top: bool = True
         self._sort_retro_games: str = "az"
         self._sort_steam_games: str = "az"
         self._sort_moonlight_apps: str = "az"
@@ -581,6 +582,11 @@ class Config:
         """Set the cached hardware decode codecs and persist the config."""
         self._hw_decode_codecs = sorted(set(codecs))
         self.save()
+
+    @property
+    def retro_favorites_on_top(self) -> bool:
+        """Persisted favorites-on-top preference for retro games. Defaults to True."""
+        return self._retro_favorites_on_top
 
     @property
     def sort_retro_games(self) -> str:
@@ -758,6 +764,13 @@ class Config:
     def set_music_library_key(self, key: str) -> None:
         """Set the selected Plex music library section key and persist the config."""
         self._music_library_key = key
+        self.save()
+
+    def set_retro_favorites_on_top(self, val: bool) -> None:
+        """Set the favorites-on-top preference for retro games and persist the config."""
+        if not isinstance(val, bool):
+            val = bool(val)
+        self._retro_favorites_on_top = val
         self.save()
 
     def set_sort_retro_games(self, key: str) -> None:
@@ -1115,6 +1128,7 @@ class Config:
                 "focus_ring_color": self._focus_ring_color,
             },
             "sort_preferences": {
+                "retro_favorites_on_top": self._retro_favorites_on_top,
                 "retro_games": self._sort_retro_games,
                 "steam_games": self._sort_steam_games,
                 "moonlight_apps": self._sort_moonlight_apps,
@@ -1334,6 +1348,7 @@ class Config:
         # sort_preferences section
         sort_prefs = raw.get("sort_preferences", {})
         if isinstance(sort_prefs, dict):
+            self._retro_favorites_on_top = bool(sort_prefs.get("retro_favorites_on_top", True))
             self._sort_retro_games = sort_prefs.get("retro_games", "az")
             self._sort_steam_games = sort_prefs.get("steam_games", "az")
             self._sort_moonlight_apps = sort_prefs.get("moonlight_apps", "az")

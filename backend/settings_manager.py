@@ -67,6 +67,7 @@ class SettingsManager(QObject):
     videoSnapAutoplayChanged = Signal()
     videoSnapDelayMsChanged = Signal()
     showNetworkIndicatorChanged = Signal()
+    retroGamesFavoritesOnTopChanged = Signal()
     sortRetroGamesChanged = Signal()
     sortSteamGamesChanged = Signal()
     sortMoonlightAppsChanged = Signal()
@@ -170,6 +171,9 @@ class SettingsManager(QObject):
 
     def _get_show_network_indicator(self) -> bool:
         return self._config.show_network_indicator
+
+    def _get_retro_favorites_on_top(self) -> bool:
+        return self._config.retro_favorites_on_top
 
     def _get_sort_retro_games(self) -> str:
         return self._config.sort_retro_games
@@ -347,6 +351,11 @@ class SettingsManager(QObject):
         bool,
         fget=_get_show_network_indicator,
         notify=showNetworkIndicatorChanged,
+    )
+    retroGamesFavoritesOnTop = Property(
+        bool,
+        fget=_get_retro_favorites_on_top,
+        notify=retroGamesFavoritesOnTopChanged,
     )
     sortRetroGames = Property(
         str,
@@ -591,6 +600,12 @@ class SettingsManager(QObject):
         """Enable or disable the network status indicator."""
         self._config.set_show_network_indicator(enabled)
         self.showNetworkIndicatorChanged.emit()
+
+    @Slot(bool)
+    def setRetroGamesFavoritesOnTop(self, val: bool) -> None:
+        """Persist the favorites-on-top preference for retro games."""
+        self._config.set_retro_favorites_on_top(val)
+        self.retroGamesFavoritesOnTopChanged.emit()
 
     @Slot(str)
     def setSortRetroGames(self, key: str) -> None:

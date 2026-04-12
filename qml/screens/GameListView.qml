@@ -36,6 +36,9 @@ FocusScope {
     // ── View mode (set by RetroGamesScreen; "grid" or "list") ─────────────────
     property string _viewMode: "grid"
 
+    // ── Favorites on top ──────────────────────────────────────────────────────
+    property bool _favoritesOnTop: true
+
     // Human-readable sort label for the status bar
     readonly property string _sortLabel: {
         if (_currentSort === "az")     return "A-Z"
@@ -443,7 +446,10 @@ FocusScope {
         // Index within the view options (0=Grid, 1=List)
         property int _viewIndex: 0
 
-        // Currently focused row: 0=sort row, 1=view row
+        // Index within the favorites-on-top options (0=On, 1=Off)
+        property int _favOnTopIndex: 0
+
+        // Currently focused row: 0=sort row, 1=view row, 2=favorites row
         property int _focusRow: 0
 
         function open() {
@@ -454,6 +460,7 @@ FocusScope {
             var viewKeys = ["grid", "list"]
             var vi = viewKeys.indexOf(gameListView._viewMode)
             _viewIndex = vi >= 0 ? vi : 0
+            _favOnTopIndex = gameListView._favoritesOnTop ? 0 : 1
             _focusRow = 0
             visible = true
             forceActiveFocus()
@@ -480,7 +487,7 @@ FocusScope {
                 left: parent.left
                 right: parent.right
             }
-            height: root.vpx(190)
+            height: root.vpx(250)
             color: Theme.colorSecondary
             opacity: 0.97
 
@@ -643,6 +650,72 @@ FocusScope {
                     }
                 }
             }
+
+            // ── Favorites label ───────────────────────────────────────────────
+            Text {
+                id: favoritesLabel
+                anchors {
+                    top: viewOptionsRow.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(6)
+                }
+                text: "Favorites on top"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+            }
+
+            // ── Favorites options row ─────────────────────────────────────────
+            Row {
+                id: favoritesOptionsRow
+                anchors {
+                    top: favoritesLabel.bottom
+                    left: parent.left
+                    leftMargin: root.vpx(16)
+                    topMargin: root.vpx(6)
+                }
+                spacing: root.vpx(8)
+
+                Repeater {
+                    model: [
+                        { key: "on",  label: "On" },
+                        { key: "off", label: "Off" }
+                    ]
+
+                    delegate: Rectangle {
+                        width: root.vpx(80)
+                        height: root.vpx(36)
+                        color: {
+                            var isFocused = sortOverlay._focusRow === 2 && sortOverlay._favOnTopIndex === index
+                            return isFocused ? Theme.colorPrimary : "transparent"
+                        }
+                        radius: root.vpx(Theme.focusRingRadius)
+
+                        Behavior on color {
+                            ColorAnimation { duration: Theme.animDurationFast }
+                        }
+
+                        Text {
+                            anchors {
+                                left: parent.left
+                                leftMargin: root.vpx(8)
+                                verticalCenter: parent.verticalCenter
+                            }
+                            text: {
+                                var isActive = modelData.key === (gameListView._favoritesOnTop ? "on" : "off")
+                                return (isActive ? "✓ " : "") + modelData.label
+                            }
+                            color: {
+                                var isFocused = sortOverlay._focusRow === 2 && sortOverlay._favOnTopIndex === index
+                                return isFocused ? Theme.colorOverlayText : Theme.colorText
+                            }
+                            font.family: Theme.fontFamily
+                            font.pixelSize: root.vpx(Theme.fontSizeBody)
+                        }
+                    }
+                }
+            }
         }
 
         // ── Key handling ─────────────────────────────────────────────────────
@@ -662,7 +735,7 @@ FocusScope {
 
             } else if (event.key === Qt.Key_Down) {
                 event.accepted = true
-                if (sortOverlay._focusRow < 1)
+                if (sortOverlay._focusRow < 2)
                     sortOverlay._focusRow += 1
 
             } else if (event.key === Qt.Key_Left) {
@@ -670,9 +743,12 @@ FocusScope {
                 if (sortOverlay._focusRow === 0) {
                     if (sortOverlay._sortIndex > 0)
                         sortOverlay._sortIndex -= 1
-                } else {
+                } else if (sortOverlay._focusRow === 1) {
                     if (sortOverlay._viewIndex > 0)
                         sortOverlay._viewIndex -= 1
+                } else {
+                    if (sortOverlay._favOnTopIndex > 0)
+                        sortOverlay._favOnTopIndex -= 1
                 }
 
             } else if (event.key === Qt.Key_Right) {
@@ -680,9 +756,12 @@ FocusScope {
                 if (sortOverlay._focusRow === 0) {
                     if (sortOverlay._sortIndex < sortCount - 1)
                         sortOverlay._sortIndex += 1
-                } else {
+                } else if (sortOverlay._focusRow === 1) {
                     if (sortOverlay._viewIndex < viewCount - 1)
                         sortOverlay._viewIndex += 1
+                } else {
+                    if (sortOverlay._favOnTopIndex < 1)
+                        sortOverlay._favOnTopIndex += 1
                 }
 
             } else if (KeyHandler.isAccept(event)) {
@@ -693,6 +772,11 @@ FocusScope {
                 gameListView._currentSort = newSort
                 library.sortGames(newSort)
                 if (Settings) Settings.setSortRetroGames(newSort)
+                // Apply favorites on top
+                var newFavOnTop = sortOverlay._favOnTopIndex === 0
+                gameListView._favoritesOnTop = newFavOnTop
+                library.setFavoritesOnTop(newFavOnTop)
+                if (Settings) Settings.setRetroGamesFavoritesOnTop(newFavOnTop)
                 // Apply view mode
                 var viewKeys = ["grid", "list"]
                 var newView = viewKeys[sortOverlay._viewIndex]
@@ -710,6 +794,17 @@ FocusScope {
         }
     }
 
+    // Restore focus to the game's new position after a favorite toggle re-sorts the list.
+    // highlightMoveDuration is zeroed so the view snaps without a visible scroll animation.
+    Connections {
+        target: library
+        function onFavoriteSorted(newIndex) {
+            gameList.highlightMoveDuration = 0
+            gameList.currentIndex = newIndex
+            Qt.callLater(function() { gameList.highlightMoveDuration = Theme.animDurationFast })
+        }
+    }
+
     Component.onCompleted: {
         if (Settings) {
             var saved = Settings.sortRetroGames
@@ -718,6 +813,8 @@ FocusScope {
                 library.sortGames(saved)
             }
             // _viewMode is bound from RetroGamesScreen; do not overwrite here.
+            _favoritesOnTop = Settings.retroGamesFavoritesOnTop
+            library.setFavoritesOnTop(_favoritesOnTop)
         }
     }
 }

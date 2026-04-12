@@ -194,3 +194,117 @@ class TestSelectSystemResetsState:
         library = _make_library(tmp_path, {"snes": xml})
         library.selectSystem("snes")
         assert library._games_model.rowCount() == 2
+
+
+# ---------------------------------------------------------------------------
+# TestFavoritesOnTop
+# ---------------------------------------------------------------------------
+
+
+class TestFavoritesOnTop:
+    """Tests for GameLibrary.setFavoritesOnTop."""
+
+    # XML with three games: Asteroids (fav), Mario (not fav), Zelda (fav)
+    _XML = (
+        "<game><path>./z.rom</path><name>Zelda</name>"
+        "<favorite>true</favorite></game>"
+        "<game><path>./a.rom</path><name>Asteroids</name>"
+        "<favorite>true</favorite></game>"
+        "<game><path>./m.rom</path><name>Mario</name></game>"
+    )
+
+    def _make_fav_library(self, tmp_path: Path) -> GameLibrary:
+        library = _make_library(tmp_path, {"snes": self._XML})
+        library.selectSystem("snes")
+        return library
+
+    def test_favorites_on_top_true_az(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop(True) + sortGames('az'): favorites first, each partition A-Z."""
+        library = self._make_fav_library(tmp_path)
+        library.setFavoritesOnTop(True)
+        library.sortGames("az")
+        names = [g.name for g in library._games_model._games]
+        # Favorites: Asteroids, Zelda (A-Z); non-favorites: Mario
+        assert names == ["Asteroids", "Zelda", "Mario"]
+
+    def test_favorites_on_top_false_az(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop(False) + sortGames('az'): purely alphabetical, no hoisting."""
+        library = self._make_fav_library(tmp_path)
+        library.setFavoritesOnTop(False)
+        library.sortGames("az")
+        names = [g.name for g in library._games_model._games]
+        assert names == ["Asteroids", "Mario", "Zelda"]
+
+    def test_favorites_on_top_true_za(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop(True) + sortGames('za'): favorites first (Z-A), then non-favorites (Z-A)."""
+        library = self._make_fav_library(tmp_path)
+        library.setFavoritesOnTop(True)
+        library.sortGames("za")
+        names = [g.name for g in library._games_model._games]
+        # Favorites: Zelda, Asteroids (Z-A); non-favorites: Mario
+        assert names == ["Zelda", "Asteroids", "Mario"]
+
+    def test_favorites_collection_not_reordered(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop(True) while current system is _favorites: no partition applied."""
+        library = self._make_fav_library(tmp_path)
+        library.setFavoritesOnTop(True)
+        library.selectSystem("_favorites")
+        # All games in _favorites are favorites; partition must not be applied
+        # (i.e. the existing sort order from _build_collection_systems is preserved).
+        names = [g.name for g in library._games_model._games]
+        # _favorites is built alphabetically in _build_collection_systems
+        assert names == ["Asteroids", "Zelda"]
+
+    def test_set_favorites_on_top_emits_games_model_changed(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop emits gamesModelChanged."""
+        library = self._make_fav_library(tmp_path)
+        signals: list[bool] = []
+        library.gamesModelChanged.connect(lambda: signals.append(True))
+        library.setFavoritesOnTop(False)
+        assert len(signals) == 1
+
+    def test_set_favorites_on_top_emits_favorites_on_top_changed(self, tmp_path: Path) -> None:
+        """setFavoritesOnTop emits favoritesOnTopChanged on change, not on same value."""
+        library = self._make_fav_library(tmp_path)
+        # Default is True; calling with True should be a no-op
+        signals: list[bool] = []
+        library.favoritesOnTopChanged.connect(lambda: signals.append(True))
+
+        library.setFavoritesOnTop(True)   # same value — no emit, no re-sort
+        assert len(signals) == 0
+
+        sort_signals: list[bool] = []
+        library.gamesModelChanged.connect(lambda: sort_signals.append(True))
+
+        library.setFavoritesOnTop(True)   # still same value
+        assert len(signals) == 0
+        assert len(sort_signals) == 0
+
+        library.setFavoritesOnTop(False)  # value changes — must emit
+        assert len(signals) == 1
+        assert len(sort_signals) == 1
+
+        library.setFavoritesOnTop(False)  # same again — no emit
+        assert len(signals) == 1
+        assert len(sort_signals) == 1
+
+    def test_favorites_on_top_toggle_true_false_true(self, tmp_path: Path) -> None:
+        """Toggling True→False→True re-applies the partition correctly each time."""
+        library = self._make_fav_library(tmp_path)
+        library.sortGames("az")
+
+        library.setFavoritesOnTop(True)
+        names_on = [g.name for g in library._games_model._games]
+        assert names_on[0] in {"Asteroids", "Zelda"}
+        assert names_on[1] in {"Asteroids", "Zelda"}
+        assert names_on[2] == "Mario"
+
+        library.setFavoritesOnTop(False)
+        names_off = [g.name for g in library._games_model._games]
+        assert names_off == ["Asteroids", "Mario", "Zelda"]
+
+        library.setFavoritesOnTop(True)
+        names_on2 = [g.name for g in library._games_model._games]
+        assert names_on2[0] in {"Asteroids", "Zelda"}
+        assert names_on2[1] in {"Asteroids", "Zelda"}
+        assert names_on2[2] == "Mario"
