@@ -424,6 +424,7 @@ class Config:
 
         # Sort preferences
         self._retro_favorites_on_top: bool = True
+        self._retro_sort_per_system: dict[str, str] = {}
         self._sort_retro_games: str = "az"
         self._sort_steam_games: str = "az"
         self._sort_moonlight_apps: str = "az"
@@ -778,6 +779,15 @@ class Config:
         self._sort_retro_games = key
         self.save()
 
+    def get_retro_sort_for_system(self, folder: str, default: str = "az") -> str:
+        """Return the persisted sort key for *folder*, or *default* if not set."""
+        return self._retro_sort_per_system.get(folder, default)
+
+    def set_retro_sort_for_system(self, folder: str, sort_key: str) -> None:
+        """Persist the sort key for *folder* and save the config."""
+        self._retro_sort_per_system[folder] = sort_key
+        self.save()
+
     def set_sort_steam_games(self, key: str) -> None:
         """Set the sort preference for the Steam games grid and persist the config."""
         self._sort_steam_games = key
@@ -1130,6 +1140,7 @@ class Config:
             "sort_preferences": {
                 "retro_favorites_on_top": self._retro_favorites_on_top,
                 "retro_games": self._sort_retro_games,
+                "retro_per_system": self._retro_sort_per_system,
                 "steam_games": self._sort_steam_games,
                 "moonlight_apps": self._sort_moonlight_apps,
                 "plex_movies": self._sort_plex_movies,
@@ -1350,6 +1361,7 @@ class Config:
         if isinstance(sort_prefs, dict):
             self._retro_favorites_on_top = bool(sort_prefs.get("retro_favorites_on_top", True))
             self._sort_retro_games = sort_prefs.get("retro_games", "az")
+            self._retro_sort_per_system = dict(sort_prefs.get("retro_per_system", {}))
             self._sort_steam_games = sort_prefs.get("steam_games", "az")
             self._sort_moonlight_apps = sort_prefs.get("moonlight_apps", "az")
             self._sort_plex_movies = sort_prefs.get("plex_movies", "")

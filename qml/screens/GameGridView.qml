@@ -585,8 +585,6 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 gameGridView._currentSort = newSort
                 library.sortGames(newSort)
-                if (Settings && library.currentSystem !== "_lastplayed")
-                    Settings.setSortRetroGames(newSort)
                 // Apply favorites on top
                 var newFavOnTop = sortOverlay._favOnTopIndex === 0
                 gameGridView._favoritesOnTop = newFavOnTop
@@ -630,11 +628,6 @@ FocusScope {
 
     Component.onCompleted: {
         if (Settings) {
-            var saved = Settings.sortRetroGames
-            if (saved) {
-                _currentSort = saved
-                library.sortGames(saved)
-            }
             // _viewMode is bound from RetroGamesScreen; do not overwrite here.
             _favoritesOnTop = Settings.retroGamesFavoritesOnTop
             library.setFavoritesOnTop(_favoritesOnTop)

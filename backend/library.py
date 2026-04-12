@@ -399,7 +399,10 @@ class GameLibrary(QObject):
 
         # Reset sort state for the new system
         self._current_games_unfiltered = list(system.games)
-        self._current_sort = "recent" if folder_name == "_lastplayed" else "az"
+        if folder_name == "_lastplayed":
+            self._current_sort = "recent"
+        else:
+            self._current_sort = self._config.get_retro_sort_for_system(folder_name, "az")
         self._current_system = folder_name
         self.currentSortChanged.emit()
         self._apply_sort_filter()
@@ -417,6 +420,8 @@ class GameLibrary(QObject):
         self._current_sort = sort_key
         self.currentSortChanged.emit()
         self._apply_sort_filter()
+        if self._current_system and self._current_system != "_lastplayed":
+            self._config.set_retro_sort_for_system(self._current_system, sort_key)
 
     @Slot(bool)
     def setFavoritesOnTop(self, val: bool) -> None:

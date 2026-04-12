@@ -39,6 +39,7 @@ def _make_library(tmp_path: Path, systems_xml: dict[str, str]) -> GameLibrary:
     config.get_system.return_value = MagicMock(
         display_name="Test System", core="core.so", extensions=[".rom"]
     )
+    config.get_retro_sort_for_system = MagicMock(return_value="az")
     return GameLibrary(config)
 
 
@@ -373,3 +374,56 @@ class TestLastPlayedSort:
         library.selectSystem("_lastplayed")
         assert len(signals) >= 1
         assert signals[-1] == "recent"
+
+
+# ---------------------------------------------------------------------------
+# TestPerSystemSort
+# ---------------------------------------------------------------------------
+
+
+class TestPerSystemSort:
+    """Tests for per-system sort persistence."""
+
+    _SNES_XML = (
+        "<game><path>./mario.rom</path><name>Mario</name></game>"
+        "<game><path>./zelda.rom</path><name>Zelda</name></game>"
+        "<game><path>./asteroids.rom</path><name>Asteroids</name></game>"
+    )
+
+    def _make_library_with_config(self, tmp_path: Path):
+        """Create a library with a config mock whose sort methods are trackable."""
+        snes_dir = tmp_path / "snes"
+        snes_dir.mkdir()
+        content = "<?xml version='1.0' encoding='utf-8'?>\n<gameList>" + self._SNES_XML + "</gameList>"
+        (snes_dir / "gamelist.xml").write_text(content, encoding="utf-8")
+
+        config = MagicMock(spec=Config)
+        config.rom_directory = tmp_path
+        config.get_system.return_value = MagicMock(
+            display_name="Test System", core="core.so", extensions=[".rom"]
+        )
+        config.get_retro_sort_for_system = MagicMock(return_value="az")
+        return GameLibrary(config), config
+
+    def test_sort_games_on_regular_system_persists(self, tmp_path: Path) -> None:
+        """sortGames('za') on a regular system calls set_retro_sort_for_system with correct args."""
+        library, config = self._make_library_with_config(tmp_path)
+        library.selectSystem("snes")
+        library.sortGames("za")
+        config.set_retro_sort_for_system.assert_called_with("snes", "za")
+
+    def test_select_system_reads_persisted_sort(self, tmp_path: Path) -> None:
+        """selectSystem reads from get_retro_sort_for_system; mock returning 'za' sets _current_sort to 'za'."""
+        library, config = self._make_library_with_config(tmp_path)
+        config.get_retro_sort_for_system.return_value = "za"
+        library.selectSystem("snes")
+        assert library._current_sort == "za"
+        config.get_retro_sort_for_system.assert_called_with("snes", "az")
+
+    def test_sort_games_on_lastplayed_does_not_persist(self, tmp_path: Path) -> None:
+        """sortGames('za') while _current_system is '_lastplayed' does NOT persist."""
+        library, config = self._make_library_with_config(tmp_path)
+        library.selectSystem("_lastplayed")
+        config.set_retro_sort_for_system.reset_mock()
+        library.sortGames("za")
+        config.set_retro_sort_for_system.assert_not_called()
