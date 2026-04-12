@@ -140,8 +140,9 @@ FocusScope {
             if (KeyHandler.isAccept(event)) {
                 event.accepted = true
                 if (currentItem) {
+                    var name = currentItem.displayNameValue
                     library.selectSystem(currentItem.folderNameValue)
-                    retroGamesScreen.selectedSystemName = currentItem.displayNameValue
+                    retroGamesScreen.selectedSystemName = name
                     retroGamesScreen.currentView = "games"
                 }
             } else if (KeyHandler.isCancel(event)) {
@@ -221,8 +222,9 @@ FocusScope {
                 }
                 onDoubleClicked: {
                     systemList.currentIndex = index
+                    var name = model.displayName
                     library.selectSystem(model.folderName)
-                    retroGamesScreen.selectedSystemName = model.displayName
+                    retroGamesScreen.selectedSystemName = name
                     retroGamesScreen.currentView = "games"
                 }
             }
