@@ -308,3 +308,68 @@ class TestFavoritesOnTop:
         assert names_on2[0] in {"Asteroids", "Zelda"}
         assert names_on2[1] in {"Asteroids", "Zelda"}
         assert names_on2[2] == "Mario"
+
+
+# ---------------------------------------------------------------------------
+# TestLastPlayedSort
+# ---------------------------------------------------------------------------
+
+
+class TestLastPlayedSort:
+    """Tests for Last Played sort isolation."""
+
+    # XML for a SNES system with three games, two of which have been played.
+    _SNES_XML = (
+        "<game><path>./mario.rom</path><name>Mario</name>"
+        "<lastplayed>20260101T120000</lastplayed></game>"
+        "<game><path>./zelda.rom</path><name>Zelda</name>"
+        "<lastplayed>20260315T090000</lastplayed></game>"
+        "<game><path>./asteroids.rom</path><name>Asteroids</name></game>"
+    )
+
+    # XML for a second system with no play history.
+    _NES_XML = (
+        "<game><path>./metroid.rom</path><name>Metroid</name></game>"
+        "<game><path>./castlevania.rom</path><name>Castlevania</name></game>"
+    )
+
+    def _make_lastplayed_library(self, tmp_path: Path) -> "GameLibrary":
+        return _make_library(tmp_path, {"snes": self._SNES_XML, "nes": self._NES_XML})
+
+    def test_lastplayed_default_sort_is_recent(self, tmp_path: Path) -> None:
+        """selectSystem('_lastplayed') results in games ordered by last_played descending."""
+        library = self._make_lastplayed_library(tmp_path)
+        library.selectSystem("_lastplayed")
+        games = library._games_model._games
+        names = [g.name for g in games]
+        # Zelda (most recent: 20260315) must come before Mario (20260101)
+        assert names.index("Zelda") < names.index("Mario")
+
+    def test_lastplayed_sort_does_not_bleed_into_other_systems(self, tmp_path: Path) -> None:
+        """Sorting in _lastplayed then switching to snes resets to A-Z, not 'recent'."""
+        library = self._make_lastplayed_library(tmp_path)
+        library.selectSystem("_lastplayed")
+        library.sortGames("az")
+        library.selectSystem("snes")
+        assert library._current_sort == "az"
+        names = [g.name for g in library._games_model._games]
+        assert names == ["Asteroids", "Mario", "Zelda"]
+
+    def test_lastplayed_resets_to_recent_after_visiting_other_system(self, tmp_path: Path) -> None:
+        """After visiting snes, switching back to _lastplayed returns to Recent sort."""
+        library = self._make_lastplayed_library(tmp_path)
+        library.selectSystem("snes")
+        library.selectSystem("_lastplayed")
+        assert library._current_sort == "recent"
+        games = library._games_model._games
+        names = [g.name for g in games]
+        assert names.index("Zelda") < names.index("Mario")
+
+    def test_lastplayed_select_emits_current_sort_changed(self, tmp_path: Path) -> None:
+        """selectSystem('_lastplayed') emits currentSortChanged."""
+        library = self._make_lastplayed_library(tmp_path)
+        signals: list[str] = []
+        library.currentSortChanged.connect(lambda: signals.append(library._current_sort))
+        library.selectSystem("_lastplayed")
+        assert len(signals) >= 1
+        assert signals[-1] == "recent"

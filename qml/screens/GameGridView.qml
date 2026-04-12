@@ -585,7 +585,8 @@ FocusScope {
                 var newSort = sortKeys[sortOverlay._sortIndex]
                 gameGridView._currentSort = newSort
                 library.sortGames(newSort)
-                if (Settings) Settings.setSortRetroGames(newSort)
+                if (Settings && library.currentSystem !== "_lastplayed")
+                    Settings.setSortRetroGames(newSort)
                 // Apply favorites on top
                 var newFavOnTop = sortOverlay._favOnTopIndex === 0
                 gameGridView._favoritesOnTop = newFavOnTop
@@ -616,6 +617,14 @@ FocusScope {
             gameGrid.highlightMoveDuration = 0
             gameGrid.currentIndex = newIndex
             Qt.callLater(function() { gameGrid.highlightMoveDuration = Theme.animDurationFast })
+        }
+    }
+
+    // Sync QML sort state whenever the backend sort changes (e.g. on selectSystem).
+    Connections {
+        target: library
+        function onCurrentSortChanged() {
+            _currentSort = library.currentSort
         }
     }
 

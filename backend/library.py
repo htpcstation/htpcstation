@@ -291,6 +291,7 @@ class GameLibrary(QObject):
     systemsModelChanged = Signal()
     gamesModelChanged = Signal()
     currentSystemChanged = Signal(str)
+    currentSortChanged = Signal()
     favoriteToggled = Signal(bool)  # emitted after toggleFavorite; arg is new favorite state
     favoriteSorted = Signal(int)    # emitted after toggleFavorite re-sort; arg is new index of the game
     favoritesOnTopChanged = Signal()
@@ -368,6 +369,11 @@ class GameLibrary(QObject):
         fget=lambda self: self._favorites_on_top,
         notify=favoritesOnTopChanged,
     )
+    currentSort = Property(
+        str,
+        fget=lambda self: self._current_sort,
+        notify=currentSortChanged,
+    )
 
     # ------------------------------------------------------------------
     # Slots
@@ -393,8 +399,9 @@ class GameLibrary(QObject):
 
         # Reset sort state for the new system
         self._current_games_unfiltered = list(system.games)
-        self._current_sort = "az"
+        self._current_sort = "recent" if folder_name == "_lastplayed" else "az"
         self._current_system = folder_name
+        self.currentSortChanged.emit()
         self._apply_sort_filter()
         self.currentSystemChanged.emit(folder_name)
 
@@ -408,6 +415,7 @@ class GameLibrary(QObject):
         Rebuilds the GameListModel with the sorted game list and emits gamesModelChanged.
         """
         self._current_sort = sort_key
+        self.currentSortChanged.emit()
         self._apply_sort_filter()
 
     @Slot(bool)
