@@ -38,12 +38,46 @@ htpcstation/
                                        # events to SDL records via GameControllerDB (compiled into SDL).
                                        # seed_from_controller_mapping() builds primary lookup from saved
                                        # mapping. Module-level singleton: resolver.
-    gamelist.py                        # gamelist.xml parser, write_game_stats()
+    gamelist.py                        # gamelist.xml read/write. ET.indent(getroot(), "  ") applied before
+                                       # tree.write() — output is human-readable with 2-space indentation.
+                                       # write_game_entry() writes <image> alongside <thumbnail> when
+                                       # game.image_path is set. parse_gamelist() returns Game objects with
+                                       # path set relative to system_path.
+    retro_scraper.py                   # RetroScraper QObject: orchestrates multi-source metadata scraping
+                                       # for ROM libraries. Runs in _ScrapeThread (QThread subclass).
+                                       # Signals: scrapeProgress(str), scrapeFinished(int, int, int, QVariantMap),
+                                       # scrapeError(str), scrapeCancelled(). scrapeFinished carries
+                                       # (scraped, skipped, failed, source_counts) where source_counts is a
+                                       # dict mapping source name → number of games it contributed metadata for.
+                                       # AbstractScraperSource base: _quota_exhausted flag set on 429/430 —
+                                       # exhausted sources are skipped for all remaining games in the session.
+                                       # _apply_result(game, result, config): sets game.image_path from
+                                       # thumbnail (or screenshot if config.scraper_preview_image=="screenshot"),
+                                       # only when not already set (preserves user miximages).
+                                       # _start_scrape(): truncates scraper.log via handler.stream.seek(0)/
+                                       # truncate() before creating _ScrapeThread — each session starts fresh.
+                                       # Log: ~/.config/htpcstation/scraper.log
+    scrapers/                          # One module per metadata source. All inherit AbstractScraperSource.
+      __init__.py
+      _utils.py                        # Shared: credential scrubber, URL normaliser, safe_request wrapper
+      screenscraper.py                 # ScreenScraper.fr adapter — HTTP 430 = daily quota (sets _quota_exhausted)
+      emumovies.py                     # EmuMovies adapter
+      thegamesdb.py                    # TheGamesDB adapter
+      mobygames.py                     # MobyGames adapter
+      igdb.py                          # IGDB adapter (Twitch OAuth)
+      retroachievements.py             # RetroAchievements adapter
+      hasheous.py                      # Hasheous hash-lookup adapter — correct endpoint:
+                                       # GET /api/v1/Lookup/ByHash/md5/{md5} (path param, not query param).
+                                       # Response: {"name": "...", "metadata": [{"source": "IGDB", "id": "..."}, ...]}
     keys.py                            # Semantic key abstraction, input source tracking, button layout.
                                        # Registered in QML as HTPCBackend.KeyHandler (not "Keys" —
                                        # that would shadow the built-in QML Keys attached property).
     launcher.py                        # QProcess emulator launcher, async signal-based start
-    library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites
+    library.py                         # GameLibrary QObject: models, collections, sort, launch, favorites.
+                                       # _scan(): always runs filesystem ROM discovery first, then merges
+                                       # gamelist.xml metadata on top. gamelist_games keyed by resolved
+                                       # absolute path; fs_games paths also resolved — consistent comparison.
+                                       # ROMs not in gamelist.xml get filesystem-only entries (no metadata loss).
     local_video_library.py             # LocalVideoLibrary QObject: flat and TV-shows scanning,
                                        # 5 QAbstractListModel subclasses (CategoryListModel,
                                        # VideoListModel, ShowListModel, SeasonListModel,
@@ -109,8 +143,11 @@ htpcstation/
                                        # _btn/_axis/_hat), build_hotkey_cfg() writes correct key type
                                        # from SDL record type (button/axis/hat)
     settings_manager.py                # SettingsManager QObject: wraps Config for QML, OAuth,
-                                        # plexPlayer toggle (mpv/browser), RetroArch hotkey slots,
-                                        # controller mapping slots, SDL record label resolution
+                                       # plexPlayer toggle (mpv/browser), RetroArch hotkey slots,
+                                       # controller mapping slots, SDL record label resolution.
+                                       # Scraper slots: scraperSourceEnabled(source)/setScraperSourceEnabled,
+                                       # getScraperCredential(source,key)/setScraperCredential,
+                                       # scraperPreviewImage()/setScraperPreviewImage, getRetroSystemsList.
     steam_config.py                    # Shared Steam directory helper (~/.config/htpcstation/steam/)
     steam_library.py                   # SteamLibrary QObject: models, sort, launch, recently played,
                                        # metadata fetch, favorites. GOG-ready source list model.
@@ -227,7 +264,13 @@ htpcstation/
       RetroarchHotkeysScreen.qml       # Modifier row + 12 interactive hotkey rows + rewind settings +
                                         # Apply button; warns if mapping wizard not yet run
       SystemCoresScreen.qml            # Per-system RetroArch core editor
-      SettingsScreen.qml               # 7-section settings menu, Video Player toggle (MPV/Browser)
+      SettingsScreen.qml               # Settings menu with tabbed subcategories. Games tab includes
+                                       # "Scraping" subcategory group for RetroScraper settings.
+                                       # _settingsRevision: int counter — incremented at end of every
+                                       # _setValue() call. All 4 delegate value bindings reference
+                                       # `settingsScreen._settingsRevision >= 0` so QML re-evaluates
+                                       # them reactively. Without this, plain JS function calls in
+                                       # bindings are never re-evaluated after initial render.
   tests/
     conftest.py
     test_collections.py                # 22 tests
@@ -239,6 +282,20 @@ htpcstation/
     test_emulator_launch.py            # 24 tests
     test_filter_sort.py                # 12 tests
     test_gamelist_parser_fixes.py      # 7 tests
+    test_gamelist_fixes_010.py         # 13 tests (ET.indent, image tag, preview image config, _apply_result)
+    test_retro_scraper_framework.py    # scraper framework: Config round-trips, quota-exhausted flag,
+                                       # Hasheous endpoint + response parsing (md5/crc path params),
+                                       # scrapeFinished 4-arg signature
+    test_retro_scraper_data_model.py   # ScraperResult / Game data model tests
+    test_quota_exhausted.py            # 18 tests (quota flag set on 429/430, skipped on subsequent calls)
+    test_rom_fallback_scan.py          # library.py filesystem+gamelist merge: ROMs not in gamelist stay visible
+    test_scraper_screenscraper.py      # ScreenScraper adapter (HTTP mocked)
+    test_scraper_emumovies.py          # EmuMovies adapter
+    test_scraper_thegamesdb.py         # TheGamesDB adapter
+    test_scraper_mobygames.py          # MobyGames adapter
+    test_scraper_igdb.py               # IGDB adapter
+    test_scraper_retroachievements.py  # RetroAchievements adapter
+    test_config_save_race.py           # 4 tests (CONFIG_FILE snapshot prevents writes to real config)
     test_live_tv_library.py            # ~38 tests (HDHomeRun guide API)
     test_moonlight_artwork.py          # 36 tests
     test_moonlight_client.py           # 24 tests
@@ -471,6 +528,20 @@ To use a custom poster image: drop any `.jpg`/`.jpeg`/`.png`/`.webp` file named 
 - `PlexTimelineReporter` (`backend/plex_timeline.py`): daemon thread, POSTs to `/:/timeline` every 10s. Position updated via push-based `@property_observer('time-pos')` callback (registered in `PlexLibrary.set_wid()`). Pause state updated via `@property_observer('pause')`. No polling. Sends `"stopped"` on exit. Session identified by per-play `uuid4()`.
 - Stream URLs use transient token (`GET /security/token?type=delegation&scope=all`) — long-lived token never exposed to the player.
 - `MpvIpc` (Unix socket IPC client) removed. All position/state reads use libmpv property observers.
+
+### Retro Scraper Architecture
+
+**Files:** `backend/retro_scraper.py`, `backend/scrapers/`, `backend/gamelist.py`, `backend/library.py`
+
+- `RetroScraper(QObject)` is the orchestrator exposed as `retroScraper` context property. `scrapeAll()` / `scrapeSystem(system)` / `cancelScrape()` are QML slots.
+- Scraping runs in `_ScrapeThread(QThread)`. Progress, finish, error, and cancel signals are emitted via `QMetaObject.invokeMethod(..., QueuedConnection)` trampolines back to the main thread.
+- `scrapeFinished = Signal(int, int, int, 'QVariantMap')` — args: scraped, skipped, failed, source_counts. `source_counts` is a dict mapping source name → number of games it contributed at least one field for. This must be treated as `QVariantMap` so PySide6 marshals it correctly to QML.
+- `AbstractScraperSource._quota_exhausted: bool = False` — set when the source returns 429 (or 430 for ScreenScraper). `_scrape_one()` checks this before calling `search()`. Once set, the source is skipped for all remaining games without network calls.
+- `_apply_result(game, result, config)` merges scraped data into a `Game` object. Sets `game.image_path` from `result.thumbnail_path` (or `result.screenshot_path` if `config.scraper_preview_image == "screenshot"`), only when `game.image_path` is currently `None` — never overwrites existing miximages.
+- **Log:** `~/.config/htpcstation/scraper.log`. Truncated at the start of each `_start_scrape()` call via `handler.stream.seek(0); handler.stream.truncate()` — each session starts fresh.
+- **Hasheous endpoint:** `GET https://hasheous.org/api/v1/Lookup/ByHash/md5/{md5}` — the hash is a **path parameter**, not a query parameter. The `/api/v1/Lookup/ByMD5?MD5=...` form returns 404. Response structure: `{"id": int, "name": str, "metadata": [{"source": "IGDB"|"TheGamesDb"|"RetroAchievements", "id": str}]}`.
+- **Library scan merge:** `library.py _scan()` always runs `_scan_rom_files()` to discover all ROM files from the filesystem, then builds `gamelist_games = {g.path.resolve(): g for g in parse_gamelist(...)}` and merges. Every filesystem ROM gets an entry; gamelist metadata wins when paths match. ROMs missing from gamelist.xml appear in the library with minimal metadata rather than being silently dropped.
+- **Config:** Scraper settings live under `"scraper"` key in `config.json`: `enabled_sources` dict, `credentials` dict (keyed by source name), `overwrite: bool`, `preview_image: "cover"|"screenshot"`.
 
 ### Live TV Architecture
 - `LiveTvLibrary`: fetches HDHomeRun host from Plex `/livetv/dvrs`, then uses HDHomeRun's own APIs for all guide data. No Plex cloud EPG calls.

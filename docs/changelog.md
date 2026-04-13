@@ -4,6 +4,21 @@ One entry per checkpoint. Task briefs live under `~/opencode/misc/coding-team/`.
 
 ---
 
+## CP44 — Retro scraper
+
+Task briefs: `misc/coding-team/retro-scraper/` (007–013)
+
+- **Scraper settings UI** (007) — Scraper subcategories added under the existing "Games" tab (not a new tab). Three subcategory groups: Global (overwrite toggle, preview image select, system select + Scrape/Cancel buttons), Per-source toggles + credential fields for ScreenScraper, EmuMovies, TheGamesDB, MobyGames, IGDB, RetroAchievements. `onScrapeProgress` status text, `onScrapeFinished` calls `Settings.rescanLibrary()`.
+- **Config save race fix** (008) — `Config.save()` submits a `_do_write` closure to `_write_executor`. The closure referenced the module-level `CONFIG_FILE` at execution time; when tests used `unittest.mock.patch` the context exited before the executor ran, causing writes to the real `~/.config/htpcstation/config.json`. Fix: snapshot `_config_file = CONFIG_FILE` before submitting; pass as default arg `def _do_write(d=data, cf=_config_file)`. 4 new tests in `test_config_save_race.py`.
+- **Quota-exhausted flag** (009) — `AbstractScraperSource._quota_exhausted: bool = False` added. `_scrape_one()` checks this flag before calling `search()` — an exhausted source is skipped for all remaining games in the session without retry. All 6 adapters set the flag on HTTP 429; ScreenScraper additionally handles 430 (its custom daily-quota code). 18 new tests in `test_quota_exhausted.py`.
+- **Gamelist fixes** (010) — `ET.indent(tree.getroot(), space="  ")` added to `gamelist.py` before `tree.write()` — gamelist.xml is now human-readable. `_apply_result(game, result, config)` sets `game.image_path` from cover thumbnail (or screenshot if `config.scraper_preview_image == "screenshot"`), only when not already set. `<image>` tag written alongside `<thumbnail>` in `write_game_entry()`. Completion toast replaced with a persistent modal showing scraped/skipped/failed counts; dismissed with A, B/Esc, or mouse click. Preview image source (cover/screenshot) configurable via Settings → Games → Scraping → Preview Image. 13 new tests in `test_gamelist_fixes_010.py`.
+- **Scraper followup fixes** (011) — Five live-scrape bugs fixed: (1) Hasheous endpoint corrected from `/api/v1/Lookup/ByMD5?MD5={hash}` to `/api/v1/Lookup/ByHash/md5/{md5}` (path param); response parsing updated from wrong `data["title"]`/`data["signatures"]` to `data["name"]` and `data["metadata"]` array. (2) Library scan now always runs filesystem discovery first then merges gamelist.xml metadata on top — `elif` bug meant unscraped ROMs vanished once gamelist.xml existed. (3) `onScrapeCancelled` QML handler now calls `Settings.rescanLibrary()`. (4) `scraper.log` truncated via `handler.stream.seek(0)/truncate()` at start of each scrape session. (5) `scrapeFinished` signal extended to `Signal(int, int, int, 'QVariantMap')` — source_counts dict accumulated per game; completion modal shows per-source game counts via Repeater. New tests in `test_retro_scraper_framework.py` and `test_rom_fallback_scan.py`.
+- **Scrape dialog focus + rename** (012) — Settings → Games scraper section renamed "Scraping". `KeyHandler.isBack` (non-existent method) replaced with `KeyHandler.isCancel`. After dialog dismiss, `_routeFocus()` is called to restore focus to the settings list. Dismiss button has `focus: true` and a `FocusRing` child (`visible: parent.activeFocus`). `_routeFocus()` gains a guard for `scrapeReportOverlay.visible`.
+- **Stale setting bindings fix** (013) — `property int _settingsRevision: 0` added to `SettingsScreen`; incremented at the end of `_setValue`. All four delegate binding expressions (textInputComp, toggleComp, sliderComp, selectComp) now reference `settingsScreen._settingsRevision >= 0` so QML re-evaluates them on every write. Toggles and text previews now update immediately without requiring a page reload.
+- Test count: 2,782 (up from 2,410).
+
+---
+
 ## CP43 — Best practices hardening + bug fixes
 
 Task briefs: `misc/coding-team/best-practices-fixes/` (001–008)
@@ -225,3 +240,5 @@ Task briefs: `misc/coding-team/homescreen-themes/`
 | 40 | Recently Played: Local Videos integration + cold-start nav fixes | `recently-played-widget/` (007) |
 | 41 | Plex UI bug fixes: white flash + sort/genre label mismatch | `plex-loading-flash/` (001–003), `plex-sort-restore/` (001) |
 | 42 | UI consistency cleanup: delegate style, LibraryHeader, GridCellHighlight, utils.py, async writes, incremental models | `ui-consistency-cleanup/` (001–012) |
+| 43 | Best practices hardening + bug fixes: explicit signal types, async image loading, Loader for overlays, QmlElement singletons, worker thread migration, sort-on-cache-load, test suite performance | `best-practices-fixes/` (001–008) |
+| 44 | Retro scraper: settings UI, config-save race fix, quota-exhausted flag, gamelist fixes (indent/image/modal), Hasheous fix, library scan merge, cancel rescan, log clearing, per-source breakdown, dialog focus, stale binding fix | `retro-scraper/` (007–013) |
