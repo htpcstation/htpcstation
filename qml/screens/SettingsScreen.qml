@@ -75,7 +75,7 @@ FocusScope {
                     ]
                 },
                 {
-                    name: "Global",
+                    name: "Scraping",
                     settings: [
                         { type: "toggle", label: "Overwrite Existing Data", settingKey: "scraperOverwrite" },
                         { type: "select", label: "Preview Image",           settingKey: "scraperPreviewImage" },
@@ -445,6 +445,10 @@ FocusScope {
 
     // ── Focus routing ────────────────────────────────────────────────────────
     function _routeFocus() {
+        if (scrapeReportOverlay.visible) {
+            scrapeReportOverlay.forceActiveFocus()
+            return
+        }
         if (systemCoresScreen.visible) {
             systemCoresScreen.forceActiveFocus()
             return
@@ -1962,11 +1966,13 @@ FocusScope {
             }
 
             Rectangle {
+                id: dismissButton
                 width: root.vpx(160)
                 height: root.vpx(48)
                 color: Theme.colorSecondary
                 radius: root.vpx(Theme.focusRingRadius)
                 anchors.horizontalCenter: parent.horizontalCenter
+                focus: true
 
                 Text {
                     anchors.centerIn: parent
@@ -1976,17 +1982,25 @@ FocusScope {
                     font.pixelSize: root.vpx(Theme.fontSizeBody)
                 }
 
+                FocusRing {
+                    visible: parent.activeFocus
+                }
+
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: settingsScreen._scrapeReport = null
+                    onClicked: {
+                        settingsScreen._scrapeReport = null
+                        settingsScreen._routeFocus()
+                    }
                 }
             }
         }
 
         Keys.onPressed: (event) => {
-            if (KeyHandler.isAccept(event) || KeyHandler.isBack(event)) {
+            if (KeyHandler.isAccept(event) || KeyHandler.isCancel(event)) {
                 event.accepted = true
                 settingsScreen._scrapeReport = null
+                settingsScreen._routeFocus()
             }
         }
 
