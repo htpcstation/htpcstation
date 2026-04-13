@@ -1,9 +1,10 @@
-"""Tests for filesystem fallback scan when gamelist.xml is missing.
+"""Tests for filesystem fallback scan and gamelist/filesystem merge.
 
 Covers:
   1. Folder with no gamelist.xml + known system -> games populated from matching files
   2. Folder with no gamelist.xml + unknown system (no extensions) -> system skipped
-  3. Folder with gamelist.xml -> gamelist.xml used (not filesystem scan)
+  3. Folder with gamelist.xml -> gamelist metadata wins for matching ROMs; filesystem-only
+     ROMs still appear (merge behaviour)
   4. Title cleaning: parentheses, brackets, and combinations stripped correctly
   5. Extension matching is case-insensitive
   6. Non-matching extensions are ignored
@@ -173,7 +174,7 @@ class TestScanFallbackIntegration:
         assert len(real) == 0
 
     def test_gamelist_takes_precedence(self, tmp_path: Path):
-        """Folder with gamelist.xml -> gamelist.xml used, not filesystem scan."""
+        """Gamelist metadata wins for ROMs that appear in both gamelist and filesystem."""
         gba_dir = tmp_path / "gba"
         gba_dir.mkdir()
         # ROM file on disk
@@ -193,3 +194,50 @@ class TestScanFallbackIntegration:
         real = [s for s in lib._systems if not s.folder_name.startswith("_")]
         assert len(real) == 1
         assert real[0].games[0].name == "From Gamelist"
+
+    def test_filesystem_roms_not_in_gamelist_appear(self, tmp_path: Path):
+        """ROMs on disk that are absent from gamelist.xml still appear in the library."""
+        gba_dir = tmp_path / "gba"
+        gba_dir.mkdir()
+        # Two ROMs on disk
+        (gba_dir / "InGamelist.gba").touch()
+        (gba_dir / "NotInGamelist.gba").touch()
+        # gamelist.xml only mentions one of them
+        _write_gamelist(
+            gba_dir,
+            '<game><path>./InGamelist.gba</path><name>Scraped Name</name></game>',
+        )
+
+        config = _make_config_mock(
+            tmp_path,
+            known_systems={"gba": ("Game Boy Advance", [".gba"])},
+        )
+        lib = GameLibrary(config)
+
+        real = [s for s in lib._systems if not s.folder_name.startswith("_")]
+        assert len(real) == 1
+        assert real[0].game_count == 2
+
+        names = {g.name for g in real[0].games}
+        # Gamelist name wins for the scraped ROM
+        assert "Scraped Name" in names
+        # Filesystem-only ROM still appears with its cleaned filename
+        assert "NotInGamelist" in names
+
+    def test_gamelist_only_no_extensions_shows_gamelist_games(self, tmp_path: Path):
+        """Folder with gamelist.xml but no configured extensions shows gamelist games only."""
+        gba_dir = tmp_path / "gba"
+        gba_dir.mkdir()
+        (gba_dir / "SomeRom.gba").touch()
+        _write_gamelist(
+            gba_dir,
+            '<game><path>./SomeRom.gba</path><name>Only In Gamelist</name></game>',
+        )
+
+        # No extensions configured for gba
+        config = _make_config_mock(tmp_path)
+        lib = GameLibrary(config)
+
+        real = [s for s in lib._systems if not s.folder_name.startswith("_")]
+        assert len(real) == 1
+        assert real[0].games[0].name == "Only In Gamelist"

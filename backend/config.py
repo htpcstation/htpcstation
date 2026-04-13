@@ -436,6 +436,7 @@ class Config:
             "igdb":                {"client_id": "", "client_secret": ""},
             "retroachievements":   {"username": "", "api_key": ""},
         }
+        self._scraper_preview_image: str = "cover"  # "cover" | "screenshot"
 
         # Sort preferences
         self._retro_favorites_on_top: bool = True
@@ -767,6 +768,17 @@ class Config:
             return
         self._scraper_credentials[source][key] = value
         self.save()
+
+    @property
+    def scraper_preview_image(self) -> str:
+        """Which media asset to use as the game preview image. 'cover' or 'screenshot'."""
+        return self._scraper_preview_image
+
+    def set_scraper_preview_image(self, val: str) -> None:
+        """Set the preview image source and persist.  No-op for invalid values."""
+        if val in ("cover", "screenshot"):
+            self._scraper_preview_image = val
+            self.save()
 
     def set_rom_directory(self, path: "str | Path") -> None:
         """Set the ROM directory and persist the config."""
@@ -1227,6 +1239,7 @@ class Config:
             "scraper": {
                 "overwrite": self._scraper_overwrite,
                 "enabled_sources": list(self._scraper_enabled_sources),
+                "preview_image": self._scraper_preview_image,
                 **{src: dict(creds) for src, creds in self._scraper_credentials.items()},
             },
         }
@@ -1489,6 +1502,7 @@ class Config:
                 self._scraper_enabled_sources = [
                     str(s) for s in scraper["enabled_sources"]
                 ]
+            self._scraper_preview_image = scraper.get("preview_image", "cover")
             # Credentials: iterate only known sources and update only known keys
             for src, defaults in self._scraper_credentials.items():
                 src_data = scraper.get(src)

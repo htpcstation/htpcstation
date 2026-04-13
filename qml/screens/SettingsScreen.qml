@@ -37,6 +37,9 @@ FocusScope {
     // ── Scraper: session-only system selection (not persisted) ───────────────
     property string _scraperSelectedSystem: ""
 
+    // ── Scraper: completion report (null when not shown) ─────────────────────
+    property var _scrapeReport: null
+
     // ── Tabs data model ──────────────────────────────────────────────────────
     readonly property var _tabs: [
         {
@@ -75,6 +78,7 @@ FocusScope {
                     name: "Global",
                     settings: [
                         { type: "toggle", label: "Overwrite Existing Data", settingKey: "scraperOverwrite" },
+                        { type: "select", label: "Preview Image",           settingKey: "scraperPreviewImage" },
                         { type: "select", label: "System",                  settingKey: "scraperSelectedSystem" },
                         { type: "button", label: "Scrape Selected System",  action: "scrapeSelectedSystem" },
                         { type: "button", label: "Scrape All Systems",      action: "scrapeAll" },
@@ -317,6 +321,10 @@ FocusScope {
             return modeMap[Settings.transcodeMode] || "Auto"
         }
         if (key === "scraperOverwrite")      return Settings ? Settings.scraperOverwrite : false
+        if (key === "scraperPreviewImage") {
+            var preview = Settings ? Settings.scraperPreviewImage() : "cover"
+            return preview === "screenshot" ? "Screenshot" : "Cover"
+        }
         if (key === "scraperSelectedSystem") return settingsScreen._scraperSelectedSystem
         if (key.startsWith("scraperEnabled_")) {
             var source = key.substring("scraperEnabled_".length)
@@ -415,6 +423,7 @@ FocusScope {
             Settings.setTranscodeMode(value)
         }
         else if (key === "scraperOverwrite")      Settings.setScraperOverwrite(value)
+        else if (key === "scraperPreviewImage")   Settings.setScraperPreviewImage(value)
         else if (key === "scraperSelectedSystem") settingsScreen._scraperSelectedSystem = value
         else if (key.startsWith("scraperEnabled_")) {
             var src = key.substring("scraperEnabled_".length)
@@ -807,6 +816,12 @@ FocusScope {
                 if (rowData.settingKey === "moonlightHost") {
                     if (!Settings) return []
                     return Settings.getHostsList()
+                }
+                if (rowData.settingKey === "scraperPreviewImage") {
+                    return [
+                        { id: "cover",       label: "Cover" },
+                        { id: "screenshot",  label: "Screenshot" },
+                    ]
                 }
                 if (rowData.settingKey === "scraperSelectedSystem") {
                     if (!Settings) return []
@@ -1827,10 +1842,11 @@ FocusScope {
             }
         }
 
-        function onScrapeFinished(scraped, skipped, failed) {
-            settingsScreen._showToast(
-                "Done: " + scraped + " scraped, " + skipped + " skipped, " + failed + " failed"
-            )
+        function onScrapeFinished(scraped, skipped, failed, sourceCounts) {
+            settingsScreen._scrapeReport = {
+                scraped: scraped, skipped: skipped, failed: failed,
+                sourceCounts: sourceCounts
+            }
             if (Settings) Settings.rescanLibrary()
         }
 
@@ -1840,6 +1856,7 @@ FocusScope {
 
         function onScrapeCancelled() {
             settingsScreen._showToast("Scrape cancelled")
+            if (Settings) Settings.rescanLibrary()
         }
     }
 
@@ -1891,6 +1908,90 @@ FocusScope {
     PlexLoginOverlay {
         id: plexLoginOverlay
         anchors.fill: parent
+    }
+
+    // ── Scrape completion report overlay ─────────────────────────────────────
+    Rectangle {
+        id: scrapeReportOverlay
+        visible: settingsScreen._scrapeReport !== null
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.75)
+        z: 100
+
+        Column {
+            anchors.centerIn: parent
+            spacing: root.vpx(16)
+
+            Text {
+                text: "Scrape Complete"
+                color: Theme.colorText
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeHeading)
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            Text {
+                visible: settingsScreen._scrapeReport !== null
+                text: settingsScreen._scrapeReport
+                    ? settingsScreen._scrapeReport.scraped + " scraped   "
+                      + settingsScreen._scrapeReport.skipped + " skipped   "
+                      + settingsScreen._scrapeReport.failed + " failed"
+                    : ""
+                color: Theme.colorTextDim
+                font.family: Theme.fontFamily
+                font.pixelSize: root.vpx(Theme.fontSizeBody)
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+
+            Repeater {
+                model: {
+                    if (!settingsScreen._scrapeReport || !settingsScreen._scrapeReport.sourceCounts)
+                        return []
+                    var counts = settingsScreen._scrapeReport.sourceCounts
+                    return Object.keys(counts).map(function(k) {
+                        return k + ": " + counts[k]
+                    })
+                }
+                Text {
+                    text: modelData
+                    color: Theme.colorTextDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeSmall || Theme.fontSizeBody)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+
+            Rectangle {
+                width: root.vpx(160)
+                height: root.vpx(48)
+                color: Theme.colorSecondary
+                radius: root.vpx(Theme.focusRingRadius)
+                anchors.horizontalCenter: parent.horizontalCenter
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Dismiss"
+                    color: Theme.colorText
+                    font.family: Theme.fontFamily
+                    font.pixelSize: root.vpx(Theme.fontSizeBody)
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: settingsScreen._scrapeReport = null
+                }
+            }
+        }
+
+        Keys.onPressed: (event) => {
+            if (KeyHandler.isAccept(event) || KeyHandler.isBack(event)) {
+                event.accepted = true
+                settingsScreen._scrapeReport = null
+            }
+        }
+
+        Component.onCompleted: forceActiveFocus()
+        onVisibleChanged: if (visible) forceActiveFocus()
     }
 
     Component.onCompleted: {

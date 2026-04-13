@@ -825,6 +825,14 @@ class SettingsManager(QObject):
     def setScraperCredential(self, source: str, key: str, value: str) -> None:
         self._config.set_scraper_credential(source, key, value)
 
+    @Slot(result=str)
+    def scraperPreviewImage(self) -> str:
+        return self._config.scraper_preview_image
+
+    @Slot(str)
+    def setScraperPreviewImage(self, val: str) -> None:
+        self._config.set_scraper_preview_image(val)
+
     @Slot(result=list)
     def getRetroSystemsList(self) -> list:
         """Return [{id, label}] for each non-virtual subdir of rom_directory."""

@@ -98,6 +98,30 @@ def _parse_game_element(
     if video_raw:
         video_path = _resolve_path(system_path, video_raw)
 
+    # --- Thumbnail path -----------------------------------------------------
+    thumbnail_raw = _text(elem, "thumbnail")
+    thumbnail_path: Path | None = None
+    if thumbnail_raw:
+        candidate = _resolve_path(system_path, thumbnail_raw)
+        if candidate.exists():
+            thumbnail_path = candidate
+
+    # --- Marquee path -------------------------------------------------------
+    marquee_raw = _text(elem, "marquee")
+    marquee_path: Path | None = None
+    if marquee_raw:
+        candidate = _resolve_path(system_path, marquee_raw)
+        if candidate.exists():
+            marquee_path = candidate
+
+    # --- Screenshot path ----------------------------------------------------
+    screenshot_raw = _text(elem, "screenshot")
+    screenshot_path: Path | None = None
+    if screenshot_raw:
+        candidate = _resolve_path(system_path, screenshot_raw)
+        if candidate.exists():
+            screenshot_path = candidate
+
     # --- Numeric fields -----------------------------------------------------
     rating_str = _text(elem, "rating", "0.0")
     try:
@@ -127,6 +151,9 @@ def _parse_game_element(
         description=_text(elem, "desc"),
         image_path=image_path,
         video_path=video_path,
+        thumbnail_path=thumbnail_path,
+        marquee_path=marquee_path,
+        screenshot_path=screenshot_path,
         rating=rating,
         release_date=_text(elem, "releasedate"),
         developer=_text(elem, "developer"),
@@ -219,7 +246,99 @@ def write_game_stats(system_path: Path, game: Game) -> None:
             target.remove(fav_elem)
 
     try:
+        ET.indent(tree.getroot(), space="  ")
         tree.write(gamelist_file, encoding="utf-8", xml_declaration=True)
         logger.debug("write_game_stats: wrote stats for '%s' to %s", game.name, gamelist_file)
     except OSError as exc:
         logger.error("write_game_stats: failed to write %s: %s", gamelist_file, exc)
+
+
+def write_game_entry(system_path: Path, game: Game) -> None:
+    """Write scraped metadata and media paths for one game into gamelist.xml.
+
+    Creates gamelist.xml if it does not exist.  Finds the matching ``<game>``
+    element by ``<path>``; appends a new one if not found.  Only writes the
+    fields listed below; never touches ``<image>``, ``<playcount>``,
+    ``<gametime>``, ``<lastplayed>``, or ``<favorite>`` (those are owned by
+    ``write_game_stats``).
+
+    Fields written: name, desc, rating, releasedate, developer, publisher,
+    genre, players, thumbnail, marquee, screenshot, video.
+    """
+    gamelist_file = system_path / "gamelist.xml"
+
+    # Load or create the XML tree
+    if gamelist_file.exists():
+        try:
+            tree = ET.parse(gamelist_file)
+        except ET.ParseError as exc:
+            logger.warning("write_game_entry: failed to parse %s: %s", gamelist_file, exc)
+            return
+        root = tree.getroot()
+    else:
+        root = ET.Element("gameList")
+        tree = ET.ElementTree(root)
+
+    # Build the relative path string as stored in gamelist.xml (e.g. "./game.rom")
+    try:
+        rel = "./" + game.path.relative_to(system_path).as_posix()
+    except ValueError:
+        rel = str(game.path)
+
+    # Find or create the matching <game> element
+    target: ET.Element | None = None
+    for game_elem in root.findall("game"):
+        if _text(game_elem, "path") == rel:
+            target = game_elem
+            break
+
+    if target is None:
+        target = ET.SubElement(root, "game")
+        path_elem = ET.SubElement(target, "path")
+        path_elem.text = rel
+
+    # Helper: write a path field as a relative path string
+    def _set_path_field(tag: str, path: Path | None) -> None:
+        if path is None:
+            return
+        try:
+            value = "./" + path.relative_to(system_path).as_posix()
+        except ValueError:
+            value = str(path)
+        _set_or_create_text(target, tag, value)  # type: ignore[arg-type]
+
+    # String fields — skip empty values
+    if game.name:
+        _set_or_create_text(target, "name", game.name)
+    if game.description:
+        _set_or_create_text(target, "desc", game.description)
+    if game.rating:
+        _set_or_create_text(target, "rating", f"{game.rating:.2f}")
+    if game.release_date:
+        _set_or_create_text(target, "releasedate", game.release_date)
+    if game.developer:
+        _set_or_create_text(target, "developer", game.developer)
+    if game.publisher:
+        _set_or_create_text(target, "publisher", game.publisher)
+    if game.genre:
+        _set_or_create_text(target, "genre", game.genre)
+    if game.players:
+        _set_or_create_text(target, "players", game.players)
+
+    # Path fields
+    _set_path_field("thumbnail", game.thumbnail_path)
+    _set_path_field("marquee", game.marquee_path)
+    _set_path_field("screenshot", game.screenshot_path)
+    _set_path_field("video", game.video_path)
+
+    # Preview image (cover / screenshot) — only write if currently absent so
+    # externally-set miximages are not overwritten.
+    if game.image_path and target.find("image") is None:
+        _set_path_field("image", game.image_path)
+
+    try:
+        ET.indent(tree.getroot(), space="  ")
+        tree.write(gamelist_file, encoding="utf-8", xml_declaration=True)
+        logger.debug("write_game_entry: wrote entry for '%s' to %s", game.name, gamelist_file)
+    except OSError as exc:
+        logger.error("write_game_entry: failed to write %s: %s", gamelist_file, exc)

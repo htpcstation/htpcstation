@@ -18,8 +18,11 @@ class Game:
     path: Path                          # absolute path to ROM file
     name: str
     description: str = ""
-    image_path: Optional[Path] = None  # absolute path to screenshot (None if absent/missing)
-    video_path: Optional[Path] = None  # absolute path to video (stored, not used yet)
+    image_path: Optional[Path] = None       # miximage (composed cover+screenshot+marquee, generated separately)
+    video_path: Optional[Path] = None       # absolute path to video
+    thumbnail_path: Optional[Path] = None   # cover / boxart front  → <thumbnail>
+    marquee_path: Optional[Path] = None     # wheel / clear logo    → <marquee>
+    screenshot_path: Optional[Path] = None  # gameplay screenshot   → <screenshot>
     rating: float = 0.0
     release_date: str = ""             # raw string from XML, e.g. "19990527T000000"
     developer: str = ""

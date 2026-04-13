@@ -170,8 +170,11 @@ class GameListModel(QAbstractListModel):
     PlayCountRole = Qt.ItemDataRole.UserRole + 12    # 268
     LastPlayedRole = Qt.ItemDataRole.UserRole + 13   # 269
     GameTimeRole = Qt.ItemDataRole.UserRole + 14     # 270
-    RomPathRole = Qt.ItemDataRole.UserRole + 15      # 271
-    SystemFolderRole = Qt.ItemDataRole.UserRole + 16 # 272
+    RomPathRole = Qt.ItemDataRole.UserRole + 15        # 271
+    SystemFolderRole = Qt.ItemDataRole.UserRole + 16   # 272
+    ThumbnailPathRole = Qt.ItemDataRole.UserRole + 17  # 273
+    MarqueePathRole = Qt.ItemDataRole.UserRole + 18    # 274
+    ScreenshotPathRole = Qt.ItemDataRole.UserRole + 19 # 275
 
     def __init__(self, games: list[Game], parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
@@ -227,6 +230,18 @@ class GameListModel(QAbstractListModel):
             return str(game.path)
         if role == self.SystemFolderRole:
             return game.system_folder
+        if role == self.ThumbnailPathRole:
+            if game.thumbnail_path is not None:
+                return QUrl.fromLocalFile(str(game.thumbnail_path)).toString()
+            return None
+        if role == self.MarqueePathRole:
+            if game.marquee_path is not None:
+                return QUrl.fromLocalFile(str(game.marquee_path)).toString()
+            return None
+        if role == self.ScreenshotPathRole:
+            if game.screenshot_path is not None:
+                return QUrl.fromLocalFile(str(game.screenshot_path)).toString()
+            return None
         if role == Qt.ItemDataRole.DisplayRole:
             return game.name
         return None
@@ -249,6 +264,9 @@ class GameListModel(QAbstractListModel):
             self.GameTimeRole: b"gameTime",
             self.RomPathRole: b"romPath",
             self.SystemFolderRole: b"systemFolder",
+            self.ThumbnailPathRole: b"thumbnailPath",
+            self.MarqueePathRole: b"marqueePath",
+            self.ScreenshotPathRole: b"screenshotPath",
         }
 
     def notify_game_changed(self, row: int) -> None:
@@ -758,10 +776,24 @@ class GameLibrary(QObject):
             folder_name = entry.name
             sys_config = self._config.get_system(folder_name)
 
+            # Parse gamelist for metadata (may be empty if file doesn't exist)
             if gamelist_file.exists():
-                games = parse_gamelist(entry)
-            elif sys_config.extensions:
-                games = _scan_rom_files(entry, folder_name, sys_config.extensions)
+                gamelist_games = {g.path.resolve(): g for g in parse_gamelist(entry)}
+            else:
+                gamelist_games = {}
+
+            if sys_config.extensions:
+                fs_games = _scan_rom_files(entry, folder_name, sys_config.extensions)
+                # Start from all gamelist entries (keeps scraped data for all known ROMs)
+                games = list(gamelist_games.values())
+                # Add filesystem ROMs that are not yet in the gamelist
+                gamelist_keys = set(gamelist_games.keys())
+                for g in fs_games:
+                    if g.path.resolve() not in gamelist_keys:
+                        games.append(g)
+            elif gamelist_games:
+                # gamelist exists but no extensions configured — use gamelist games only
+                games = list(gamelist_games.values())
             else:
                 continue
 
