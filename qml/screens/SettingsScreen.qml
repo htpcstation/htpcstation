@@ -40,6 +40,12 @@ FocusScope {
     // ── Scraper: completion report (null when not shown) ─────────────────────
     property var _scrapeReport: null
 
+    // ── Settings revision counter ────────────────────────────────────────────
+    // Incremented at the end of _setValue so delegate bindings that reference
+    // this property are re-evaluated by QML's binding system immediately after
+    // any setting is written (plain function calls alone don't trigger re-eval).
+    property int _settingsRevision: 0
+
     // ── Tabs data model ──────────────────────────────────────────────────────
     readonly property var _tabs: [
         {
@@ -441,6 +447,7 @@ FocusScope {
             }
         }
 
+        _settingsRevision++
     }
 
     // ── Focus routing ────────────────────────────────────────────────────────
@@ -664,7 +671,7 @@ FocusScope {
             property var rowData
             width: parent ? parent.width : 0
             label: rowData ? rowData.label : ""
-            value: rowData ? settingsScreen._getValue(rowData.settingKey) : ""
+            value: rowData && settingsScreen._settingsRevision >= 0 ? settingsScreen._getValue(rowData.settingKey) : ""
             masked: rowData ? (rowData.masked || false) : false
 
             onEditingChanged: {
@@ -684,7 +691,7 @@ FocusScope {
             property var rowData
             width: parent ? parent.width : 0
             label: rowData ? rowData.label : ""
-            checked: rowData ? settingsScreen._getValue(rowData.settingKey) : false
+            checked: rowData && settingsScreen._settingsRevision >= 0 ? settingsScreen._getValue(rowData.settingKey) : false
 
             onToggled: (newValue) => {
                 if (rowData) settingsScreen._setValue(rowData.settingKey, newValue)
@@ -776,7 +783,7 @@ FocusScope {
             property var rowData
             width: parent ? parent.width : 0
             label: rowData ? rowData.label : ""
-            value: rowData ? settingsScreen._getValue(rowData.settingKey) : 0
+            value: rowData && settingsScreen._settingsRevision >= 0 ? settingsScreen._getValue(rowData.settingKey) : 0
             minValue: rowData && rowData.min !== undefined ? rowData.min : 0
             maxValue: rowData && rowData.max !== undefined ? rowData.max : 5000
             step: rowData && rowData.step !== undefined ? rowData.step : 100
@@ -799,7 +806,7 @@ FocusScope {
             property var rowData
             width: parent ? parent.width : 0
             label: rowData ? rowData.label : ""
-            currentValue: rowData ? settingsScreen._getValue(rowData.settingKey) : ""
+            currentValue: rowData && settingsScreen._settingsRevision >= 0 ? settingsScreen._getValue(rowData.settingKey) : ""
             optionsProvider: function() {
                 if (!rowData) return []
                 if (rowData.settingKey === "buttonLayout") {
